@@ -1,0 +1,363 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // pooled connection (pgbouncer) — used at runtime
+  directUrl = env("DIRECT_URL")     // direct connection — used for prisma db push / migrate
+}
+
+model Area {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  retailers Retailer[]
+  createdAt DateTime   @default(now())
+}
+
+model Supplier {
+  id               String            @id @default(cuid())
+  name             String
+  type             String            // OPEN_MARKET | OFFICIAL_DISTRIBUTOR
+  contactPerson    String?
+  phone            String?
+  address          String?
+  notes            String?
+  isActive         Boolean           @default(true)
+  purchaseInvoices PurchaseInvoice[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model PurchaseInvoice {
+  id            String                @id @default(cuid())
+  invoiceNumber String                @unique
+  supplierId    String
+  supplier      Supplier              @relation(fields: [supplierId], references: [id])
+  invoiceDate   DateTime
+  dueDate       DateTime?
+  totalAmount   Decimal               @default(0) @db.Decimal(10, 2)
+  status        String                @default("UNPAID") // UNPAID | PAID | PARTIAL
+  notes         String?
+  items         PurchaseInvoiceItem[]
+  payments      SupplierPayment[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
+}
+
+model PurchaseInvoiceItem {
+  id                String          @id @default(cuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  medicineId        String
+  medicine          Medicine        @relation(fields: [medicineId], references: [id])
+  quantity          Int
+  unitPrice         Decimal  @db.Decimal(10, 2)
+  lineTotal         Decimal  @db.Decimal(10, 2)
+
+  @@index([purchaseInvoiceId])
+}
+
+model SupplierPayment {
+  id                String          @id @default(cuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id])
+  supplierId        String
+  amount            Decimal  @db.Decimal(10, 2)
+  paymentDate       DateTime        @default(now())
+  method            String          @default("CASH")
+  reference         String?
+  notes             String?
+  createdAt         DateTime        @default(now())
+
+  @@index([purchaseInvoiceId])
+}
+
+model DeleteApproval {
+  id            String    @id @default(cuid())
+  requestedById String
+  requestedBy   Employee  @relation("RequestedBy", fields: [requestedById], references: [id])
+  model         String    // Order | Invoice | Retailer | Medicine
+  recordId      String
+  recordLabel   String
+  status        String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewedById  String?
+  reviewedAt    DateTime?
+  reviewNote    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  type        String   // DELETE_APPROVAL_REQUEST | DELETE_APPROVED | DELETE_REJECTED
+  title       String
+  message     String
+  referenceId String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([employeeId])
+  @@index([read])
+}
+
+model Manufacturer {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  contact   String?
+  medicines Medicine[]
+  createdAt DateTime   @default(now())
+}
+
+model Medicine {
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  genericName    String?
+  manufacturerId String
+  manufacturer   Manufacturer    @relation(fields: [manufacturerId], references: [id])
+  category       String?
+  packSize       String?
+  tradePrice     Decimal  @db.Decimal(10, 2)
+  mrp            Decimal? @db.Decimal(10, 2)
+  bonusQty       String?
+  bonusNote      String?
+  minStockLevel  Int             @default(10)
+  isActive       Boolean         @default(true)
+  batches        MedicineBatch[]
+  orderItems     OrderItem[]
+  offerListItems OfferListItem[]
+  purchaseItems  PurchaseInvoiceItem[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([name])
+  @@index([code])
+}
+
+model MedicineBatch {
+  id            String   @id @default(cuid())
+  medicineId    String
+  medicine      Medicine @relation(fields: [medicineId], references: [id])
+  batchNumber   String
+  expiryDate    DateTime
+  quantityIn    Int
+  currentQty    Int
+  purchasePrice Decimal  @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
+
+  @@index([medicineId])
+  @@index([expiryDate])
+}
+
+model Employee {
+  id              String           @id @default(cuid())
+  name            String
+  cnic            String?          @unique
+  role            String
+  phone           String?
+  email           String?
+  address         String?
+  joiningDate     DateTime?
+  salary          Decimal? @db.Decimal(10, 2)
+  isActive        Boolean          @default(true)
+  username        String?          @unique
+  passwordHash    String?
+  retailers       Retailer[]
+  orders          Order[]
+  deliveries      Delivery[]
+  attendance      Attendance[]
+  notifications   Notification[]
+  deleteApprovals DeleteApproval[] @relation("RequestedBy")
+  createdAt       DateTime         @default(now())
+}
+
+model Retailer {
+  id                String          @id @default(cuid())
+  code              String?         @unique
+  name              String
+  ownerName         String?
+  phone             String?
+  whatsappNumber    String?
+  areaId            String?
+  area              Area?           @relation(fields: [areaId], references: [id])
+  address           String?
+  drugLicenseNumber String?
+  drugLicenseExpiry DateTime?
+  creditLimit       Decimal         @default(0) @db.Decimal(10, 2)
+  creditDays        Int             @default(0)
+  paymentMode       String          @default("CASH")
+  salesRepId        String?
+  salesRep          Employee?       @relation(fields: [salesRepId], references: [id])
+  isActive          Boolean         @default(true)
+  notes             String?
+  orders            Order[]
+  invoices          Invoice[]
+  payments          Payment[]
+  whatsappOrders    WhatsappOrder[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([whatsappNumber])
+  @@index([name])
+  @@index([areaId])
+}
+
+model Order {
+  id              String         @id @default(cuid())
+  orderNumber     String         @unique @default(cuid())
+  retailerId      String
+  retailer        Retailer       @relation(fields: [retailerId], references: [id])
+  salesRepId      String?
+  salesRep        Employee?      @relation(fields: [salesRepId], references: [id])
+  orderDate       DateTime       @default(now())
+  deliveryDate    DateTime?
+  status          String         @default("PENDING")
+  source          String         @default("MANUAL")
+  whatsappOrderId String?
+  whatsappOrder   WhatsappOrder? @relation(fields: [whatsappOrderId], references: [id])
+  items           OrderItem[]
+  invoice         Invoice?
+  delivery        Delivery?
+  totalAmount     Decimal        @default(0) @db.Decimal(10, 2)
+  discountAmount  Decimal        @default(0) @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([retailerId])
+  @@index([status])
+  @@index([orderDate])
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  medicineId   String
+  medicine     Medicine @relation(fields: [medicineId], references: [id])
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(10, 2)
+  offerPercent Decimal  @default(0) @db.Decimal(10, 2)
+  bonusQty     Int      @default(0)
+  lineTotal    Decimal  @db.Decimal(10, 2)
+
+  @@index([orderId])
+}
+
+model OfferList {
+  id         String          @id @default(cuid())
+  listNumber String          @unique
+  listDate   DateTime
+  isActive   Boolean         @default(false)
+  createdBy  String?
+  items      OfferListItem[]
+  createdAt  DateTime        @default(now())
+}
+
+model OfferListItem {
+  id           String    @id @default(cuid())
+  offerListId  String
+  offerList    OfferList @relation(fields: [offerListId], references: [id])
+  medicineId   String
+  medicine     Medicine  @relation(fields: [medicineId], references: [id])
+  offerPercent Decimal   @default(0) @db.Decimal(10, 2)
+  bonusQty     Int       @default(0)
+  specialPrice Decimal?  @db.Decimal(10, 2)
+
+  @@unique([offerListId, medicineId])
+}
+
+model Invoice {
+  id             String    @id @default(cuid())
+  invoiceNumber  String    @unique
+  orderId        String    @unique
+  order          Order     @relation(fields: [orderId], references: [id])
+  retailerId     String
+  retailer       Retailer  @relation(fields: [retailerId], references: [id])
+  invoiceDate    DateTime  @default(now())
+  dueDate        DateTime?
+  subtotal       Decimal   @db.Decimal(10, 2)
+  discountAmount Decimal   @default(0) @db.Decimal(10, 2)
+  taxAmount      Decimal   @default(0) @db.Decimal(10, 2)
+  totalAmount    Decimal   @db.Decimal(10, 2)
+  status         String    @default("UNPAID")
+  pdfUrl         String?
+  payments       Payment[]
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([retailerId])
+  @@index([status])
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  retailerId  String
+  retailer    Retailer @relation(fields: [retailerId], references: [id])
+  invoiceId   String?
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id])
+  amount      Decimal  @db.Decimal(10, 2)
+  paymentDate DateTime @default(now())
+  method      String   @default("CASH")
+  reference   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([retailerId])
+}
+
+model WhatsappOrder {
+  id                String   @id @default(cuid())
+  phoneNumber       String
+  retailerId        String?
+  retailer          Retailer? @relation(fields: [retailerId], references: [id])
+  imageUrl          String
+  whatsappMessageId String?
+  rawOcrText        String?
+  extractedItems    String?
+  status            String   @default("PENDING_REVIEW")
+  convertedOrderId  String?
+  orders            Order[]
+  autoReplyText     String?
+  autoReplySent     Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([phoneNumber])
+  @@index([status])
+}
+
+model Delivery {
+  id            String    @id @default(cuid())
+  orderId       String    @unique
+  order         Order     @relation(fields: [orderId], references: [id])
+  driverId      String?
+  driver        Employee? @relation(fields: [driverId], references: [id])
+  scheduledDate DateTime
+  deliveredAt   DateTime?
+  status        String    @default("SCHEDULED")
+  notes         String?
+  createdAt     DateTime  @default(now())
+}
+
+model Attendance {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  date       DateTime @db.Date
+  timeIn     DateTime?
+  timeOut    DateTime?
+  status     String   @default("PRESENT")
+  notes      String?
+
+  @@unique([employeeId, date])
+}

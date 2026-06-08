@@ -25,7 +25,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# local env files — never commit these
+.env
+.env.*
 .env*.local
 
 # vercel
@@ -34,3 +36,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/lib/generated/prisma
+
+# Local SQLite database
+prisma/dev.db
+prisma/dev.db-journal
+
+# WhatsApp test images (large binary files)
+/whatsapp-test-images/
+/public/whatsapp-test-images/
