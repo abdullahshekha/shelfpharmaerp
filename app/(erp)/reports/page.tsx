@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { formatPKR } from '@/lib/utils/format'
 import { BarChart3, RefreshCw } from 'lucide-react'
 import { DateRangePicker, type DateRange } from '@/components/shared/DateRangePicker'

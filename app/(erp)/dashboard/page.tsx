@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer,
 } from 'recharts'
 
 interface Stats {
@@ -30,7 +30,6 @@ interface SalesData {
   salesReps: { name: string; orders: number; revenue: number }[]
 }
 
-const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#be185d', '#059669', '#b45309', '#4338ca']
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
