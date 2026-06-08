@@ -1,60 +1,35 @@
-'use client'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { createHmac } from 'crypto'
+import { ErpShell } from './shell'
 
-import { useState, useEffect } from 'react'
-import { Sidebar } from '@/components/shared/Sidebar'
-import { Menu } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import Image from 'next/image'
+function decodeSession(cookie: string, secret: string) {
+  try {
+    const dot = cookie.lastIndexOf('.')
+    if (dot === -1) return null
+    const payload = cookie.slice(0, dot)
+    const sig = cookie.slice(dot + 1)
+    const expected = createHmac('sha256', secret).update(payload).digest('base64url')
+    if (sig !== expected) return null
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'))
+  } catch {
+    return null
+  }
+}
 
-export default function ErpLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [role, setRole] = useState('ADMIN')
-  const [unreadCount, setUnreadCount] = useState(0)
+export default async function ErpLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies()
+  const token = cookieStore.get('sp_session')?.value
+  const secret = process.env.AUTH_SECRET ?? 'shelfpharma-erp-secret-2026'
 
-  useEffect(() => {
-    fetch('/api/auth/me')
-      .then(r => r.json())
-      .then(j => { if (j.data?.role) setRole(j.data.role) })
+  if (!token) redirect('/login')
 
-    const fetchNotifs = () => {
-      fetch('/api/notifications')
-        .then(r => r.json())
-        .then(j => setUnreadCount(j.unreadCount ?? 0))
-    }
-    fetchNotifs()
-    const interval = setInterval(fetchNotifs, 60_000)
-    return () => clearInterval(interval)
-  }, [])
+  const session = decodeSession(token, secret)
+  if (!session) redirect('/login')
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-shrink-0 sticky top-0 h-screen">
-        <Sidebar role={role} unreadCount={unreadCount} />
-      </aside>
-
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 flex lg:hidden">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <aside className="relative z-50 flex-shrink-0">
-            <Sidebar onClose={() => setSidebarOpen(false)} role={role} unreadCount={unreadCount} />
-          </aside>
-        </div>
-      )}
-
-      <div className="flex flex-col flex-1">
-        <header className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
-            <Menu size={20} />
-          </Button>
-          <Image src="/logo.png" alt="Shelf Pharma" width={100} height={36} className="object-contain" />
-        </header>
-
-        <main className="flex-1 p-4 lg:p-6">
-          {children}
-        </main>
-      </div>
-    </div>
+    <ErpShell role={session.role ?? 'ADMIN'}>
+      {children}
+    </ErpShell>
   )
 }
