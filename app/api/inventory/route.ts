@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
+import { getEffectivePrice } from '@/lib/utils/pricing'
+import { generateMedicineCode } from '@/lib/utils/generate-code'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,12 +20,12 @@ export async function GET(req: NextRequest) {
     isActive: true,
     ...(search && {
       OR: [
-        { name: { contains: search } },
-        { code: { contains: search } },
-        { manufacturer: { name: { contains: search } } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } },
+        { manufacturer: { name: { contains: search, mode: 'insensitive' } } },
       ],
     }),
-    ...(manufacturer && { manufacturer: { name: { contains: manufacturer } } }),
+    ...(manufacturer && { manufacturer: { name: { contains: manufacturer, mode: 'insensitive' } } }),
     ...(category && { category }),
   }
 
@@ -33,7 +35,7 @@ export async function GET(req: NextRequest) {
       include: {
         manufacturer: { select: { name: true } },
         batches: {
-          select: { currentQty: true, expiryDate: true },
+          select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true },
           orderBy: { expiryDate: 'asc' },
         },
       },
@@ -50,7 +52,8 @@ export async function GET(req: NextRequest) {
   let results = medicines.map((m) => {
     const totalStock = m.batches.reduce((sum, b) => sum + b.currentQty, 0)
     const hasNearExpiry = m.batches.some((b) => b.expiryDate <= ninetyDays && b.currentQty > 0)
-    return { ...m, totalStock, hasNearExpiry }
+    const { tradePrice, mrp } = getEffectivePrice(m.batches)
+    return { ...m, totalStock, hasNearExpiry, tradePrice, mrp }
   })
 
   if (lowStock) results = results.filter((m) => m.totalStock <= m.minStockLevel)
@@ -65,16 +68,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
+  const code = await generateMedicineCode()
+
   const medicine = await prisma.medicine.create({
     data: {
-      code: body.code,
+      code,
       name: body.name,
       genericName: body.genericName ?? null,
       manufacturerId: body.manufacturerId,
       category: body.category ?? null,
       packSize: body.packSize ?? null,
-      tradePrice: body.tradePrice,
-      mrp: body.mrp ?? null,
       minStockLevel: body.minStockLevel ?? 10,
     },
     include: { manufacturer: { select: { name: true } } },

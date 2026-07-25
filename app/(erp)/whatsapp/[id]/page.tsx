@@ -12,7 +12,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 
 interface FuzzyMatch {
-  medicine: { id: string; code: string; name: string; tradePrice: number }
+  medicine: { id: string; code: string; name: string; tradePrice: number | null }
   score: number
   confidence: 'high' | 'medium' | 'low'
 }
@@ -38,7 +38,7 @@ interface ReviewLine {
   offerPercent: number
   included: boolean
   searchQuery: string
-  searchResults: { id: string; name: string; code: string; tradePrice: number }[]
+  searchResults: { id: string; name: string; code: string; tradePrice: number | null }[]
   showSearch: boolean
 }
 
@@ -123,10 +123,10 @@ export default function WhatsappReviewPage() {
     ))
   }, [])
 
-  const selectMedicine = (lineIdx: number, med: { id: string; name: string; tradePrice: number }) => {
+  const selectMedicine = (lineIdx: number, med: { id: string; name: string; tradePrice: number | null }) => {
     setLines(ls => ls.map((l, i) =>
       i === lineIdx
-        ? { ...l, selectedMedicineId: med.id, selectedMedicineName: med.name, unitPrice: med.tradePrice, showSearch: false, searchQuery: '', included: true }
+        ? { ...l, selectedMedicineId: med.id, selectedMedicineName: med.name, unitPrice: med.tradePrice ?? 0, showSearch: false, searchQuery: '', included: true }
         : l
     ))
   }
@@ -328,7 +328,7 @@ export default function WhatsappReviewPage() {
                                 onMouseDown={() => selectMedicine(i, m)}
                               >
                                 <span className="font-medium">{m.name}</span>
-                                <span className="text-slate-400">{formatPKR(m.tradePrice)}</span>
+                                <span className="text-slate-400">{m.tradePrice != null ? formatPKR(m.tradePrice) : '—'}</span>
                               </button>
                             ))}
                           </div>

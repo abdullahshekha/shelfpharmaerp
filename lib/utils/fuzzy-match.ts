@@ -5,7 +5,7 @@ export interface MedicineSearchItem {
   code: string
   name: string
   genericName?: string | null
-  tradePrice: number
+  tradePrice: number | null
   category?: string | null
 }
 

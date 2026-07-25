@@ -7,8 +7,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const body = await req.json()
 
-  if (!body.batchNumber || !body.expiryDate || !body.quantityIn || !body.purchasePrice) {
-    return NextResponse.json({ error: 'batchNumber, expiryDate, quantityIn and purchasePrice are required' }, { status: 400 })
+  if (!body.batchNumber || !body.expiryDate || !body.quantityIn || !body.purchasePrice || !body.tradePrice) {
+    return NextResponse.json({ error: 'batchNumber, expiryDate, quantityIn, purchasePrice and tradePrice are required' }, { status: 400 })
   }
 
   const batch = await prisma.medicineBatch.create({
@@ -19,6 +19,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       quantityIn: parseInt(body.quantityIn),
       currentQty: parseInt(body.quantityIn),
       purchasePrice: parseFloat(body.purchasePrice),
+      tradePrice: parseFloat(body.tradePrice),
+      mrp: body.mrp ? parseFloat(body.mrp) : null,
     },
   })
 

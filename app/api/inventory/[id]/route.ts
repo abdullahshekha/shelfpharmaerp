@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getEffectivePrice } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   })
   if (!medicine) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json({ data: medicine })
+
+  const { tradePrice, mrp } = getEffectivePrice(medicine.batches)
+  return NextResponse.json({ data: { ...medicine, tradePrice, mrp } })
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,8 +31,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       manufacturerId: body.manufacturerId,
       category: body.category ?? null,
       packSize: body.packSize ?? null,
-      tradePrice: body.tradePrice,
-      mrp: body.mrp ?? null,
       minStockLevel: body.minStockLevel ?? 10,
       isActive: body.isActive ?? true,
     },

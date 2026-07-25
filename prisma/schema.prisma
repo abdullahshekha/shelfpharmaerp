@@ -13,10 +13,16 @@ model Area {
   createdAt DateTime   @default(now())
 }
 
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
 model Supplier {
   id               String            @id @default(cuid())
   name             String
-  type             String            // OPEN_MARKET | OFFICIAL_DISTRIBUTOR
+  type             String // OPEN_MARKET | OFFICIAL_DISTRIBUTOR
   contactPerson    String?
   phone            String?
   address          String?
@@ -53,8 +59,8 @@ model PurchaseInvoiceItem {
   medicineId        String
   medicine          Medicine        @relation(fields: [medicineId], references: [id])
   quantity          Int
-  unitPrice         Decimal  @db.Decimal(10, 2)
-  lineTotal         Decimal  @db.Decimal(10, 2)
+  unitPrice         Decimal         @db.Decimal(10, 2)
+  lineTotal         Decimal         @db.Decimal(10, 2)
 
   @@index([purchaseInvoiceId])
 }
@@ -64,7 +70,7 @@ model SupplierPayment {
   purchaseInvoiceId String
   purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id])
   supplierId        String
-  amount            Decimal  @db.Decimal(10, 2)
+  amount            Decimal         @db.Decimal(10, 2)
   paymentDate       DateTime        @default(now())
   method            String          @default("CASH")
   reference         String?
@@ -78,7 +84,7 @@ model DeleteApproval {
   id            String    @id @default(cuid())
   requestedById String
   requestedBy   Employee  @relation("RequestedBy", fields: [requestedById], references: [id])
-  model         String    // Order | Invoice | Retailer | Medicine
+  model         String // Order | Invoice | Retailer | Medicine
   recordId      String
   recordLabel   String
   status        String    @default("PENDING") // PENDING | APPROVED | REJECTED
@@ -95,7 +101,7 @@ model Notification {
   id          String   @id @default(cuid())
   employeeId  String
   employee    Employee @relation(fields: [employeeId], references: [id])
-  type        String   // DELETE_APPROVAL_REQUEST | DELETE_APPROVED | DELETE_REJECTED
+  type        String // DELETE_APPROVAL_REQUEST | DELETE_APPROVED | DELETE_REJECTED
   title       String
   message     String
   referenceId String?
@@ -115,26 +121,24 @@ model Manufacturer {
 }
 
 model Medicine {
-  id             String          @id @default(cuid())
-  code           String          @unique
+  id             String                @id @default(cuid())
+  code           String                @unique
   name           String
   genericName    String?
   manufacturerId String
-  manufacturer   Manufacturer    @relation(fields: [manufacturerId], references: [id])
+  manufacturer   Manufacturer          @relation(fields: [manufacturerId], references: [id])
   category       String?
   packSize       String?
-  tradePrice     Decimal  @db.Decimal(10, 2)
-  mrp            Decimal? @db.Decimal(10, 2)
   bonusQty       String?
   bonusNote      String?
-  minStockLevel  Int             @default(10)
-  isActive       Boolean         @default(true)
+  minStockLevel  Int                   @default(10)
+  isActive       Boolean               @default(true)
   batches        MedicineBatch[]
   orderItems     OrderItem[]
   offerListItems OfferListItem[]
   purchaseItems  PurchaseInvoiceItem[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   @@index([name])
   @@index([code])
@@ -149,6 +153,8 @@ model MedicineBatch {
   quantityIn    Int
   currentQty    Int
   purchasePrice Decimal  @db.Decimal(10, 2)
+  tradePrice    Decimal  @db.Decimal(10, 2)
+  mrp           Decimal? @db.Decimal(10, 2)
   createdAt     DateTime @default(now())
 
   @@index([medicineId])
@@ -164,7 +170,7 @@ model Employee {
   email           String?
   address         String?
   joiningDate     DateTime?
-  salary          Decimal? @db.Decimal(10, 2)
+  salary          Decimal?         @db.Decimal(10, 2)
   isActive        Boolean          @default(true)
   username        String?          @unique
   passwordHash    String?
@@ -314,7 +320,7 @@ model Payment {
 }
 
 model WhatsappOrder {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   phoneNumber       String
   retailerId        String?
   retailer          Retailer? @relation(fields: [retailerId], references: [id])
@@ -322,13 +328,13 @@ model WhatsappOrder {
   whatsappMessageId String?
   rawOcrText        String?
   extractedItems    String?
-  status            String   @default("PENDING_REVIEW")
+  status            String    @default("PENDING_REVIEW")
   convertedOrderId  String?
   orders            Order[]
   autoReplyText     String?
-  autoReplySent     Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  autoReplySent     Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([phoneNumber])
   @@index([status])
@@ -348,13 +354,13 @@ model Delivery {
 }
 
 model Attendance {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  date       DateTime @db.Date
+  employee   Employee  @relation(fields: [employeeId], references: [id])
+  date       DateTime  @db.Date
   timeIn     DateTime?
   timeOut    DateTime?
-  status     String   @default("PRESENT")
+  status     String    @default("PRESENT")
   notes      String?
 
   @@unique([employeeId, date])

@@ -228,7 +228,10 @@ function PurchaseInvoicesTab() {
           />
         </div>
 
-        <Select value={supplierFilter || 'all'} onValueChange={v => setSupplierFilter(v === 'all' ? '' : (v ?? ''))}>
+        <Select
+          items={[{ value: 'all', label: 'All Suppliers' }, ...suppliers.map(s => ({ value: s.id, label: s.name }))]}
+          value={supplierFilter || 'all'} onValueChange={v => setSupplierFilter(v === 'all' ? '' : (v ?? ''))}
+        >
           <SelectTrigger className="w-44 h-8 text-sm"><SelectValue placeholder="All suppliers" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Suppliers</SelectItem>

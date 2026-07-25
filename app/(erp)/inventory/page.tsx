@@ -10,14 +10,12 @@ import { formatPKR } from '@/lib/utils/format'
 import { Search, Plus, AlertTriangle, Clock } from 'lucide-react'
 import Link from 'next/link'
 
-const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Drops/Spray', 'Topical', 'Injection', 'Sachet/Powder', 'Personal Care', 'Other']
-
 interface Medicine {
   id: string
   code: string
   name: string
   category: string | null
-  tradePrice: number
+  tradePrice: number | null
   manufacturer: { name: string }
   totalStock: number
   hasNearExpiry: boolean
@@ -36,9 +34,14 @@ export default function InventoryPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const [lowStock, setLowStock] = useState(false)
   const [nearExpiry, setNearExpiry] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/categories').then(r => r.json()).then(j => setCategories(j.data ?? []))
+  }, [])
 
   const fetchMedicines = useCallback(async () => {
     setLoading(true)
@@ -70,7 +73,7 @@ export default function InventoryPage() {
         </div>
         <Link href="/inventory/add">
           <Button size="sm" className="gap-2">
-            <Plus size={16} /> Add Medicine
+            <Plus size={16} /> Item Creation
           </Button>
         </Link>
       </div>
@@ -87,13 +90,17 @@ export default function InventoryPage() {
           />
         </div>
 
-        <Select value={category || 'all'} onValueChange={(v) => { setCategory(v === 'all' ? '' : (v ?? '')); setPage(1) }}>
+        <Select
+          items={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name }))]}
+          value={category || 'all'}
+          onValueChange={(v) => { setCategory(v === 'all' ? '' : (v ?? '')); setPage(1) }}
+        >
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Category" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            {categories.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
 
@@ -168,7 +175,7 @@ export default function InventoryPage() {
                           <Badge variant="outline" className="text-xs">{m.category}</Badge>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium">{formatPKR(m.tradePrice)}</td>
+                      <td className="px-4 py-3 text-right font-medium">{m.tradePrice != null ? formatPKR(m.tradePrice) : '—'}</td>
                       <td className="px-4 py-3 text-center">
                         <StockBadge total={m.totalStock} min={m.minStockLevel} />
                       </td>

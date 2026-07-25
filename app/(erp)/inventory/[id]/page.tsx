@@ -19,6 +19,8 @@ interface Batch {
   quantityIn: number
   currentQty: number
   purchasePrice: number
+  tradePrice: number
+  mrp: number | null
 }
 
 interface Medicine {
@@ -28,7 +30,7 @@ interface Medicine {
   genericName: string | null
   category: string | null
   packSize: string | null
-  tradePrice: number
+  tradePrice: number | null
   mrp: number | null
   bonusQty: string | null
   bonusNote: string | null
@@ -37,7 +39,7 @@ interface Medicine {
   batches: Batch[]
 }
 
-const emptyBatch = { batchNumber: '', expiryDate: '', quantityIn: '', purchasePrice: '' }
+const emptyBatch = { batchNumber: '', expiryDate: '', quantityIn: '', purchasePrice: '', tradePrice: '', mrp: '' }
 
 export default function MedicineDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -57,8 +59,8 @@ export default function MedicineDetailPage() {
   useEffect(() => { fetchMedicine() }, [id])
 
   const addBatch = async () => {
-    if (!batchForm.batchNumber || !batchForm.expiryDate || !batchForm.quantityIn || !batchForm.purchasePrice) {
-      toast.error('All batch fields are required')
+    if (!batchForm.batchNumber || !batchForm.expiryDate || !batchForm.quantityIn || !batchForm.purchasePrice || !batchForm.tradePrice) {
+      toast.error('Batch number, expiry, quantity, purchase price and trade price are required')
       return
     }
     setSavingBatch(true)
@@ -117,7 +119,7 @@ export default function MedicineDetailPage() {
             <Row label="Generic Name" value={medicine.genericName ?? '—'} />
             <Row label="Category" value={medicine.category ?? '—'} />
             <Row label="Pack Size" value={medicine.packSize ?? '—'} />
-            <Row label="Trade Price" value={formatPKR(medicine.tradePrice)} />
+            <Row label="Trade Price" value={medicine.tradePrice != null ? formatPKR(medicine.tradePrice) : 'No priced batch yet'} />
             <Row label="MRP" value={medicine.mrp ? formatPKR(medicine.mrp) : '—'} />
             <Row label="Bonus Qty" value={medicine.bonusQty ?? '—'} />
             <Row label="Bonus Note" value={medicine.bonusNote ?? '—'} />
@@ -201,6 +203,24 @@ export default function MedicineDetailPage() {
                   onChange={e => setBatchForm(f => ({ ...f, purchasePrice: e.target.value }))}
                 />
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Trade Price (PKR) *</Label>
+                <Input
+                  type="number" step="0.01" placeholder="298.35"
+                  className="h-8 text-sm"
+                  value={batchForm.tradePrice}
+                  onChange={e => setBatchForm(f => ({ ...f, tradePrice: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">MRP (PKR)</Label>
+                <Input
+                  type="number" step="0.01" placeholder="350.00"
+                  className="h-8 text-sm"
+                  value={batchForm.mrp}
+                  onChange={e => setBatchForm(f => ({ ...f, mrp: e.target.value }))}
+                />
+              </div>
             </div>
             <div className="flex gap-2 justify-end">
               <Button size="sm" variant="outline" onClick={() => { setShowBatchForm(false); setBatchForm(emptyBatch) }}>
@@ -225,6 +245,8 @@ export default function MedicineDetailPage() {
                   <th className="text-right px-4 py-3 font-medium text-slate-600">In</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Remaining</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase Price</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Trade Price</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">MRP</th>
                   <th className="w-10" />
                 </tr>
               </thead>
@@ -248,6 +270,8 @@ export default function MedicineDetailPage() {
                         {b.currentQty === 0 ? <span className="text-slate-400">0</span> : b.currentQty}
                       </td>
                       <td className="px-4 py-3 text-right">{formatPKR(b.purchasePrice)}</td>
+                      <td className="px-4 py-3 text-right">{formatPKR(b.tradePrice)}</td>
+                      <td className="px-4 py-3 text-right">{b.mrp ? formatPKR(b.mrp) : '—'}</td>
                       <td className="px-4 py-3">
                         <button onClick={() => deleteBatch(b.id)} className="text-red-400 hover:text-red-600">
                           <Trash2 size={14} />

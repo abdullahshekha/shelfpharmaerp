@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Check, X, MapPin } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, X, MapPin, Factory, Tags } from 'lucide-react'
 import { toast } from 'sonner'
+import { ReferenceListManager } from '@/components/shared/ReferenceListManager'
 
 interface Area { id: string; name: string; _count?: { retailers: number } }
 
@@ -168,6 +169,25 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ReferenceListManager
+        title="Manufacturers"
+        icon={<Factory size={16} className="text-purple-500" />}
+        apiPath="/api/manufacturers"
+        addPlaceholder="New manufacturer name (e.g. ABBOTT LABORATORIES)"
+        withContact
+        countField="medicineCount"
+        countLabel={(n) => `${n} medicine${n !== 1 ? 's' : ''}`}
+      />
+
+      <ReferenceListManager
+        title="Categories"
+        icon={<Tags size={16} className="text-emerald-500" />}
+        apiPath="/api/categories"
+        addPlaceholder="New category name (e.g. Tablet, Syrup)"
+        countField="medicineCount"
+        countLabel={(n) => `${n} medicine${n !== 1 ? 's' : ''}`}
+      />
     </div>
   )
 }

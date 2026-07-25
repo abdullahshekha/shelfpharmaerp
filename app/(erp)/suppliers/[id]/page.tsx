@@ -13,7 +13,7 @@ import { ArrowLeft, Plus, X, Search } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
-interface Medicine { id: string; name: string; code: string; tradePrice: number }
+interface Medicine { id: string; name: string; code: string; tradePrice: number | null }
 interface InvoiceItem { medicineId: string; medicineName: string; quantity: number; unitPrice: number }
 interface Payment { id: string; amount: number; paymentDate: string; method: string; reference: string | null }
 
@@ -89,7 +89,7 @@ export default function SupplierDetailPage() {
     if (existing) {
       setItems(prev => prev.map(i => i.medicineId === med.id ? { ...i, quantity: i.quantity + 1 } : i))
     } else {
-      setItems(prev => [...prev, { medicineId: med.id, medicineName: med.name, quantity: 1, unitPrice: med.tradePrice }])
+      setItems(prev => [...prev, { medicineId: med.id, medicineName: med.name, quantity: 1, unitPrice: med.tradePrice ?? 0 }])
     }
     setMedSearch('')
     setShowMedDrop(false)

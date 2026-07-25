@@ -11,32 +11,29 @@ import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
-const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Drops/Spray', 'Topical', 'Injection', 'Sachet/Powder', 'Personal Care', 'Other']
-
-export default function AddMedicinePage() {
+export default function ItemCreationPage() {
   const router = useRouter()
   const [manufacturers, setManufacturers] = useState<{ id: string; name: string }[]>([])
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
-    code: '',
     name: '',
     genericName: '',
     manufacturerId: '',
     category: '',
     packSize: '',
-    tradePrice: '',
-    mrp: '',
     minStockLevel: '10',
   })
 
   useEffect(() => {
     fetch('/api/manufacturers').then(r => r.json()).then(j => setManufacturers(j.data ?? []))
+    fetch('/api/categories').then(r => r.json()).then(j => setCategories(j.data ?? []))
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.code || !form.name || !form.manufacturerId || !form.tradePrice) {
-      toast.error('Code, name, manufacturer, and trade price are required')
+    if (!form.name || !form.manufacturerId) {
+      toast.error('Name and manufacturer are required')
       return
     }
     setSaving(true)
@@ -45,17 +42,16 @@ export default function AddMedicinePage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...form,
-        tradePrice: parseFloat(form.tradePrice),
-        mrp: form.mrp ? parseFloat(form.mrp) : null,
         minStockLevel: parseInt(form.minStockLevel),
       }),
     })
     if (res.ok) {
-      toast.success('Medicine added')
-      router.push('/inventory')
+      const j = await res.json()
+      toast.success(`Item created — code ${j.data.code}`)
+      router.push(`/inventory/${j.data.id}`)
     } else {
       const j = await res.json()
-      toast.error(j.error ?? 'Failed to add medicine')
+      toast.error(j.error ?? 'Failed to create item')
     }
     setSaving(false)
   }
@@ -66,24 +62,21 @@ export default function AddMedicinePage() {
         <Link href="/inventory">
           <Button variant="ghost" size="icon"><ArrowLeft size={18} /></Button>
         </Link>
-        <h1 className="text-2xl font-bold text-slate-900">Add Medicine</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Item Creation</h1>
       </div>
 
       <form onSubmit={handleSubmit}>
         <Card>
           <CardHeader><CardTitle className="text-base">Medicine Details</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="code">Code *</Label>
-                <Input id="code" placeholder="028146" value={form.code}
-                  onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Name *</Label>
-                <Input id="name" placeholder="ABOCAL TAB" value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value.toUpperCase() }))} />
-              </div>
+            <p className="text-xs text-slate-500 -mt-1">
+              A unique item code is generated automatically. Trade Price and MRP are set when you add the first stock batch.
+            </p>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="name">Name *</Label>
+              <Input id="name" placeholder="ABOCAL TAB" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value.toUpperCase() }))} />
             </div>
 
             <div className="space-y-1.5">
@@ -95,8 +88,12 @@ export default function AddMedicinePage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Manufacturer *</Label>
-                <Select value={form.manufacturerId || undefined} onValueChange={v => setForm(f => ({ ...f, manufacturerId: v ?? '' }))}>
-                  <SelectTrigger><SelectValue placeholder="Select manufacturer" /></SelectTrigger>
+                <Select
+                  items={manufacturers.map(m => ({ value: m.id, label: m.name }))}
+                  value={form.manufacturerId || undefined}
+                  onValueChange={v => setForm(f => ({ ...f, manufacturerId: v ?? '' }))}
+                >
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select manufacturer" /></SelectTrigger>
                   <SelectContent>
                     {manufacturers.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
                   </SelectContent>
@@ -104,25 +101,24 @@ export default function AddMedicinePage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Category</Label>
-                <Select value={form.category || undefined} onValueChange={v => setForm(f => ({ ...f, category: v ?? '' }))}>
-                  <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                <Select
+                  items={categories.map(c => ({ value: c.name, label: c.name }))}
+                  value={form.category || undefined}
+                  onValueChange={v => setForm(f => ({ ...f, category: v ?? '' }))}
+                >
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select category" /></SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="tradePrice">Trade Price (PKR) *</Label>
-                <Input id="tradePrice" type="number" step="0.01" placeholder="298.35" value={form.tradePrice}
-                  onChange={e => setForm(f => ({ ...f, tradePrice: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mrp">MRP (PKR)</Label>
-                <Input id="mrp" type="number" step="0.01" placeholder="350.00" value={form.mrp}
-                  onChange={e => setForm(f => ({ ...f, mrp: e.target.value }))} />
+                <Label htmlFor="packSize">Pack Size</Label>
+                <Input id="packSize" placeholder="10x10 or 120ml" value={form.packSize}
+                  onChange={e => setForm(f => ({ ...f, packSize: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="minStockLevel">Min Stock Alert</Label>
@@ -131,15 +127,9 @@ export default function AddMedicinePage() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="packSize">Pack Size</Label>
-              <Input id="packSize" placeholder="10x10 or 120ml" value={form.packSize}
-                onChange={e => setForm(f => ({ ...f, packSize: e.target.value }))} />
-            </div>
-
             <div className="flex justify-end gap-3 pt-2">
               <Link href="/inventory"><Button type="button" variant="outline">Cancel</Button></Link>
-              <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Add Medicine'}</Button>
+              <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Create Item'}</Button>
             </div>
           </CardContent>
         </Card>

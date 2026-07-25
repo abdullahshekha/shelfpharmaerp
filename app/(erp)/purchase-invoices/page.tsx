@@ -123,7 +123,10 @@ export default function PurchaseInvoicesPage() {
           />
         </div>
 
-        <Select value={supplierFilter || 'all'} onValueChange={v => setSupplierFilter(v === 'all' ? '' : (v ?? ''))}>
+        <Select
+          items={[{ value: 'all', label: 'All Suppliers' }, ...suppliers.map(s => ({ value: s.id, label: s.name }))]}
+          value={supplierFilter || 'all'} onValueChange={v => setSupplierFilter(v === 'all' ? '' : (v ?? ''))}
+        >
           <SelectTrigger className="w-52">
             <SelectValue placeholder="All suppliers" />
           </SelectTrigger>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractOrderFromImage, ExtractedItem } from '@/lib/claude/extract-order'
 import { buildFuseIndex, fuzzyMatchMedicine } from '@/lib/utils/fuzzy-match'
+import { getEffectivePrice } from '@/lib/utils/pricing'
 import path from 'path'
 import fs from 'fs'
 
@@ -43,7 +44,10 @@ export async function POST(req: NextRequest) {
     // Load all medicines for fuzzy matching
     const medicines = await prisma.medicine.findMany({
       where: { isActive: true },
-      select: { id: true, code: true, name: true, genericName: true, tradePrice: true, category: true },
+      select: {
+        id: true, code: true, name: true, genericName: true, category: true,
+        batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true } },
+      },
     })
 
     buildFuseIndex(medicines.map(m => ({
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
       code: m.code,
       name: m.name,
       genericName: m.genericName,
-      tradePrice: Number(m.tradePrice),
+      tradePrice: getEffectivePrice(m.batches).tradePrice,
       category: m.category,
     })))
 

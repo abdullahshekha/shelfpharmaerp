@@ -207,7 +207,10 @@ export default function RetailerDetailPage() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Area</Label>
-                <Select value={editForm.areaId || 'none'} onValueChange={v => setEditForm(f => ({ ...f, areaId: v === 'none' ? '' : (v ?? '') }))}>
+                <Select
+                  items={[{ value: 'none', label: 'No area' }, ...areas.map(a => ({ value: a.id, label: a.name }))]}
+                  value={editForm.areaId || 'none'} onValueChange={v => setEditForm(f => ({ ...f, areaId: v === 'none' ? '' : (v ?? '') }))}
+                >
                   <SelectTrigger className="h-8 text-sm bg-white"><SelectValue placeholder="Select area" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No area</SelectItem>
@@ -285,7 +288,10 @@ export default function RetailerDetailPage() {
             {retailer.notes && <Row label="Notes" value={retailer.notes} />}
             <div className="flex justify-between items-center pt-1">
               <span className="text-slate-500 flex items-center gap-1"><UserCheck size={13} /> Sales Rep</span>
-              <Select value={retailer.salesRepId ?? 'none'} onValueChange={v => assignSalesRep(v === 'none' ? null : (v ?? null))}>
+              <Select
+                items={[{ value: 'none', label: 'No sales rep' }, ...salesReps.map(rep => ({ value: rep.id, label: rep.name }))]}
+                value={retailer.salesRepId ?? 'none'} onValueChange={v => assignSalesRep(v === 'none' ? null : (v ?? null))}
+              >
                 <SelectTrigger className="h-7 text-xs w-40"><SelectValue placeholder="Assign rep" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No sales rep</SelectItem>

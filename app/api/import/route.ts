@@ -77,15 +77,12 @@ export async function POST() {
           continue
         }
 
-        const tradePrice = parseFloat(row.trade_price) || 0
-
         await prisma.medicine.upsert({
           where: { code },
           update: {
             name,
             manufacturerId,
             category: row.category?.trim() || null,
-            tradePrice,
             bonusQty: row.bonus_qty?.trim() || null,
             bonusNote: row.bonus_note?.trim() || null,
           },
@@ -94,7 +91,6 @@ export async function POST() {
             name,
             manufacturerId,
             category: row.category?.trim() || null,
-            tradePrice,
             bonusQty: row.bonus_qty?.trim() || null,
             bonusNote: row.bonus_note?.trim() || null,
           },

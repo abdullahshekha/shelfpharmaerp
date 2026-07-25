@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractOrderFromImage } from '@/lib/claude/extract-order'
 import { buildFuseIndex, fuzzyMatchMedicine } from '@/lib/utils/fuzzy-match'
+import { getEffectivePrice } from '@/lib/utils/pricing'
 import { sendWhatsAppMessage, buildAutoReplyText } from '@/lib/whatsapp/send-message'
 import path from 'path'
 import fs from 'fs'
@@ -95,9 +96,15 @@ export async function POST(req: NextRequest) {
     // Fuzzy match
     const medicines = await prisma.medicine.findMany({
       where: { isActive: true },
-      select: { id: true, code: true, name: true, genericName: true, tradePrice: true, category: true },
+      select: {
+        id: true, code: true, name: true, genericName: true, category: true,
+        batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true } },
+      },
     })
-    buildFuseIndex(medicines.map(m => ({ ...m, tradePrice: Number(m.tradePrice), genericName: m.genericName })))
+    buildFuseIndex(medicines.map(m => ({
+      id: m.id, code: m.code, name: m.name, genericName: m.genericName, category: m.category,
+      tradePrice: getEffectivePrice(m.batches).tradePrice,
+    })))
 
     const withMatches = extractedItems.map(item => {
       const matches = fuzzyMatchMedicine(item.cleanedName)

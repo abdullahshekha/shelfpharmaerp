@@ -97,7 +97,10 @@ export default function AddRetailerPage() {
               {/* Area dropdown */}
               <div className="space-y-1.5">
                 <Label>Area</Label>
-                <Select value={form.areaId || 'none'} onValueChange={v => setForm(f => ({ ...f, areaId: v === 'none' ? '' : (v ?? '') }))}>
+                <Select
+                  items={[{ value: 'none', label: 'No area' }, ...areas.map(a => ({ value: a.id, label: a.name }))]}
+                  value={form.areaId || 'none'} onValueChange={v => setForm(f => ({ ...f, areaId: v === 'none' ? '' : (v ?? '') }))}
+                >
                   <SelectTrigger><SelectValue placeholder="Select area" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No area</SelectItem>
@@ -126,7 +129,10 @@ export default function AddRetailerPage() {
 
               <div className="space-y-1.5 col-span-2">
                 <Label>Assigned Sales Rep</Label>
-                <Select value={form.salesRepId || 'none'} onValueChange={v => setForm(f => ({ ...f, salesRepId: v === 'none' ? '' : (v ?? '') }))}>
+                <Select
+                  items={[{ value: 'none', label: 'No sales rep' }, ...salesReps.map(rep => ({ value: rep.id, label: rep.name }))]}
+                  value={form.salesRepId || 'none'} onValueChange={v => setForm(f => ({ ...f, salesRepId: v === 'none' ? '' : (v ?? '') }))}
+                >
                   <SelectTrigger><SelectValue placeholder="Select sales rep (optional)" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No sales rep</SelectItem>

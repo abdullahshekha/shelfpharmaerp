@@ -174,6 +174,7 @@ export default function DeliveriesPage() {
 
                       <td className="px-4 py-3 print:hidden w-44">
                         <Select
+                          items={[{ value: 'none', label: 'No driver' }, ...drivers.map(dr => ({ value: dr.id, label: dr.name }))]}
                           value={driverMap[d.id] ?? 'none'}
                           onValueChange={v => {
                             const val = v ?? 'none'

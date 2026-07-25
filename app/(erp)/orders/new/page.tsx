@@ -15,7 +15,7 @@ interface Medicine {
   id: string
   code: string
   name: string
-  tradePrice: number
+  tradePrice: number | null
   category: string | null
   totalStock: number
 }
@@ -100,7 +100,7 @@ function NewOrderForm() {
     if (existing) {
       setLines(ls => ls.map(l => l.medicine.id === med.id ? { ...l, quantity: l.quantity + 1 } : l))
     } else {
-      setLines(ls => [...ls, { medicine: med, quantity: 1, unitPrice: med.tradePrice, offerPercent: 0 }])
+      setLines(ls => [...ls, { medicine: med, quantity: 1, unitPrice: med.tradePrice ?? 0, offerPercent: 0 }])
     }
     setMedSearch('')
     setShowMedDropdown(false)
@@ -302,7 +302,7 @@ function NewOrderForm() {
                         ? <span className="text-xs text-red-500 font-semibold">Out of Stock</span>
                         : <span className="text-xs text-green-600">{m.totalStock} in stock</span>
                       }
-                      <span className="text-slate-600 font-medium">{formatPKR(m.tradePrice)}</span>
+                      <span className="text-slate-600 font-medium">{m.tradePrice != null ? formatPKR(m.tradePrice) : '—'}</span>
                     </div>
                   </button>
                 ))}

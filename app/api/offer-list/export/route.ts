@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getEffectivePrice } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,10 +8,15 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
 
+  const medicineInclude = {
+    manufacturer: { select: { name: true } },
+    batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true } },
+  }
+
   // If no ID, use active list
   const list = id
-    ? await prisma.offerList.findUnique({ where: { id }, include: { items: { include: { medicine: { include: { manufacturer: { select: { name: true } } } } } } } })
-    : await prisma.offerList.findFirst({ where: { isActive: true }, include: { items: { include: { medicine: { include: { manufacturer: { select: { name: true } } } } } } } })
+    ? await prisma.offerList.findUnique({ where: { id }, include: { items: { include: { medicine: { include: medicineInclude } } } } })
+    : await prisma.offerList.findFirst({ where: { isActive: true }, include: { items: { include: { medicine: { include: medicineInclude } } } } })
 
   if (!list) {
     return new NextResponse('No active offer list found', { status: 404 })
@@ -36,7 +42,8 @@ export async function GET(req: NextRequest) {
       rowIndex++
       const offerDisplay = Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}  %` : ''
       const bonusDisplay = item.bonusQty > 0 ? String(item.bonusQty) : (item.medicine.bonusQty ?? '')
-      const price = Number(item.specialPrice ?? item.medicine.tradePrice).toFixed(2)
+      const effectiveTradePrice = getEffectivePrice(item.medicine.batches).tradePrice
+      const price = (item.specialPrice != null ? Number(item.specialPrice) : effectiveTradePrice ?? 0).toFixed(2)
       itemRows += `<tr class="item">
   <td align="center">${item.medicine.code}</td>
   <td style="text-align: left;">${item.medicine.name}</td>
