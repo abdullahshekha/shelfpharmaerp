@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
-import { ArrowLeft, Plus, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Plus, ExternalLink, Download } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
@@ -19,8 +19,11 @@ interface PurchaseInvoice {
   invoiceDate: string
   dueDate: string | null
   totalAmount: number
+  salesTaxTotal: number
   aitCollectibleTotal: number
   aitPayableTotal: number
+  previousPayable: number
+  grandTotal: number
   status: string
   notes: string | null
   supplier: { id: string; name: string; type: string; phone: string | null }
@@ -35,6 +38,7 @@ interface PurchaseInvoice {
     discountPercent: number
     tradeOfferPercent: number
     salesTax: number
+    salesTaxAmount: number
     aitCollectiblePercent: number
     aitPayablePercent: number
     aitCollectibleAmount: number
@@ -111,6 +115,13 @@ export default function PurchaseInvoiceDetailPage() {
           <p className="text-slate-500 text-sm">{formatDate(invoice.invoiceDate)}</p>
         </div>
         <Badge className={`${STATUS_COLORS[invoice.status] ?? ''}`}>{invoice.status}</Badge>
+        <a
+          href={`/api/purchase-invoices/${id}/pdf`}
+          download
+          className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
+        >
+          <Download size={14} /> Download PDF
+        </a>
         {invoice.status !== 'PAID' && (
           <Button size="sm" className="gap-1" onClick={() => setShowPaymentForm(true)}>
             <Plus size={14} /> Record Payment
@@ -139,31 +150,45 @@ export default function PurchaseInvoiceDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">Summary</CardTitle></CardHeader>
           <CardContent className="space-y-1 text-sm">
-            {(Number(invoice.aitCollectibleTotal) > 0 || Number(invoice.aitPayableTotal) > 0) && (
-              <>
-                <div className="flex justify-between text-slate-500">
-                  <span>Subtotal</span>
-                  <span>{formatPKR(Number(invoice.totalAmount) - Number(invoice.aitCollectibleTotal) - Number(invoice.aitPayableTotal))}</span>
-                </div>
-                {Number(invoice.aitCollectibleTotal) > 0 && (
-                  <div className="flex justify-between text-slate-500">
-                    <span>AIT Collectible</span>
-                    <span>{formatPKR(invoice.aitCollectibleTotal)}</span>
-                  </div>
-                )}
-                {Number(invoice.aitPayableTotal) > 0 && (
-                  <div className="flex justify-between text-slate-500">
-                    <span>AIT Payable</span>
-                    <span>{formatPKR(invoice.aitPayableTotal)}</span>
-                  </div>
-                )}
-              </>
+            <div className="flex justify-between text-slate-500">
+              <span>Total (exc. taxes)</span>
+              <span>{formatPKR(invoice.items.reduce((s, item) => s + Number(item.lineTotal), 0))}</span>
+            </div>
+            {Number(invoice.salesTaxTotal) > 0 && (
+              <div className="flex justify-between text-slate-500">
+                <span>Total Sales Tax</span>
+                <span>{formatPKR(invoice.salesTaxTotal)}</span>
+              </div>
             )}
-            <div className="flex justify-between">
-              <span className="text-slate-500">Invoice Total</span>
+            {Number(invoice.aitCollectibleTotal) > 0 && (
+              <div className="flex justify-between text-slate-500">
+                <span>Adv Tax Collectible</span>
+                <span className="text-red-600">-{formatPKR(invoice.aitCollectibleTotal)}</span>
+              </div>
+            )}
+            {Number(invoice.aitPayableTotal) > 0 && (
+              <div className="flex justify-between text-slate-500">
+                <span>Adv Tax Payable</span>
+                <span>{formatPKR(invoice.aitPayableTotal)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t pt-1 mt-1">
+              <span className="font-semibold">Invoice Total</span>
               <span className="font-semibold">{formatPKR(invoice.totalAmount)}</span>
             </div>
-            <div className="flex justify-between">
+            {Number(invoice.previousPayable) > 0 && (
+              <>
+                <div className="flex justify-between text-slate-500">
+                  <span>Previous Payable</span>
+                  <span>{formatPKR(invoice.previousPayable)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-1 mt-1">
+                  <span className="font-bold">Grand Total</span>
+                  <span className="font-bold">{formatPKR(invoice.grandTotal)}</span>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between pt-1">
               <span className="text-slate-500">Total Paid</span>
               <span className="text-green-600 font-medium">{formatPKR(totalPaid)}</span>
             </div>
@@ -252,8 +277,8 @@ export default function PurchaseInvoiceDetailPage() {
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Disc %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">S. Tax</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-C %</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-P %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Adv Tax-C %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Adv Tax-P %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase Price</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Total</th>
                 </tr>
@@ -281,7 +306,7 @@ export default function PurchaseInvoiceDetailPage() {
                   </tr>
                 ))}
                 <tr className="font-bold border-t">
-                  <td colSpan={13} className="px-4 py-3 text-right">Subtotal</td>
+                  <td colSpan={13} className="px-4 py-3 text-right">Total (exc. taxes)</td>
                   <td className="px-4 py-3 text-right text-base">
                     {formatPKR(invoice.items.reduce((s, item) => s + Number(item.lineTotal), 0))}
                   </td>

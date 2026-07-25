@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
-import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount } from '@/lib/utils/pricing'
+import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount, calcSalesTaxAmount } from '@/lib/utils/pricing'
 import { ArrowLeft, Plus, X, Search } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -18,6 +18,8 @@ interface Medicine {
   id: string; name: string; code: string
   tradePrice: number | null; mrp: number | null; salesTaxApplicable: boolean
 }
+
+interface PriorBatch { mrp: number | null; purchasePrice: number; createdAt: string }
 
 interface InvoiceItem {
   medicineId: string
@@ -33,6 +35,7 @@ interface InvoiceItem {
   salesTax: number
   aitCollectiblePercent: number
   aitPayablePercent: number
+  priorBatches: PriorBatch[]
 }
 
 interface Payment { id: string; amount: number; paymentDate: string; method: string; reference: string | null }
@@ -42,10 +45,13 @@ interface PurchaseInvoice {
   invoiceNumber: string
   invoiceDate: string
   totalAmount: number
-  status: string
-  notes: string | null
+  salesTaxTotal: number
   aitCollectibleTotal: number
   aitPayableTotal: number
+  previousPayable: number
+  grandTotal: number
+  status: string
+  notes: string | null
   items: {
     id: string; quantity: number; bonusQuantity: number; purchasePrice: number; lineTotal: number
     medicine: { name: string; code: string }
@@ -75,12 +81,16 @@ function itemPurchasePrice(item: InvoiceItem) {
     tradePrice: item.tradePrice,
     discountPercent: item.discountPercent,
     tradeOfferPercent,
-    salesTax: item.salesTaxApplicable ? item.salesTax : 0,
   })
 }
 
 function itemTotalQuantity(item: InvoiceItem) {
   return item.quantity + item.bonusQuantity
+}
+
+function itemSalesTaxAmount(item: InvoiceItem) {
+  if (!item.salesTaxApplicable) return 0
+  return calcSalesTaxAmount(item.salesTax, itemTotalQuantity(item))
 }
 
 function itemAitCollectibleAmount(item: InvoiceItem, isFiler: boolean) {
@@ -93,6 +103,27 @@ function itemAitPayableAmount(item: InvoiceItem, isFiler: boolean) {
   return calcAitAmount(item.tradePrice, item.aitPayablePercent, itemTotalQuantity(item))
 }
 
+/** Warn if this item's Purchase Price exceeds the most recent batch's Purchase Price at the same MRP. */
+function itemPriceWarning(item: InvoiceItem): { oldPrice: number } | null {
+  const mrpNum = parseFloat(item.mrp)
+  if (!Number.isFinite(mrpNum)) return null
+  const matches = item.priorBatches.filter((b) => b.mrp != null && Math.abs(Number(b.mrp) - mrpNum) < 0.005)
+  if (matches.length === 0) return null
+  const mostRecent = matches.reduce((a, b) => (new Date(b.createdAt) > new Date(a.createdAt) ? b : a))
+  const newPrice = itemPurchasePrice(item)
+  if (newPrice > mostRecent.purchasePrice + 0.005) return { oldPrice: mostRecent.purchasePrice }
+  return null
+}
+
+/** Supplier's current outstanding balance across all not-fully-paid purchase invoices. */
+function computeSupplierOutstanding(supplier: Supplier): number {
+  return supplier.purchaseInvoices.reduce((sum, inv) => {
+    if (inv.status === 'PAID') return sum
+    const paid = inv.payments.reduce((s, p) => s + Number(p.amount), 0)
+    return sum + (Number(inv.totalAmount) - paid)
+  }, 0)
+}
+
 export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [supplier, setSupplier] = useState<Supplier | null>(null)
@@ -102,6 +133,7 @@ export default function SupplierDetailPage() {
   const [showInvoiceForm, setShowInvoiceForm] = useState(false)
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10))
   const [invoiceNotes, setInvoiceNotes] = useState('')
+  const [previousPayable, setPreviousPayable] = useState('0')
   const [items, setItems] = useState<InvoiceItem[]>([])
   const [medSearch, setMedSearch] = useState('')
   const [medResults, setMedResults] = useState<Medicine[]>([])
@@ -135,7 +167,7 @@ export default function SupplierDetailPage() {
     return () => clearTimeout(t)
   }, [medSearch])
 
-  const addItem = (med: Medicine) => {
+  const addItem = async (med: Medicine) => {
     setItems(prev => [...prev, {
       medicineId: med.id,
       medicineName: med.name,
@@ -150,9 +182,18 @@ export default function SupplierDetailPage() {
       salesTax: 0,
       aitCollectiblePercent: 0,
       aitPayablePercent: 0,
+      priorBatches: [],
     }])
     setMedSearch('')
     setShowMedDrop(false)
+
+    // Fetch batch history so we can flag a Purchase Price increase at the same MRP.
+    const res = await fetch(`/api/inventory/${med.id}`)
+    const j = await res.json()
+    const priorBatches: PriorBatch[] = (j.data?.batches ?? []).map((b: { mrp: number | null; purchasePrice: number; createdAt: string }) => ({
+      mrp: b.mrp, purchasePrice: Number(b.purchasePrice), createdAt: b.createdAt,
+    }))
+    setItems(prev => prev.map(i => i.medicineId === med.id ? { ...i, priorBatches } : i))
   }
 
   const updateItem = (medicineId: string, patch: Partial<InvoiceItem>) => {
@@ -177,6 +218,7 @@ export default function SupplierDetailPage() {
         supplierId: id,
         invoiceDate,
         notes: invoiceNotes || null,
+        previousPayable: parseFloat(previousPayable) || 0,
         items: items.map(i => ({
           medicineId: i.medicineId,
           batchNumber: i.batchNumber,
@@ -197,6 +239,7 @@ export default function SupplierDetailPage() {
       setShowInvoiceForm(false)
       setItems([])
       setInvoiceNotes('')
+      setPreviousPayable('0')
       fetchSupplier()
     } else {
       const j = await res.json()
@@ -224,17 +267,17 @@ export default function SupplierDetailPage() {
     setSavingPayment(false)
   }
 
-  const invoiceSubTotal = items.reduce((s, i) => s + itemTotalQuantity(i) * itemPurchasePrice(i), 0)
+  const invoiceExclTaxTotal = items.reduce((s, i) => s + itemTotalQuantity(i) * itemPurchasePrice(i), 0)
+  const invoiceSalesTaxTotal = items.reduce((s, i) => s + itemSalesTaxAmount(i), 0)
   const invoiceAitCollectibleTotal = items.reduce((s, i) => s + itemAitCollectibleAmount(i, isFiler), 0)
   const invoiceAitPayableTotal = items.reduce((s, i) => s + itemAitPayableAmount(i, isFiler), 0)
-  const invoiceTotal = invoiceSubTotal + invoiceAitCollectibleTotal + invoiceAitPayableTotal
+  const invoiceTotal = invoiceExclTaxTotal + invoiceSalesTaxTotal - invoiceAitCollectibleTotal + invoiceAitPayableTotal
+  const invoiceGrandTotal = invoiceTotal + (parseFloat(previousPayable) || 0)
 
   if (loading) return <div className="animate-pulse p-8 text-slate-400">Loading...</div>
   if (!supplier) return <div className="p-8 text-slate-400">Supplier not found.</div>
 
-  const totalOwed = supplier.purchaseInvoices
-    .filter(i => i.status !== 'PAID')
-    .reduce((s, i) => s + Number(i.totalAmount), 0)
+  const totalOwed = computeSupplierOutstanding(supplier)
 
   return (
     <div className="max-w-6xl space-y-6">
@@ -252,7 +295,7 @@ export default function SupplierDetailPage() {
             )}
           </div>
         </div>
-        <Button onClick={() => setShowInvoiceForm(true)} className="gap-2">
+        <Button onClick={() => { setPreviousPayable(String(computeSupplierOutstanding(supplier))); setShowInvoiceForm(true) }} className="gap-2">
           <Plus size={16} /> New Purchase Invoice
         </Button>
       </div>
@@ -278,7 +321,7 @@ export default function SupplierDetailPage() {
           <CardHeader>
             <CardTitle className="text-base flex items-center justify-between">
               New Purchase Invoice
-              <button onClick={() => { setShowInvoiceForm(false); setItems([]) }}><X size={16} className="text-slate-400" /></button>
+              <button onClick={() => { setShowInvoiceForm(false); setItems([]); setPreviousPayable('0') }}><X size={16} className="text-slate-400" /></button>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -308,8 +351,8 @@ export default function SupplierDetailPage() {
                       <th className="text-right py-1.5 px-1 w-24">Trade Price</th>
                       <th className="text-right py-1.5 px-1 w-16">Disc %</th>
                       <th className="text-right py-1.5 px-1 w-20">S. Tax</th>
-                      {isFiler && <th className="text-right py-1.5 px-1 w-16">AIT-C %</th>}
-                      {isFiler && <th className="text-right py-1.5 px-1 w-16">AIT-P %</th>}
+                      {isFiler && <th className="text-right py-1.5 px-1 w-16">Adv Tax-C %</th>}
+                      {isFiler && <th className="text-right py-1.5 px-1 w-16">Adv Tax-P %</th>}
                       <th className="text-right py-1.5 px-1 w-24">Purchase Price</th>
                       <th className="text-right py-1.5 px-1 w-24">Total</th>
                       <th className="w-8" />
@@ -379,7 +422,14 @@ export default function SupplierDetailPage() {
                                 onChange={e => updateItem(item.medicineId, { aitPayablePercent: parseFloat(e.target.value) || 0 })} />
                             </td>
                           )}
-                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice)}</td>
+                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">
+                            {formatPKR(purchasePrice)}
+                            {itemPriceWarning(item) && (
+                              <div className="text-orange-600 font-normal text-[10px] whitespace-nowrap">
+                                ⚠ was {formatPKR(itemPriceWarning(item)!.oldPrice)}
+                              </div>
+                            )}
+                          </td>
                           <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice * itemTotalQuantity(item))}</td>
                           <td className="py-1.5 px-1">
                             <button className="text-slate-400 hover:text-red-500"
@@ -421,33 +471,49 @@ export default function SupplierDetailPage() {
             {/* Totals breakdown */}
             {items.length > 0 && (
               <div className="flex justify-end">
-                <div className="w-full sm:w-72 space-y-1 text-sm">
+                <div className="w-full sm:w-80 space-y-1 text-sm">
                   <div className="flex justify-between text-slate-600">
-                    <span>Subtotal</span>
-                    <span>{formatPKR(invoiceSubTotal)}</span>
+                    <span>Total (exc. taxes)</span>
+                    <span>{formatPKR(invoiceExclTaxTotal)}</span>
                   </div>
+                  {invoiceSalesTaxTotal > 0 && (
+                    <div className="flex justify-between text-slate-600">
+                      <span>Total Sales Tax</span>
+                      <span>{formatPKR(invoiceSalesTaxTotal)}</span>
+                    </div>
+                  )}
                   {isFiler && (
                     <>
                       <div className="flex justify-between text-slate-600">
-                        <span>AIT Collectible</span>
-                        <span>{formatPKR(invoiceAitCollectibleTotal)}</span>
+                        <span>Adv Tax Collectible</span>
+                        <span className="text-red-600">-{formatPKR(invoiceAitCollectibleTotal)}</span>
                       </div>
                       <div className="flex justify-between text-slate-600">
-                        <span>AIT Payable</span>
+                        <span>Adv Tax Payable</span>
                         <span>{formatPKR(invoiceAitPayableTotal)}</span>
                       </div>
                     </>
                   )}
-                  <div className="flex justify-between font-bold text-base border-t pt-1">
-                    <span>Total</span>
+                  <div className="flex justify-between font-semibold border-t pt-1">
+                    <span>Invoice Total</span>
                     <span>{formatPKR(invoiceTotal)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600 pt-1">
+                    <Label className="text-xs">Previous Payable</Label>
+                    <Input type="number" step="0.01" className="w-32 h-7 text-xs text-right"
+                      value={previousPayable}
+                      onChange={e => setPreviousPayable(e.target.value)} />
+                  </div>
+                  <div className="flex justify-between font-bold text-base border-t pt-1">
+                    <span>Grand Total</span>
+                    <span>{formatPKR(invoiceGrandTotal)}</span>
                   </div>
                 </div>
               </div>
             )}
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setShowInvoiceForm(false); setItems([]) }}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => { setShowInvoiceForm(false); setItems([]); setPreviousPayable('0') }}>Cancel</Button>
               <Button size="sm" onClick={createInvoice} disabled={savingInvoice || items.length === 0}>
                 {savingInvoice ? 'Creating...' : `Create Invoice (${formatPKR(invoiceTotal)})`}
               </Button>
@@ -491,18 +557,33 @@ export default function SupplierDetailPage() {
                           <span>{item.quantity + item.bonusQuantity} × {formatPKR(item.purchasePrice)} = {formatPKR(item.lineTotal)}</span>
                         </div>
                       ))}
-                      {(Number(inv.aitCollectibleTotal) > 0 || Number(inv.aitPayableTotal) > 0) && (
+                      {(Number(inv.salesTaxTotal) > 0 || Number(inv.aitCollectibleTotal) > 0 || Number(inv.aitPayableTotal) > 0) && (
                         <div className="pt-1 mt-1 border-t space-y-0.5">
+                          {Number(inv.salesTaxTotal) > 0 && (
+                            <div className="flex justify-between text-xs text-slate-500">
+                              <span>Total Sales Tax</span><span>{formatPKR(inv.salesTaxTotal)}</span>
+                            </div>
+                          )}
                           {Number(inv.aitCollectibleTotal) > 0 && (
                             <div className="flex justify-between text-xs text-slate-500">
-                              <span>AIT Collectible</span><span>{formatPKR(inv.aitCollectibleTotal)}</span>
+                              <span>Adv Tax Collectible</span><span className="text-red-600">-{formatPKR(inv.aitCollectibleTotal)}</span>
                             </div>
                           )}
                           {Number(inv.aitPayableTotal) > 0 && (
                             <div className="flex justify-between text-xs text-slate-500">
-                              <span>AIT Payable</span><span>{formatPKR(inv.aitPayableTotal)}</span>
+                              <span>Adv Tax Payable</span><span>{formatPKR(inv.aitPayableTotal)}</span>
                             </div>
                           )}
+                        </div>
+                      )}
+                      {Number(inv.previousPayable) > 0 && (
+                        <div className="pt-1 mt-1 border-t space-y-0.5">
+                          <div className="flex justify-between text-xs text-slate-500">
+                            <span>Previous Payable</span><span>{formatPKR(inv.previousPayable)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs font-semibold">
+                            <span>Grand Total</span><span>{formatPKR(inv.grandTotal)}</span>
+                          </div>
                         </div>
                       )}
                     </div>

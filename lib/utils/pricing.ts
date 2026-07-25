@@ -40,27 +40,26 @@ interface PurchasePriceInput {
   tradePrice: number
   discountPercent: number
   tradeOfferPercent: number
-  salesTax: number
 }
 
 /**
- * Purchase price per unit, used for inventory/batch costing:
- *   ((100 − combined discount%) / 100) × Trade Price + Sales Tax
+ * Purchase price per unit, used for inventory/batch costing (pure cost of goods, no taxes):
+ *   ((100 − combined discount%) / 100) × Trade Price
  * Discount% and Trade Offer% (from bonus quantity) are two successive, independent
  * reductions off Trade Price, so they compound multiplicatively rather than being summed —
  * (1 − Discount%/100) × (1 − TradeOffer%/100) — otherwise the invoice value would shift
  * depending on bonus quantity even when Discount% alone should keep it fixed.
- * Sales Tax is a flat Rs value per unit (not a rate), added directly.
- * Advance Income Tax (Collectible/Payable) is NOT part of Purchase Price — see calcAitAmount.
+ * Sales Tax and Advance Income Tax (Collectible/Payable) are NOT part of Purchase Price —
+ * they're calculated separately and totalled at the invoice level instead (see calcSalesTaxAmount,
+ * calcAitAmount).
  */
 export function calcPurchasePrice({
   tradePrice,
   discountPercent,
   tradeOfferPercent,
-  salesTax,
 }: PurchasePriceInput): number {
   const combinedDiscountFactor = (1 - discountPercent / 100) * (1 - tradeOfferPercent / 100)
-  return tradePrice * combinedDiscountFactor + salesTax
+  return tradePrice * combinedDiscountFactor
 }
 
 /**
@@ -70,4 +69,9 @@ export function calcPurchasePrice({
  */
 export function calcAitAmount(tradePrice: number, aitPercent: number, totalQuantity: number): number {
   return tradePrice * (aitPercent / 100) * totalQuantity
+}
+
+/** Total Sales Tax owed on a purchase invoice line — Sales Tax is a flat Rs value per unit. */
+export function calcSalesTaxAmount(salesTax: number, totalQuantity: number): number {
+  return salesTax * totalQuantity
 }

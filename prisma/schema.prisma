@@ -46,8 +46,11 @@ model PurchaseInvoice {
   invoiceDate         DateTime
   dueDate             DateTime?
   totalAmount         Decimal               @default(0) @db.Decimal(10, 2)
+  salesTaxTotal       Decimal               @default(0) @db.Decimal(10, 2)
   aitCollectibleTotal Decimal               @default(0) @db.Decimal(10, 2)
   aitPayableTotal     Decimal               @default(0) @db.Decimal(10, 2)
+  previousPayable     Decimal               @default(0) @db.Decimal(10, 2)
+  grandTotal          Decimal               @default(0) @db.Decimal(10, 2)
   status              String                @default("UNPAID") // UNPAID | PAID | PARTIAL
   notes               String?
   items               PurchaseInvoiceItem[]
@@ -74,6 +77,7 @@ model PurchaseInvoiceItem {
   discountPercent       Decimal         @default(0) @db.Decimal(5, 2)
   tradeOfferPercent     Decimal         @default(0) @db.Decimal(5, 2)
   salesTax              Decimal         @default(0) @db.Decimal(10, 2)
+  salesTaxAmount        Decimal         @default(0) @db.Decimal(10, 2)
   aitCollectiblePercent Decimal         @default(0) @db.Decimal(5, 2)
   aitPayablePercent     Decimal         @default(0) @db.Decimal(5, 2)
   aitCollectibleAmount  Decimal         @default(0) @db.Decimal(10, 2)

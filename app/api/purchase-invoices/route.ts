@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount } from '@/lib/utils/pricing'
+import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount, calcSalesTaxAmount } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -93,14 +93,14 @@ export async function POST(req: NextRequest) {
     // Bonus/free trade-offer stock is spread across all units received as an equivalent discount.
     const tradeOfferPercent = calcTradeOfferPercent(item.quantity, bonusQuantity)
 
-    // Purchase Price drives inventory/batch costing — AIT is a tax pass-through, not a cost of goods,
-    // so it's excluded here and totalled separately at the invoice level below.
+    // Purchase Price drives inventory/batch costing — pure cost of goods, no taxes.
+    // Sales Tax and AIT are tax pass-throughs, excluded here and totalled at the invoice level below.
     const purchasePrice = calcPurchasePrice({
       tradePrice: item.tradePrice,
       discountPercent,
       tradeOfferPercent,
-      salesTax,
     })
+    const salesTaxAmount = calcSalesTaxAmount(salesTax, totalQuantity)
     const aitCollectibleAmount = calcAitAmount(item.tradePrice, aitCollectiblePercent, totalQuantity)
     const aitPayableAmount = calcAitAmount(item.tradePrice, aitPayablePercent, totalQuantity)
 
@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
       discountPercent,
       tradeOfferPercent,
       salesTax,
+      salesTaxAmount,
       aitCollectiblePercent,
       aitPayablePercent,
       aitCollectibleAmount,
@@ -125,10 +126,14 @@ export async function POST(req: NextRequest) {
     }
   })
 
+  // Total (exc. taxes) + Total Sales Tax − Adv Tax Collectible + Adv Tax Payable = this invoice's amount.
   const subTotal = computedItems.reduce((sum, item) => sum + item.lineTotal, 0)
+  const salesTaxTotal = computedItems.reduce((sum, item) => sum + item.salesTaxAmount, 0)
   const aitCollectibleTotal = computedItems.reduce((sum, item) => sum + item.aitCollectibleAmount, 0)
   const aitPayableTotal = computedItems.reduce((sum, item) => sum + item.aitPayableAmount, 0)
-  const totalAmount = subTotal + aitCollectibleTotal + aitPayableTotal
+  const totalAmount = subTotal + salesTaxTotal - aitCollectibleTotal + aitPayableTotal
+  const previousPayable = Number(body.previousPayable) || 0
+  const grandTotal = totalAmount + previousPayable
   const invoiceNumber = `SP-PUR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`
 
   const invoice = await prisma.$transaction(async (tx) => {
@@ -139,8 +144,11 @@ export async function POST(req: NextRequest) {
         invoiceDate: new Date(body.invoiceDate ?? new Date()),
         dueDate: body.dueDate ? new Date(body.dueDate) : null,
         totalAmount,
+        salesTaxTotal,
         aitCollectibleTotal,
         aitPayableTotal,
+        previousPayable,
+        grandTotal,
         status: 'UNPAID',
         notes: body.notes ?? null,
         items: {
@@ -155,6 +163,7 @@ export async function POST(req: NextRequest) {
             discountPercent: item.discountPercent,
             tradeOfferPercent: item.tradeOfferPercent,
             salesTax: item.salesTax,
+            salesTaxAmount: item.salesTaxAmount,
             aitCollectiblePercent: item.aitCollectiblePercent,
             aitPayablePercent: item.aitPayablePercent,
             aitCollectibleAmount: item.aitCollectibleAmount,
