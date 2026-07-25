@@ -25,11 +25,13 @@ interface PurchaseInvoice {
   items: {
     id: string
     quantity: number
+    bonusQuantity: number
     batchNumber: string
     expiryDate: string
     tradePrice: number
     mrp: number | null
     discountPercent: number
+    tradeOfferPercent: number
     salesTaxPercent: number
     aitCollectiblePercent: number
     aitPayablePercent: number
@@ -213,16 +215,18 @@ export default function PurchaseInvoiceDetailPage() {
         <CardHeader><CardTitle className="text-base">Items ({invoice.items.length})</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[1050px]">
               <thead>
                 <tr className="border-b bg-slate-50">
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Batch #</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Expiry</th>
                   <th className="text-center px-4 py-3 font-medium text-slate-600">Qty</th>
+                  <th className="text-center px-4 py-3 font-medium text-slate-600">Bonus</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">MRP</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Trade Price</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Disc %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Tax %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-C %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-P %</th>
@@ -240,9 +244,11 @@ export default function PurchaseInvoiceDetailPage() {
                     <td className="px-4 py-2.5 font-mono text-xs">{item.batchNumber}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">{formatDate(item.expiryDate)}</td>
                     <td className="px-4 py-2.5 text-center">{item.quantity}</td>
+                    <td className="px-4 py-2.5 text-center">{item.bonusQuantity > 0 ? item.bonusQuantity : '—'}</td>
                     <td className="px-4 py-2.5 text-right">{item.mrp != null ? formatPKR(item.mrp) : '—'}</td>
                     <td className="px-4 py-2.5 text-right">{formatPKR(item.tradePrice)}</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.discountPercent)}%</td>
+                    <td className="px-4 py-2.5 text-right">{Number(item.tradeOfferPercent).toFixed(2)}%</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.salesTaxPercent)}%</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.aitCollectiblePercent)}%</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.aitPayablePercent)}%</td>
@@ -251,7 +257,7 @@ export default function PurchaseInvoiceDetailPage() {
                   </tr>
                 ))}
                 <tr className="font-bold border-t">
-                  <td colSpan={11} className="px-4 py-3 text-right">Total</td>
+                  <td colSpan={13} className="px-4 py-3 text-right">Total</td>
                   <td className="px-4 py-3 text-right text-base">{formatPKR(invoice.totalAmount)}</td>
                 </tr>
               </tbody>

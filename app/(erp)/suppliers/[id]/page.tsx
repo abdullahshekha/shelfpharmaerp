@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
-import { calcPurchasePrice } from '@/lib/utils/pricing'
+import { calcPurchasePrice, calcTradeOfferPercent } from '@/lib/utils/pricing'
 import { ArrowLeft, Plus, X, Search } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -26,6 +26,7 @@ interface InvoiceItem {
   batchNumber: string
   expiryDate: string
   quantity: number
+  bonusQuantity: number
   tradePrice: number
   mrp: string
   discountPercent: number
@@ -44,7 +45,7 @@ interface PurchaseInvoice {
   status: string
   notes: string | null
   items: {
-    id: string; quantity: number; purchasePrice: number; lineTotal: number
+    id: string; quantity: number; bonusQuantity: number; purchasePrice: number; lineTotal: number
     medicine: { name: string; code: string }
   }[]
   payments: Payment[]
@@ -67,13 +68,18 @@ const STATUS_COLORS: Record<string, string> = {
 const emptyPayment = { amount: '', method: 'CASH', reference: '', paymentDate: new Date().toISOString().slice(0, 10) }
 
 function itemPurchasePrice(item: InvoiceItem, isFiler: boolean) {
+  const tradeOfferPercent = calcTradeOfferPercent(item.quantity, item.bonusQuantity)
   return calcPurchasePrice({
     tradePrice: item.tradePrice,
-    discountPercent: item.discountPercent,
+    discountPercent: item.discountPercent + tradeOfferPercent,
     salesTaxPercent: item.salesTaxApplicable ? item.salesTaxPercent : 0,
     aitCollectiblePercent: isFiler ? item.aitCollectiblePercent : 0,
     aitPayablePercent: isFiler ? item.aitPayablePercent : 0,
   })
+}
+
+function itemTotalQuantity(item: InvoiceItem) {
+  return item.quantity + item.bonusQuantity
 }
 
 export default function SupplierDetailPage() {
@@ -126,6 +132,7 @@ export default function SupplierDetailPage() {
       batchNumber: '',
       expiryDate: '',
       quantity: 1,
+      bonusQuantity: 0,
       tradePrice: med.tradePrice ?? 0,
       mrp: med.mrp != null ? String(med.mrp) : '',
       discountPercent: 0,
@@ -164,6 +171,7 @@ export default function SupplierDetailPage() {
           batchNumber: i.batchNumber,
           expiryDate: i.expiryDate,
           quantity: i.quantity,
+          bonusQuantity: i.bonusQuantity,
           tradePrice: i.tradePrice,
           mrp: i.mrp ? parseFloat(i.mrp) : null,
           discountPercent: i.discountPercent,
@@ -205,7 +213,7 @@ export default function SupplierDetailPage() {
     setSavingPayment(false)
   }
 
-  const invoiceTotal = items.reduce((s, i) => s + i.quantity * itemPurchasePrice(i, isFiler), 0)
+  const invoiceTotal = items.reduce((s, i) => s + itemTotalQuantity(i) * itemPurchasePrice(i, isFiler), 0)
 
   if (loading) return <div className="animate-pulse p-8 text-slate-400">Loading...</div>
   if (!supplier) return <div className="p-8 text-slate-400">Supplier not found.</div>
@@ -304,6 +312,7 @@ export default function SupplierDetailPage() {
                       <th className="text-left py-1.5 px-1 w-28">Batch #</th>
                       <th className="text-left py-1.5 px-1 w-32">Expiry</th>
                       <th className="text-center py-1.5 px-1 w-16">Qty</th>
+                      <th className="text-center py-1.5 px-1 w-16">Bonus Qty</th>
                       <th className="text-right py-1.5 px-1 w-20">MRP</th>
                       <th className="text-right py-1.5 px-1 w-24">Trade Price</th>
                       <th className="text-right py-1.5 px-1 w-16">Disc %</th>
@@ -335,6 +344,11 @@ export default function SupplierDetailPage() {
                             <Input type="number" min="1" className="w-16 h-7 text-xs text-center"
                               value={item.quantity}
                               onChange={e => updateItem(item.medicineId, { quantity: parseInt(e.target.value) || 1 })} />
+                          </td>
+                          <td className="py-1.5 px-1 text-center">
+                            <Input type="number" min="0" className="w-16 h-7 text-xs text-center"
+                              value={item.bonusQuantity}
+                              onChange={e => updateItem(item.medicineId, { bonusQuantity: parseInt(e.target.value) || 0 })} />
                           </td>
                           <td className="py-1.5 px-1">
                             <Input type="number" step="0.01" className="w-20 h-7 text-xs text-right"
@@ -375,7 +389,7 @@ export default function SupplierDetailPage() {
                             </td>
                           )}
                           <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice)}</td>
-                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice * item.quantity)}</td>
+                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice * itemTotalQuantity(item))}</td>
                           <td className="py-1.5 px-1">
                             <button className="text-slate-400 hover:text-red-500"
                               onClick={() => setItems(prev => prev.filter(i => i.medicineId !== item.medicineId))}>
@@ -386,7 +400,7 @@ export default function SupplierDetailPage() {
                       )
                     })}
                     <tr>
-                      <td colSpan={isFiler ? 11 : 9} className="py-2 text-right font-semibold">Total</td>
+                      <td colSpan={isFiler ? 12 : 10} className="py-2 text-right font-semibold">Total</td>
                       <td className="py-2 text-right font-bold whitespace-nowrap">{formatPKR(invoiceTotal)}</td>
                       <td />
                     </tr>
@@ -433,8 +447,11 @@ export default function SupplierDetailPage() {
                     <div className="bg-slate-50 rounded p-2 space-y-1">
                       {inv.items.map(item => (
                         <div key={item.id} className="flex justify-between text-xs text-slate-600">
-                          <span>{item.medicine.name}</span>
-                          <span>{item.quantity} × {formatPKR(item.purchasePrice)} = {formatPKR(item.lineTotal)}</span>
+                          <span>
+                            {item.medicine.name}
+                            {item.bonusQuantity > 0 && <span className="text-slate-400"> ({item.quantity} + {item.bonusQuantity} bonus)</span>}
+                          </span>
+                          <span>{item.quantity + item.bonusQuantity} × {formatPKR(item.purchasePrice)} = {formatPKR(item.lineTotal)}</span>
                         </div>
                       ))}
                     </div>

@@ -66,9 +66,11 @@ model PurchaseInvoiceItem {
   batchNumber           String
   expiryDate            DateTime
   quantity              Int
+  bonusQuantity         Int             @default(0)
   tradePrice            Decimal         @db.Decimal(10, 2)
   mrp                   Decimal?        @db.Decimal(10, 2)
   discountPercent       Decimal         @default(0) @db.Decimal(5, 2)
+  tradeOfferPercent     Decimal         @default(0) @db.Decimal(5, 2)
   salesTaxPercent       Decimal         @default(0) @db.Decimal(5, 2)
   aitCollectiblePercent Decimal         @default(0) @db.Decimal(5, 2)
   aitPayablePercent     Decimal         @default(0) @db.Decimal(5, 2)

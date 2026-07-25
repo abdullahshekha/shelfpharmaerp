@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { calcPurchasePrice } from '@/lib/utils/pricing'
+import { calcPurchasePrice, calcTradeOfferPercent } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +46,7 @@ interface PurchaseInvoiceItemInput {
   batchNumber: string
   expiryDate: string
   quantity: number
+  bonusQuantity?: number
   tradePrice: number
   mrp?: number | null
   discountPercent?: number
@@ -86,10 +87,15 @@ export async function POST(req: NextRequest) {
     const aitCollectiblePercent = supplier.isFiler ? (item.aitCollectiblePercent ?? 0) : 0
     const aitPayablePercent = supplier.isFiler ? (item.aitPayablePercent ?? 0) : 0
     const discountPercent = item.discountPercent ?? 0
+    const bonusQuantity = item.bonusQuantity ?? 0
+    const totalQuantity = item.quantity + bonusQuantity
+
+    // Bonus/free trade-offer stock is spread across all units received as an equivalent discount.
+    const tradeOfferPercent = calcTradeOfferPercent(item.quantity, bonusQuantity)
 
     const purchasePrice = calcPurchasePrice({
       tradePrice: item.tradePrice,
-      discountPercent,
+      discountPercent: discountPercent + tradeOfferPercent,
       salesTaxPercent,
       aitCollectiblePercent,
       aitPayablePercent,
@@ -100,14 +106,17 @@ export async function POST(req: NextRequest) {
       batchNumber: item.batchNumber,
       expiryDate: new Date(item.expiryDate),
       quantity: item.quantity,
+      bonusQuantity,
       tradePrice: item.tradePrice,
       mrp: item.mrp ?? null,
       discountPercent,
+      tradeOfferPercent,
       salesTaxPercent,
       aitCollectiblePercent,
       aitPayablePercent,
       purchasePrice,
-      lineTotal: purchasePrice * item.quantity,
+      lineTotal: purchasePrice * totalQuantity,
+      totalQuantity,
     }
   })
 
@@ -124,19 +133,36 @@ export async function POST(req: NextRequest) {
         totalAmount,
         status: 'UNPAID',
         notes: body.notes ?? null,
-        items: { create: computedItems },
+        items: {
+          create: computedItems.map((item) => ({
+            medicineId: item.medicineId,
+            batchNumber: item.batchNumber,
+            expiryDate: item.expiryDate,
+            quantity: item.quantity,
+            bonusQuantity: item.bonusQuantity,
+            tradePrice: item.tradePrice,
+            mrp: item.mrp,
+            discountPercent: item.discountPercent,
+            tradeOfferPercent: item.tradeOfferPercent,
+            salesTaxPercent: item.salesTaxPercent,
+            aitCollectiblePercent: item.aitCollectiblePercent,
+            aitPayablePercent: item.aitPayablePercent,
+            purchasePrice: item.purchasePrice,
+            lineTotal: item.lineTotal,
+          })),
+        },
       },
       include: { items: true },
     })
 
-    // Receiving a purchase invoice is how new stock (a batch) enters inventory.
+    // Receiving a purchase invoice is how new stock (a batch) enters inventory — actual + bonus quantity together.
     await tx.medicineBatch.createMany({
       data: computedItems.map((item) => ({
         medicineId: item.medicineId,
         batchNumber: item.batchNumber,
         expiryDate: item.expiryDate,
-        quantityIn: item.quantity,
-        currentQty: item.quantity,
+        quantityIn: item.totalQuantity,
+        currentQty: item.totalQuantity,
         purchasePrice: item.purchasePrice,
         tradePrice: item.tradePrice,
         mrp: item.mrp,

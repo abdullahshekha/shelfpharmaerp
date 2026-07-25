@@ -50,3 +50,14 @@ export function calcPurchasePrice({
   const aitPayable = tradePrice * (aitPayablePercent / 100)
   return discounted + salesTax + aitCollectible + aitPayable
 }
+
+/**
+ * Converts a bonus/free-goods trade offer into an equivalent discount percentage,
+ * so its cost can be spread evenly across all units received (actual + bonus).
+ * e.g. 10 actual + 2 bonus = paying for 10 units but stocking 12, i.e. a 2/12 ≈ 16.67% discount per unit.
+ */
+export function calcTradeOfferPercent(actualQuantity: number, bonusQuantity: number): number {
+  const totalQuantity = actualQuantity + bonusQuantity
+  if (totalQuantity <= 0 || bonusQuantity <= 0) return 0
+  return (bonusQuantity / totalQuantity) * 100
+}
