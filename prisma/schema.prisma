@@ -39,19 +39,21 @@ model Supplier {
 }
 
 model PurchaseInvoice {
-  id            String                @id @default(cuid())
-  invoiceNumber String                @unique
-  supplierId    String
-  supplier      Supplier              @relation(fields: [supplierId], references: [id])
-  invoiceDate   DateTime
-  dueDate       DateTime?
-  totalAmount   Decimal               @default(0) @db.Decimal(10, 2)
-  status        String                @default("UNPAID") // UNPAID | PAID | PARTIAL
-  notes         String?
-  items         PurchaseInvoiceItem[]
-  payments      SupplierPayment[]
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  id                  String                @id @default(cuid())
+  invoiceNumber       String                @unique
+  supplierId          String
+  supplier            Supplier              @relation(fields: [supplierId], references: [id])
+  invoiceDate         DateTime
+  dueDate             DateTime?
+  totalAmount         Decimal               @default(0) @db.Decimal(10, 2)
+  aitCollectibleTotal Decimal               @default(0) @db.Decimal(10, 2)
+  aitPayableTotal     Decimal               @default(0) @db.Decimal(10, 2)
+  status              String                @default("UNPAID") // UNPAID | PAID | PARTIAL
+  notes               String?
+  items               PurchaseInvoiceItem[]
+  payments            SupplierPayment[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   @@index([supplierId])
   @@index([status])
@@ -71,9 +73,11 @@ model PurchaseInvoiceItem {
   mrp                   Decimal?        @db.Decimal(10, 2)
   discountPercent       Decimal         @default(0) @db.Decimal(5, 2)
   tradeOfferPercent     Decimal         @default(0) @db.Decimal(5, 2)
-  salesTaxPercent       Decimal         @default(0) @db.Decimal(5, 2)
+  salesTax              Decimal         @default(0) @db.Decimal(10, 2)
   aitCollectiblePercent Decimal         @default(0) @db.Decimal(5, 2)
   aitPayablePercent     Decimal         @default(0) @db.Decimal(5, 2)
+  aitCollectibleAmount  Decimal         @default(0) @db.Decimal(10, 2)
+  aitPayableAmount      Decimal         @default(0) @db.Decimal(10, 2)
   purchasePrice         Decimal         @db.Decimal(10, 2)
   lineTotal             Decimal         @db.Decimal(10, 2)
 

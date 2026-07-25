@@ -25,32 +25,6 @@ export function getEffectivePrice<T extends BatchForPricing>(batches: T[]): { tr
   }
 }
 
-interface PurchasePriceInput {
-  tradePrice: number
-  discountPercent: number
-  salesTaxPercent: number
-  aitCollectiblePercent: number
-  aitPayablePercent: number
-}
-
-/**
- * Purchase price after discount and taxes, all computed as percentages of Trade Price:
- * discounted Trade Price + Sales Tax + Advance Income Tax (Collectible) + Advance Income Tax (Payable).
- */
-export function calcPurchasePrice({
-  tradePrice,
-  discountPercent,
-  salesTaxPercent,
-  aitCollectiblePercent,
-  aitPayablePercent,
-}: PurchasePriceInput): number {
-  const discounted = tradePrice * (1 - discountPercent / 100)
-  const salesTax = tradePrice * (salesTaxPercent / 100)
-  const aitCollectible = tradePrice * (aitCollectiblePercent / 100)
-  const aitPayable = tradePrice * (aitPayablePercent / 100)
-  return discounted + salesTax + aitCollectible + aitPayable
-}
-
 /**
  * Converts a bonus/free-goods trade offer into an equivalent discount percentage,
  * so its cost can be spread evenly across all units received (actual + bonus).
@@ -60,4 +34,40 @@ export function calcTradeOfferPercent(actualQuantity: number, bonusQuantity: num
   const totalQuantity = actualQuantity + bonusQuantity
   if (totalQuantity <= 0 || bonusQuantity <= 0) return 0
   return (bonusQuantity / totalQuantity) * 100
+}
+
+interface PurchasePriceInput {
+  tradePrice: number
+  discountPercent: number
+  tradeOfferPercent: number
+  salesTax: number
+}
+
+/**
+ * Purchase price per unit, used for inventory/batch costing:
+ *   ((100 − combined discount%) / 100) × Trade Price + Sales Tax
+ * Discount% and Trade Offer% (from bonus quantity) are two successive, independent
+ * reductions off Trade Price, so they compound multiplicatively rather than being summed —
+ * (1 − Discount%/100) × (1 − TradeOffer%/100) — otherwise the invoice value would shift
+ * depending on bonus quantity even when Discount% alone should keep it fixed.
+ * Sales Tax is a flat Rs value per unit (not a rate), added directly.
+ * Advance Income Tax (Collectible/Payable) is NOT part of Purchase Price — see calcAitAmount.
+ */
+export function calcPurchasePrice({
+  tradePrice,
+  discountPercent,
+  tradeOfferPercent,
+  salesTax,
+}: PurchasePriceInput): number {
+  const combinedDiscountFactor = (1 - discountPercent / 100) * (1 - tradeOfferPercent / 100)
+  return tradePrice * combinedDiscountFactor + salesTax
+}
+
+/**
+ * Advance Income Tax (Collectible or Payable) owed on a purchase invoice line —
+ * a rate off Trade Price applied across all units received, kept separate from
+ * Purchase Price and totalled at the invoice level instead.
+ */
+export function calcAitAmount(tradePrice: number, aitPercent: number, totalQuantity: number): number {
+  return tradePrice * (aitPercent / 100) * totalQuantity
 }

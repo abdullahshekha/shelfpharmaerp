@@ -5,8 +5,11 @@ import { useParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
-import { ArrowLeft, Package, Trash2 } from 'lucide-react'
+import { ArrowLeft, Package, Trash2, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
@@ -34,7 +37,8 @@ interface Medicine {
   bonusNote: string | null
   salesTaxApplicable: boolean
   minStockLevel: number
-  manufacturer: { name: string }
+  manufacturerId: string
+  manufacturer: { id: string; name: string }
   batches: Batch[]
 }
 
@@ -42,15 +46,69 @@ export default function MedicineDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [medicine, setMedicine] = useState<Medicine | null>(null)
   const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [manufacturers, setManufacturers] = useState<{ id: string; name: string }[]>([])
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [editForm, setEditForm] = useState({
+    name: '', genericName: '', manufacturerId: '', category: '', packSize: '',
+    salesTaxApplicable: 'false', minStockLevel: '10',
+  })
 
   const fetchMedicine = () => {
     fetch(`/api/inventory/${id}`)
       .then(r => r.json())
-      .then(j => setMedicine(j.data))
+      .then(j => {
+        const m: Medicine = j.data
+        setMedicine(m)
+        setEditForm({
+          name: m.name ?? '',
+          genericName: m.genericName ?? '',
+          manufacturerId: m.manufacturerId ?? '',
+          category: m.category ?? '',
+          packSize: m.packSize ?? '',
+          salesTaxApplicable: m.salesTaxApplicable ? 'true' : 'false',
+          minStockLevel: String(m.minStockLevel ?? 10),
+        })
+      })
       .finally(() => setLoading(false))
   }
 
   useEffect(() => { fetchMedicine() }, [id])
+
+  useEffect(() => {
+    fetch('/api/manufacturers').then(r => r.json()).then(j => setManufacturers(j.data ?? []))
+    fetch('/api/categories').then(r => r.json()).then(j => setCategories(j.data ?? []))
+  }, [])
+
+  const saveEdit = async () => {
+    if (!editForm.name.trim() || !editForm.manufacturerId) {
+      toast.error('Name and manufacturer are required')
+      return
+    }
+    setSaving(true)
+    const res = await fetch(`/api/inventory/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...editForm,
+        salesTaxApplicable: editForm.salesTaxApplicable === 'true',
+        minStockLevel: parseInt(editForm.minStockLevel) || 10,
+      }),
+    })
+    if (res.ok) {
+      toast.success('Item updated')
+      setEditing(false)
+      fetchMedicine()
+    } else {
+      const j = await res.json()
+      toast.error(j.error ?? 'Failed to save changes')
+    }
+    setSaving(false)
+  }
+
+  const set = (field: keyof typeof editForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setEditForm(f => ({ ...f, [field]: e.target.value }))
 
   const deleteBatch = async (batchId: string) => {
     if (!confirm('Delete this batch?')) return
@@ -80,7 +138,85 @@ export default function MedicineDetailPage() {
           <h1 className="text-2xl font-bold text-slate-900">{medicine.name}</h1>
           <p className="text-slate-500 text-sm font-mono">{medicine.code}</p>
         </div>
+        <Button size="sm" variant="outline" className="ml-auto gap-1" onClick={() => setEditing(true)}>
+          <Pencil size={14} /> Edit
+        </Button>
       </div>
+
+      {/* Inline Edit Form */}
+      {editing && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="pt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="font-semibold text-blue-900">Edit Item Details</p>
+              <button onClick={() => setEditing(false)}><X size={16} className="text-slate-400" /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs">Name *</Label>
+                <Input className="h-8 text-sm bg-white" value={editForm.name}
+                  onChange={e => setEditForm(f => ({ ...f, name: e.target.value.toUpperCase() }))} />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs">Generic Name</Label>
+                <Input className="h-8 text-sm bg-white" value={editForm.genericName} onChange={set('genericName')} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Manufacturer *</Label>
+                <Select
+                  items={manufacturers.map(m => ({ value: m.id, label: m.name }))}
+                  value={editForm.manufacturerId || undefined}
+                  onValueChange={v => setEditForm(f => ({ ...f, manufacturerId: v ?? '' }))}
+                >
+                  <SelectTrigger className="h-8 text-sm bg-white w-full"><SelectValue placeholder="Select manufacturer" /></SelectTrigger>
+                  <SelectContent>
+                    {manufacturers.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Category</Label>
+                <Select
+                  items={categories.map(c => ({ value: c.name, label: c.name }))}
+                  value={editForm.category || undefined}
+                  onValueChange={v => setEditForm(f => ({ ...f, category: v ?? '' }))}
+                >
+                  <SelectTrigger className="h-8 text-sm bg-white w-full"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Pack Size</Label>
+                <Input className="h-8 text-sm bg-white" value={editForm.packSize} onChange={set('packSize')} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Min Stock Alert</Label>
+                <Input className="h-8 text-sm bg-white" type="number" value={editForm.minStockLevel} onChange={set('minStockLevel')} />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs">Sales Tax Applicable *</Label>
+                <Select
+                  items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
+                  value={editForm.salesTaxApplicable}
+                  onValueChange={v => setEditForm(f => ({ ...f, salesTaxApplicable: v ?? 'false' }))}
+                >
+                  <SelectTrigger className="h-8 text-sm bg-white w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setEditing(false)}>Cancel</Button>
+              <Button size="sm" onClick={saveEdit} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         <Card>

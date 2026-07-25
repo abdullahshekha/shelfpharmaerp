@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
-import { calcPurchasePrice, calcTradeOfferPercent } from '@/lib/utils/pricing'
+import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount } from '@/lib/utils/pricing'
 import { ArrowLeft, Plus, X, Search } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -30,7 +30,7 @@ interface InvoiceItem {
   tradePrice: number
   mrp: string
   discountPercent: number
-  salesTaxPercent: number
+  salesTax: number
   aitCollectiblePercent: number
   aitPayablePercent: number
 }
@@ -44,6 +44,8 @@ interface PurchaseInvoice {
   totalAmount: number
   status: string
   notes: string | null
+  aitCollectibleTotal: number
+  aitPayableTotal: number
   items: {
     id: string; quantity: number; bonusQuantity: number; purchasePrice: number; lineTotal: number
     medicine: { name: string; code: string }
@@ -67,19 +69,28 @@ const STATUS_COLORS: Record<string, string> = {
 
 const emptyPayment = { amount: '', method: 'CASH', reference: '', paymentDate: new Date().toISOString().slice(0, 10) }
 
-function itemPurchasePrice(item: InvoiceItem, isFiler: boolean) {
+function itemPurchasePrice(item: InvoiceItem) {
   const tradeOfferPercent = calcTradeOfferPercent(item.quantity, item.bonusQuantity)
   return calcPurchasePrice({
     tradePrice: item.tradePrice,
-    discountPercent: item.discountPercent + tradeOfferPercent,
-    salesTaxPercent: item.salesTaxApplicable ? item.salesTaxPercent : 0,
-    aitCollectiblePercent: isFiler ? item.aitCollectiblePercent : 0,
-    aitPayablePercent: isFiler ? item.aitPayablePercent : 0,
+    discountPercent: item.discountPercent,
+    tradeOfferPercent,
+    salesTax: item.salesTaxApplicable ? item.salesTax : 0,
   })
 }
 
 function itemTotalQuantity(item: InvoiceItem) {
   return item.quantity + item.bonusQuantity
+}
+
+function itemAitCollectibleAmount(item: InvoiceItem, isFiler: boolean) {
+  if (!isFiler) return 0
+  return calcAitAmount(item.tradePrice, item.aitCollectiblePercent, itemTotalQuantity(item))
+}
+
+function itemAitPayableAmount(item: InvoiceItem, isFiler: boolean) {
+  if (!isFiler) return 0
+  return calcAitAmount(item.tradePrice, item.aitPayablePercent, itemTotalQuantity(item))
 }
 
 export default function SupplierDetailPage() {
@@ -136,7 +147,7 @@ export default function SupplierDetailPage() {
       tradePrice: med.tradePrice ?? 0,
       mrp: med.mrp != null ? String(med.mrp) : '',
       discountPercent: 0,
-      salesTaxPercent: 0,
+      salesTax: 0,
       aitCollectiblePercent: 0,
       aitPayablePercent: 0,
     }])
@@ -175,7 +186,7 @@ export default function SupplierDetailPage() {
           tradePrice: i.tradePrice,
           mrp: i.mrp ? parseFloat(i.mrp) : null,
           discountPercent: i.discountPercent,
-          salesTaxPercent: i.salesTaxApplicable ? i.salesTaxPercent : 0,
+          salesTax: i.salesTaxApplicable ? i.salesTax : 0,
           aitCollectiblePercent: isFiler ? i.aitCollectiblePercent : 0,
           aitPayablePercent: isFiler ? i.aitPayablePercent : 0,
         })),
@@ -213,7 +224,10 @@ export default function SupplierDetailPage() {
     setSavingPayment(false)
   }
 
-  const invoiceTotal = items.reduce((s, i) => s + itemTotalQuantity(i) * itemPurchasePrice(i, isFiler), 0)
+  const invoiceSubTotal = items.reduce((s, i) => s + itemTotalQuantity(i) * itemPurchasePrice(i), 0)
+  const invoiceAitCollectibleTotal = items.reduce((s, i) => s + itemAitCollectibleAmount(i, isFiler), 0)
+  const invoiceAitPayableTotal = items.reduce((s, i) => s + itemAitPayableAmount(i, isFiler), 0)
+  const invoiceTotal = invoiceSubTotal + invoiceAitCollectibleTotal + invoiceAitPayableTotal
 
   if (loading) return <div className="animate-pulse p-8 text-slate-400">Loading...</div>
   if (!supplier) return <div className="p-8 text-slate-400">Supplier not found.</div>
@@ -279,29 +293,6 @@ export default function SupplierDetailPage() {
               </div>
             </div>
 
-            {/* Medicine search */}
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-                placeholder="Search medicine to add..."
-                className="pl-9 text-sm"
-                value={medSearch}
-                onChange={e => setMedSearch(e.target.value)}
-                onBlur={() => setTimeout(() => setShowMedDrop(false), 200)}
-              />
-              {showMedDrop && medResults.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {medResults.map(m => (
-                    <button key={m.id} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between"
-                      onMouseDown={() => addItem(m)}>
-                      <span className="font-medium">{m.name}</span>
-                      <span className="text-slate-400 font-mono text-xs">{m.code}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* Items table */}
             {items.length > 0 && (
               <div className="overflow-x-auto -mx-2 px-2">
@@ -316,7 +307,7 @@ export default function SupplierDetailPage() {
                       <th className="text-right py-1.5 px-1 w-20">MRP</th>
                       <th className="text-right py-1.5 px-1 w-24">Trade Price</th>
                       <th className="text-right py-1.5 px-1 w-16">Disc %</th>
-                      <th className="text-right py-1.5 px-1 w-16">Tax %</th>
+                      <th className="text-right py-1.5 px-1 w-20">S. Tax</th>
                       {isFiler && <th className="text-right py-1.5 px-1 w-16">AIT-C %</th>}
                       {isFiler && <th className="text-right py-1.5 px-1 w-16">AIT-P %</th>}
                       <th className="text-right py-1.5 px-1 w-24">Purchase Price</th>
@@ -326,7 +317,7 @@ export default function SupplierDetailPage() {
                   </thead>
                   <tbody>
                     {items.map(item => {
-                      const purchasePrice = itemPurchasePrice(item, isFiler)
+                      const purchasePrice = itemPurchasePrice(item)
                       return (
                         <tr key={item.medicineId} className="border-b">
                           <td className="py-1.5 pr-2 font-medium whitespace-nowrap">{item.medicineName}</td>
@@ -367,9 +358,9 @@ export default function SupplierDetailPage() {
                           </td>
                           <td className="py-1.5 px-1">
                             {item.salesTaxApplicable ? (
-                              <Input type="number" min="0" max="100" step="0.01" className="w-16 h-7 text-xs text-right"
-                                value={item.salesTaxPercent}
-                                onChange={e => updateItem(item.medicineId, { salesTaxPercent: parseFloat(e.target.value) || 0 })} />
+                              <Input type="number" min="0" step="0.01" className="w-20 h-7 text-xs text-right"
+                                value={item.salesTax}
+                                onChange={e => updateItem(item.medicineId, { salesTax: parseFloat(e.target.value) || 0 })} />
                             ) : (
                               <span className="text-slate-300 text-xs block text-right pr-1">N/A</span>
                             )}
@@ -399,13 +390,59 @@ export default function SupplierDetailPage() {
                         </tr>
                       )
                     })}
-                    <tr>
-                      <td colSpan={isFiler ? 12 : 10} className="py-2 text-right font-semibold">Total</td>
-                      <td className="py-2 text-right font-bold whitespace-nowrap">{formatPKR(invoiceTotal)}</td>
-                      <td />
-                    </tr>
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Add another medicine — kept right under the last item row for fast repeated entry */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="Search medicine to add..."
+                className="pl-9 text-sm"
+                value={medSearch}
+                onChange={e => setMedSearch(e.target.value)}
+                onBlur={() => setTimeout(() => setShowMedDrop(false), 200)}
+              />
+              {showMedDrop && medResults.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {medResults.map(m => (
+                    <button key={m.id} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between"
+                      onMouseDown={() => addItem(m)}>
+                      <span className="font-medium">{m.name}</span>
+                      <span className="text-slate-400 font-mono text-xs">{m.code}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Totals breakdown */}
+            {items.length > 0 && (
+              <div className="flex justify-end">
+                <div className="w-full sm:w-72 space-y-1 text-sm">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Subtotal</span>
+                    <span>{formatPKR(invoiceSubTotal)}</span>
+                  </div>
+                  {isFiler && (
+                    <>
+                      <div className="flex justify-between text-slate-600">
+                        <span>AIT Collectible</span>
+                        <span>{formatPKR(invoiceAitCollectibleTotal)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>AIT Payable</span>
+                        <span>{formatPKR(invoiceAitPayableTotal)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex justify-between font-bold text-base border-t pt-1">
+                    <span>Total</span>
+                    <span>{formatPKR(invoiceTotal)}</span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -454,6 +491,20 @@ export default function SupplierDetailPage() {
                           <span>{item.quantity + item.bonusQuantity} × {formatPKR(item.purchasePrice)} = {formatPKR(item.lineTotal)}</span>
                         </div>
                       ))}
+                      {(Number(inv.aitCollectibleTotal) > 0 || Number(inv.aitPayableTotal) > 0) && (
+                        <div className="pt-1 mt-1 border-t space-y-0.5">
+                          {Number(inv.aitCollectibleTotal) > 0 && (
+                            <div className="flex justify-between text-xs text-slate-500">
+                              <span>AIT Collectible</span><span>{formatPKR(inv.aitCollectibleTotal)}</span>
+                            </div>
+                          )}
+                          {Number(inv.aitPayableTotal) > 0 && (
+                            <div className="flex justify-between text-xs text-slate-500">
+                              <span>AIT Payable</span><span>{formatPKR(inv.aitPayableTotal)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Payments */}

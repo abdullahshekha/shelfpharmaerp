@@ -19,6 +19,8 @@ interface PurchaseInvoice {
   invoiceDate: string
   dueDate: string | null
   totalAmount: number
+  aitCollectibleTotal: number
+  aitPayableTotal: number
   status: string
   notes: string | null
   supplier: { id: string; name: string; type: string; phone: string | null }
@@ -32,9 +34,11 @@ interface PurchaseInvoice {
     mrp: number | null
     discountPercent: number
     tradeOfferPercent: number
-    salesTaxPercent: number
+    salesTax: number
     aitCollectiblePercent: number
     aitPayablePercent: number
+    aitCollectibleAmount: number
+    aitPayableAmount: number
     purchasePrice: number
     lineTotal: number
     medicine: { name: string; code: string; category: string | null }
@@ -135,6 +139,26 @@ export default function PurchaseInvoiceDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">Summary</CardTitle></CardHeader>
           <CardContent className="space-y-1 text-sm">
+            {(Number(invoice.aitCollectibleTotal) > 0 || Number(invoice.aitPayableTotal) > 0) && (
+              <>
+                <div className="flex justify-between text-slate-500">
+                  <span>Subtotal</span>
+                  <span>{formatPKR(Number(invoice.totalAmount) - Number(invoice.aitCollectibleTotal) - Number(invoice.aitPayableTotal))}</span>
+                </div>
+                {Number(invoice.aitCollectibleTotal) > 0 && (
+                  <div className="flex justify-between text-slate-500">
+                    <span>AIT Collectible</span>
+                    <span>{formatPKR(invoice.aitCollectibleTotal)}</span>
+                  </div>
+                )}
+                {Number(invoice.aitPayableTotal) > 0 && (
+                  <div className="flex justify-between text-slate-500">
+                    <span>AIT Payable</span>
+                    <span>{formatPKR(invoice.aitPayableTotal)}</span>
+                  </div>
+                )}
+              </>
+            )}
             <div className="flex justify-between">
               <span className="text-slate-500">Invoice Total</span>
               <span className="font-semibold">{formatPKR(invoice.totalAmount)}</span>
@@ -227,7 +251,7 @@ export default function PurchaseInvoiceDetailPage() {
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Trade Price</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Disc %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Tax %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">S. Tax</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-C %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-P %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase Price</th>
@@ -249,7 +273,7 @@ export default function PurchaseInvoiceDetailPage() {
                     <td className="px-4 py-2.5 text-right">{formatPKR(item.tradePrice)}</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.discountPercent)}%</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.tradeOfferPercent).toFixed(2)}%</td>
-                    <td className="px-4 py-2.5 text-right">{Number(item.salesTaxPercent)}%</td>
+                    <td className="px-4 py-2.5 text-right">{formatPKR(item.salesTax)}</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.aitCollectiblePercent)}%</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.aitPayablePercent)}%</td>
                     <td className="px-4 py-2.5 text-right">{formatPKR(item.purchasePrice)}</td>
@@ -257,8 +281,10 @@ export default function PurchaseInvoiceDetailPage() {
                   </tr>
                 ))}
                 <tr className="font-bold border-t">
-                  <td colSpan={13} className="px-4 py-3 text-right">Total</td>
-                  <td className="px-4 py-3 text-right text-base">{formatPKR(invoice.totalAmount)}</td>
+                  <td colSpan={13} className="px-4 py-3 text-right">Subtotal</td>
+                  <td className="px-4 py-3 text-right text-base">
+                    {formatPKR(invoice.items.reduce((s, item) => s + Number(item.lineTotal), 0))}
+                  </td>
                 </tr>
               </tbody>
             </table>
