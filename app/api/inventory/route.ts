@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
       manufacturerId: body.manufacturerId,
       category: body.category ?? null,
       packSize: body.packSize ?? null,
+      salesTaxApplicable: body.salesTaxApplicable ?? false,
       minStockLevel: body.minStockLevel ?? 10,
     },
     include: { manufacturer: { select: { name: true } } },

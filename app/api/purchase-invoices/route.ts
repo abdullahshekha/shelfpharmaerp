@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { calcPurchasePrice } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,38 +41,109 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ data: invoices, meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } })
 }
 
+interface PurchaseInvoiceItemInput {
+  medicineId: string
+  batchNumber: string
+  expiryDate: string
+  quantity: number
+  tradePrice: number
+  mrp?: number | null
+  discountPercent?: number
+  salesTaxPercent?: number
+  aitCollectiblePercent?: number
+  aitPayablePercent?: number
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
   if (!body.supplierId) return NextResponse.json({ error: 'Supplier required' }, { status: 400 })
   if (!body.items?.length) return NextResponse.json({ error: 'At least one item required' }, { status: 400 })
 
+  const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } })
+  if (!supplier) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
+
+  const items: PurchaseInvoiceItemInput[] = body.items
+  for (const item of items) {
+    if (!item.medicineId || !item.batchNumber || !item.expiryDate || !item.quantity || !item.tradePrice) {
+      return NextResponse.json(
+        { error: 'Each item requires medicine, batch number, expiry date, quantity and trade price' },
+        { status: 400 }
+      )
+    }
+  }
+
+  const medicines = await prisma.medicine.findMany({
+    where: { id: { in: items.map((i) => i.medicineId) } },
+    select: { id: true, salesTaxApplicable: true },
+  })
+  const medicineMap = new Map(medicines.map((m) => [m.id, m]))
+
+  const computedItems = items.map((item) => {
+    const medicine = medicineMap.get(item.medicineId)
+    // Sales tax only applies if the medicine is flagged for it; AIT only applies if the supplier is a Filer.
+    const salesTaxPercent = medicine?.salesTaxApplicable ? (item.salesTaxPercent ?? 0) : 0
+    const aitCollectiblePercent = supplier.isFiler ? (item.aitCollectiblePercent ?? 0) : 0
+    const aitPayablePercent = supplier.isFiler ? (item.aitPayablePercent ?? 0) : 0
+    const discountPercent = item.discountPercent ?? 0
+
+    const purchasePrice = calcPurchasePrice({
+      tradePrice: item.tradePrice,
+      discountPercent,
+      salesTaxPercent,
+      aitCollectiblePercent,
+      aitPayablePercent,
+    })
+
+    return {
+      medicineId: item.medicineId,
+      batchNumber: item.batchNumber,
+      expiryDate: new Date(item.expiryDate),
+      quantity: item.quantity,
+      tradePrice: item.tradePrice,
+      mrp: item.mrp ?? null,
+      discountPercent,
+      salesTaxPercent,
+      aitCollectiblePercent,
+      aitPayablePercent,
+      purchasePrice,
+      lineTotal: purchasePrice * item.quantity,
+    }
+  })
+
+  const totalAmount = computedItems.reduce((sum, item) => sum + item.lineTotal, 0)
   const invoiceNumber = `SP-PUR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`
 
-  const totalAmount = body.items.reduce(
-    (sum: number, item: { quantity: number; unitPrice: number }) => sum + item.quantity * item.unitPrice,
-    0
-  )
-
-  const invoice = await prisma.purchaseInvoice.create({
-    data: {
-      invoiceNumber,
-      supplierId: body.supplierId,
-      invoiceDate: new Date(body.invoiceDate ?? new Date()),
-      dueDate: body.dueDate ? new Date(body.dueDate) : null,
-      totalAmount,
-      status: 'UNPAID',
-      notes: body.notes ?? null,
-      items: {
-        create: body.items.map((item: { medicineId: string; quantity: number; unitPrice: number }) => ({
-          medicineId: item.medicineId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: item.quantity * item.unitPrice,
-        })),
+  const invoice = await prisma.$transaction(async (tx) => {
+    const created = await tx.purchaseInvoice.create({
+      data: {
+        invoiceNumber,
+        supplierId: body.supplierId,
+        invoiceDate: new Date(body.invoiceDate ?? new Date()),
+        dueDate: body.dueDate ? new Date(body.dueDate) : null,
+        totalAmount,
+        status: 'UNPAID',
+        notes: body.notes ?? null,
+        items: { create: computedItems },
       },
-    },
-    include: { items: true },
+      include: { items: true },
+    })
+
+    // Receiving a purchase invoice is how new stock (a batch) enters inventory.
+    await tx.medicineBatch.createMany({
+      data: computedItems.map((item) => ({
+        medicineId: item.medicineId,
+        batchNumber: item.batchNumber,
+        expiryDate: item.expiryDate,
+        quantityIn: item.quantity,
+        currentQty: item.quantity,
+        purchasePrice: item.purchasePrice,
+        tradePrice: item.tradePrice,
+        mrp: item.mrp,
+      })),
+    })
+
+    return created
   })
 
   return NextResponse.json({ data: invoice }, { status: 201 })

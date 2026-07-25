@@ -25,6 +25,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await req.json()
+
+  const isFiler = !!body.isFiler
+  if (isFiler && !body.ntnNumber?.trim()) {
+    return NextResponse.json({ error: 'NTN Number is required for a Filer supplier' }, { status: 400 })
+  }
+  if (isFiler && body.strnStatus === 'REGISTERED' && !body.strnNumber?.trim()) {
+    return NextResponse.json({ error: 'STRN Number is required when STRN is Registered' }, { status: 400 })
+  }
+
   const supplier = await prisma.supplier.update({
     where: { id },
     data: {
@@ -34,6 +43,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       phone: body.phone ?? null,
       address: body.address ?? null,
       notes: body.notes ?? null,
+      isFiler,
+      ntnNumber: isFiler ? (body.ntnNumber?.trim() ?? null) : null,
+      strnStatus: isFiler ? (body.strnStatus ?? null) : null,
+      strnNumber: isFiler && body.strnStatus === 'REGISTERED' ? (body.strnNumber?.trim() ?? null) : null,
+      drugLicenseNumber: body.drugLicenseNumber?.trim() || null,
       isActive: body.isActive ?? true,
     },
   })

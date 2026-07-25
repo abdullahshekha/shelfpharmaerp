@@ -20,17 +20,22 @@ model Category {
 }
 
 model Supplier {
-  id               String            @id @default(cuid())
-  name             String
-  type             String // OPEN_MARKET | OFFICIAL_DISTRIBUTOR
-  contactPerson    String?
-  phone            String?
-  address          String?
-  notes            String?
-  isActive         Boolean           @default(true)
-  purchaseInvoices PurchaseInvoice[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                String            @id @default(cuid())
+  name              String
+  type              String // OPEN_MARKET | OFFICIAL_DISTRIBUTOR
+  contactPerson     String?
+  phone             String?
+  address           String?
+  notes             String?
+  isFiler           Boolean           @default(false)
+  ntnNumber         String?
+  strnStatus        String? // REGISTERED | UNREGISTERED — only meaningful when isFiler
+  strnNumber        String?
+  drugLicenseNumber String?
+  isActive          Boolean           @default(true)
+  purchaseInvoices  PurchaseInvoice[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 }
 
 model PurchaseInvoice {
@@ -53,14 +58,22 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceItem {
-  id                String          @id @default(cuid())
-  purchaseInvoiceId String
-  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
-  medicineId        String
-  medicine          Medicine        @relation(fields: [medicineId], references: [id])
-  quantity          Int
-  unitPrice         Decimal         @db.Decimal(10, 2)
-  lineTotal         Decimal         @db.Decimal(10, 2)
+  id                    String          @id @default(cuid())
+  purchaseInvoiceId     String
+  purchaseInvoice       PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  medicineId            String
+  medicine              Medicine        @relation(fields: [medicineId], references: [id])
+  batchNumber           String
+  expiryDate            DateTime
+  quantity              Int
+  tradePrice            Decimal         @db.Decimal(10, 2)
+  mrp                   Decimal?        @db.Decimal(10, 2)
+  discountPercent       Decimal         @default(0) @db.Decimal(5, 2)
+  salesTaxPercent       Decimal         @default(0) @db.Decimal(5, 2)
+  aitCollectiblePercent Decimal         @default(0) @db.Decimal(5, 2)
+  aitPayablePercent     Decimal         @default(0) @db.Decimal(5, 2)
+  purchasePrice         Decimal         @db.Decimal(10, 2)
+  lineTotal             Decimal         @db.Decimal(10, 2)
 
   @@index([purchaseInvoiceId])
 }
@@ -121,24 +134,25 @@ model Manufacturer {
 }
 
 model Medicine {
-  id             String                @id @default(cuid())
-  code           String                @unique
-  name           String
-  genericName    String?
-  manufacturerId String
-  manufacturer   Manufacturer          @relation(fields: [manufacturerId], references: [id])
-  category       String?
-  packSize       String?
-  bonusQty       String?
-  bonusNote      String?
-  minStockLevel  Int                   @default(10)
-  isActive       Boolean               @default(true)
-  batches        MedicineBatch[]
-  orderItems     OrderItem[]
-  offerListItems OfferListItem[]
-  purchaseItems  PurchaseInvoiceItem[]
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  id                 String                @id @default(cuid())
+  code               String                @unique
+  name               String
+  genericName        String?
+  manufacturerId     String
+  manufacturer       Manufacturer          @relation(fields: [manufacturerId], references: [id])
+  category           String?
+  packSize           String?
+  bonusQty           String?
+  bonusNote          String?
+  salesTaxApplicable Boolean               @default(false)
+  minStockLevel      Int                   @default(10)
+  isActive           Boolean               @default(true)
+  batches            MedicineBatch[]
+  orderItems         OrderItem[]
+  offerListItems     OfferListItem[]
+  purchaseItems      PurchaseInvoiceItem[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   @@index([name])
   @@index([code])

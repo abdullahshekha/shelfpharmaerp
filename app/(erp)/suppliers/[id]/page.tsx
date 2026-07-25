@@ -9,12 +9,31 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
+import { calcPurchasePrice } from '@/lib/utils/pricing'
 import { ArrowLeft, Plus, X, Search } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
-interface Medicine { id: string; name: string; code: string; tradePrice: number | null }
-interface InvoiceItem { medicineId: string; medicineName: string; quantity: number; unitPrice: number }
+interface Medicine {
+  id: string; name: string; code: string
+  tradePrice: number | null; mrp: number | null; salesTaxApplicable: boolean
+}
+
+interface InvoiceItem {
+  medicineId: string
+  medicineName: string
+  salesTaxApplicable: boolean
+  batchNumber: string
+  expiryDate: string
+  quantity: number
+  tradePrice: number
+  mrp: string
+  discountPercent: number
+  salesTaxPercent: number
+  aitCollectiblePercent: number
+  aitPayablePercent: number
+}
+
 interface Payment { id: string; amount: number; paymentDate: string; method: string; reference: string | null }
 
 interface PurchaseInvoice {
@@ -24,13 +43,18 @@ interface PurchaseInvoice {
   totalAmount: number
   status: string
   notes: string | null
-  items: { id: string; quantity: number; unitPrice: number; lineTotal: number; medicine: { name: string; code: string } }[]
+  items: {
+    id: string; quantity: number; purchasePrice: number; lineTotal: number
+    medicine: { name: string; code: string }
+  }[]
   payments: Payment[]
 }
 
 interface Supplier {
   id: string; name: string; type: string; contactPerson: string | null
   phone: string | null; address: string | null; notes: string | null
+  isFiler: boolean; ntnNumber: string | null; strnStatus: string | null
+  strnNumber: string | null; drugLicenseNumber: string | null
   purchaseInvoices: PurchaseInvoice[]
 }
 
@@ -41,6 +65,16 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const emptyPayment = { amount: '', method: 'CASH', reference: '', paymentDate: new Date().toISOString().slice(0, 10) }
+
+function itemPurchasePrice(item: InvoiceItem, isFiler: boolean) {
+  return calcPurchasePrice({
+    tradePrice: item.tradePrice,
+    discountPercent: item.discountPercent,
+    salesTaxPercent: item.salesTaxApplicable ? item.salesTaxPercent : 0,
+    aitCollectiblePercent: isFiler ? item.aitCollectiblePercent : 0,
+    aitPayablePercent: isFiler ? item.aitPayablePercent : 0,
+  })
+}
 
 export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -85,18 +119,38 @@ export default function SupplierDetailPage() {
   }, [medSearch])
 
   const addItem = (med: Medicine) => {
-    const existing = items.find(i => i.medicineId === med.id)
-    if (existing) {
-      setItems(prev => prev.map(i => i.medicineId === med.id ? { ...i, quantity: i.quantity + 1 } : i))
-    } else {
-      setItems(prev => [...prev, { medicineId: med.id, medicineName: med.name, quantity: 1, unitPrice: med.tradePrice ?? 0 }])
-    }
+    setItems(prev => [...prev, {
+      medicineId: med.id,
+      medicineName: med.name,
+      salesTaxApplicable: med.salesTaxApplicable,
+      batchNumber: '',
+      expiryDate: '',
+      quantity: 1,
+      tradePrice: med.tradePrice ?? 0,
+      mrp: med.mrp != null ? String(med.mrp) : '',
+      discountPercent: 0,
+      salesTaxPercent: 0,
+      aitCollectiblePercent: 0,
+      aitPayablePercent: 0,
+    }])
     setMedSearch('')
     setShowMedDrop(false)
   }
 
+  const updateItem = (medicineId: string, patch: Partial<InvoiceItem>) => {
+    setItems(prev => prev.map(i => i.medicineId === medicineId ? { ...i, ...patch } : i))
+  }
+
+  const isFiler = supplier?.isFiler ?? false
+
   const createInvoice = async () => {
     if (items.length === 0) { toast.error('Add at least one medicine'); return }
+    for (const item of items) {
+      if (!item.batchNumber || !item.expiryDate || !item.quantity || !item.tradePrice) {
+        toast.error(`${item.medicineName}: batch number, expiry date, quantity and trade price are required`)
+        return
+      }
+    }
     setSavingInvoice(true)
     const res = await fetch('/api/purchase-invoices', {
       method: 'POST',
@@ -105,7 +159,18 @@ export default function SupplierDetailPage() {
         supplierId: id,
         invoiceDate,
         notes: invoiceNotes || null,
-        items: items.map(i => ({ medicineId: i.medicineId, quantity: i.quantity, unitPrice: i.unitPrice })),
+        items: items.map(i => ({
+          medicineId: i.medicineId,
+          batchNumber: i.batchNumber,
+          expiryDate: i.expiryDate,
+          quantity: i.quantity,
+          tradePrice: i.tradePrice,
+          mrp: i.mrp ? parseFloat(i.mrp) : null,
+          discountPercent: i.discountPercent,
+          salesTaxPercent: i.salesTaxApplicable ? i.salesTaxPercent : 0,
+          aitCollectiblePercent: isFiler ? i.aitCollectiblePercent : 0,
+          aitPayablePercent: isFiler ? i.aitPayablePercent : 0,
+        })),
       }),
     })
     if (res.ok) {
@@ -115,7 +180,8 @@ export default function SupplierDetailPage() {
       setInvoiceNotes('')
       fetchSupplier()
     } else {
-      toast.error('Failed to create invoice')
+      const j = await res.json()
+      toast.error(j.error ?? 'Failed to create invoice')
     }
     setSavingInvoice(false)
   }
@@ -139,7 +205,7 @@ export default function SupplierDetailPage() {
     setSavingPayment(false)
   }
 
-  const invoiceTotal = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
+  const invoiceTotal = items.reduce((s, i) => s + i.quantity * itemPurchasePrice(i, isFiler), 0)
 
   if (loading) return <div className="animate-pulse p-8 text-slate-400">Loading...</div>
   if (!supplier) return <div className="p-8 text-slate-400">Supplier not found.</div>
@@ -149,7 +215,7 @@ export default function SupplierDetailPage() {
     .reduce((s, i) => s + Number(i.totalAmount), 0)
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="max-w-6xl space-y-6">
       <div className="flex items-center gap-3">
         <Link href="/suppliers"><Button variant="ghost" size="icon"><ArrowLeft size={18} /></Button></Link>
         <div className="flex-1">
@@ -158,6 +224,7 @@ export default function SupplierDetailPage() {
             <Badge className={supplier.type === 'OFFICIAL_DISTRIBUTOR' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}>
               {supplier.type === 'OFFICIAL_DISTRIBUTOR' ? 'Official Distributor' : 'Open Market'}
             </Badge>
+            <Badge variant="outline">{supplier.isFiler ? 'Filer' : 'Non-Filer'}</Badge>
             {totalOwed > 0 && (
               <span className="text-sm text-red-600 font-medium">Outstanding: {formatPKR(totalOwed)}</span>
             )}
@@ -173,6 +240,14 @@ export default function SupplierDetailPage() {
         {supplier.contactPerson && <div><span className="text-slate-400">Contact:</span> {supplier.contactPerson}</div>}
         {supplier.phone && <div><span className="text-slate-400">Phone:</span> {supplier.phone}</div>}
         {supplier.address && <div><span className="text-slate-400">Address:</span> {supplier.address}</div>}
+        {supplier.isFiler && supplier.ntnNumber && <div><span className="text-slate-400">NTN:</span> {supplier.ntnNumber}</div>}
+        {supplier.isFiler && (
+          <div>
+            <span className="text-slate-400">STRN:</span>{' '}
+            {supplier.strnStatus === 'REGISTERED' ? supplier.strnNumber : 'Unregistered'}
+          </div>
+        )}
+        {supplier.drugLicenseNumber && <div><span className="text-slate-400">Drug License:</span> {supplier.drugLicenseNumber}</div>}
       </div>
 
       {/* New invoice form */}
@@ -221,48 +296,103 @@ export default function SupplierDetailPage() {
 
             {/* Items table */}
             {items.length > 0 && (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-slate-600 text-xs">
-                    <th className="text-left py-1.5">Medicine</th>
-                    <th className="text-center py-1.5 w-20">Qty</th>
-                    <th className="text-right py-1.5 w-28">Unit Price</th>
-                    <th className="text-right py-1.5 w-24">Total</th>
-                    <th className="w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(item => (
-                    <tr key={item.medicineId} className="border-b">
-                      <td className="py-1.5 font-medium">{item.medicineName}</td>
-                      <td className="py-1.5 text-center">
-                        <Input type="number" min="1" className="w-16 h-7 text-xs text-center mx-auto"
-                          value={item.quantity}
-                          onChange={e => setItems(prev => prev.map(i => i.medicineId === item.medicineId
-                            ? { ...i, quantity: parseInt(e.target.value) || 1 } : i))} />
-                      </td>
-                      <td className="py-1.5 text-right">
-                        <Input type="number" step="0.01" className="w-24 h-7 text-xs text-right ml-auto"
-                          value={item.unitPrice}
-                          onChange={e => setItems(prev => prev.map(i => i.medicineId === item.medicineId
-                            ? { ...i, unitPrice: parseFloat(e.target.value) || 0 } : i))} />
-                      </td>
-                      <td className="py-1.5 text-right text-xs font-medium">{formatPKR(item.quantity * item.unitPrice)}</td>
-                      <td className="py-1.5">
-                        <button className="text-slate-400 hover:text-red-500"
-                          onClick={() => setItems(prev => prev.filter(i => i.medicineId !== item.medicineId))}>
-                          <X size={14} />
-                        </button>
-                      </td>
+              <div className="overflow-x-auto -mx-2 px-2">
+                <table className="w-full text-sm min-w-[1100px]">
+                  <thead>
+                    <tr className="border-b text-slate-600 text-xs">
+                      <th className="text-left py-1.5 pr-2">Medicine</th>
+                      <th className="text-left py-1.5 px-1 w-28">Batch #</th>
+                      <th className="text-left py-1.5 px-1 w-32">Expiry</th>
+                      <th className="text-center py-1.5 px-1 w-16">Qty</th>
+                      <th className="text-right py-1.5 px-1 w-20">MRP</th>
+                      <th className="text-right py-1.5 px-1 w-24">Trade Price</th>
+                      <th className="text-right py-1.5 px-1 w-16">Disc %</th>
+                      <th className="text-right py-1.5 px-1 w-16">Tax %</th>
+                      {isFiler && <th className="text-right py-1.5 px-1 w-16">AIT-C %</th>}
+                      {isFiler && <th className="text-right py-1.5 px-1 w-16">AIT-P %</th>}
+                      <th className="text-right py-1.5 px-1 w-24">Purchase Price</th>
+                      <th className="text-right py-1.5 px-1 w-24">Total</th>
+                      <th className="w-8" />
                     </tr>
-                  ))}
-                  <tr>
-                    <td colSpan={3} className="py-2 text-right font-semibold">Total</td>
-                    <td className="py-2 text-right font-bold">{formatPKR(invoiceTotal)}</td>
-                    <td />
-                  </tr>
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {items.map(item => {
+                      const purchasePrice = itemPurchasePrice(item, isFiler)
+                      return (
+                        <tr key={item.medicineId} className="border-b">
+                          <td className="py-1.5 pr-2 font-medium whitespace-nowrap">{item.medicineName}</td>
+                          <td className="py-1.5 px-1">
+                            <Input placeholder="Batch #" className="w-28 h-7 text-xs"
+                              value={item.batchNumber}
+                              onChange={e => updateItem(item.medicineId, { batchNumber: e.target.value })} />
+                          </td>
+                          <td className="py-1.5 px-1">
+                            <Input type="date" className="w-32 h-7 text-xs"
+                              value={item.expiryDate}
+                              onChange={e => updateItem(item.medicineId, { expiryDate: e.target.value })} />
+                          </td>
+                          <td className="py-1.5 px-1 text-center">
+                            <Input type="number" min="1" className="w-16 h-7 text-xs text-center"
+                              value={item.quantity}
+                              onChange={e => updateItem(item.medicineId, { quantity: parseInt(e.target.value) || 1 })} />
+                          </td>
+                          <td className="py-1.5 px-1">
+                            <Input type="number" step="0.01" className="w-20 h-7 text-xs text-right"
+                              value={item.mrp}
+                              onChange={e => updateItem(item.medicineId, { mrp: e.target.value })} />
+                          </td>
+                          <td className="py-1.5 px-1">
+                            <Input type="number" step="0.01" className="w-24 h-7 text-xs text-right"
+                              value={item.tradePrice}
+                              onChange={e => updateItem(item.medicineId, { tradePrice: parseFloat(e.target.value) || 0 })} />
+                          </td>
+                          <td className="py-1.5 px-1">
+                            <Input type="number" min="0" max="100" step="0.01" className="w-16 h-7 text-xs text-right"
+                              value={item.discountPercent}
+                              onChange={e => updateItem(item.medicineId, { discountPercent: parseFloat(e.target.value) || 0 })} />
+                          </td>
+                          <td className="py-1.5 px-1">
+                            {item.salesTaxApplicable ? (
+                              <Input type="number" min="0" max="100" step="0.01" className="w-16 h-7 text-xs text-right"
+                                value={item.salesTaxPercent}
+                                onChange={e => updateItem(item.medicineId, { salesTaxPercent: parseFloat(e.target.value) || 0 })} />
+                            ) : (
+                              <span className="text-slate-300 text-xs block text-right pr-1">N/A</span>
+                            )}
+                          </td>
+                          {isFiler && (
+                            <td className="py-1.5 px-1">
+                              <Input type="number" min="0" max="100" step="0.01" className="w-16 h-7 text-xs text-right"
+                                value={item.aitCollectiblePercent}
+                                onChange={e => updateItem(item.medicineId, { aitCollectiblePercent: parseFloat(e.target.value) || 0 })} />
+                            </td>
+                          )}
+                          {isFiler && (
+                            <td className="py-1.5 px-1">
+                              <Input type="number" min="0" max="100" step="0.01" className="w-16 h-7 text-xs text-right"
+                                value={item.aitPayablePercent}
+                                onChange={e => updateItem(item.medicineId, { aitPayablePercent: parseFloat(e.target.value) || 0 })} />
+                            </td>
+                          )}
+                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice)}</td>
+                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(purchasePrice * item.quantity)}</td>
+                          <td className="py-1.5 px-1">
+                            <button className="text-slate-400 hover:text-red-500"
+                              onClick={() => setItems(prev => prev.filter(i => i.medicineId !== item.medicineId))}>
+                              <X size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    <tr>
+                      <td colSpan={isFiler ? 11 : 9} className="py-2 text-right font-semibold">Total</td>
+                      <td className="py-2 text-right font-bold whitespace-nowrap">{formatPKR(invoiceTotal)}</td>
+                      <td />
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             )}
 
             <div className="flex justify-end gap-2">
@@ -304,7 +434,7 @@ export default function SupplierDetailPage() {
                       {inv.items.map(item => (
                         <div key={item.id} className="flex justify-between text-xs text-slate-600">
                           <span>{item.medicine.name}</span>
-                          <span>{item.quantity} × {formatPKR(item.unitPrice)} = {formatPKR(item.lineTotal)}</span>
+                          <span>{item.quantity} × {formatPKR(item.purchasePrice)} = {formatPKR(item.lineTotal)}</span>
                         </div>
                       ))}
                     </div>

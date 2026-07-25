@@ -23,7 +23,18 @@ interface PurchaseInvoice {
   notes: string | null
   supplier: { id: string; name: string; type: string; phone: string | null }
   items: {
-    id: string; quantity: number; unitPrice: number; lineTotal: number
+    id: string
+    quantity: number
+    batchNumber: string
+    expiryDate: string
+    tradePrice: number
+    mrp: number | null
+    discountPercent: number
+    salesTaxPercent: number
+    aitCollectiblePercent: number
+    aitPayablePercent: number
+    purchasePrice: number
+    lineTotal: number
     medicine: { name: string; code: string; category: string | null }
   }[]
   payments: { id: string; amount: number; paymentDate: string; method: string; reference: string | null }[]
@@ -201,33 +212,51 @@ export default function PurchaseInvoiceDetailPage() {
       <Card>
         <CardHeader><CardTitle className="text-base">Items ({invoice.items.length})</CardTitle></CardHeader>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-slate-50">
-                <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
-                <th className="text-center px-4 py-3 font-medium text-slate-600">Qty</th>
-                <th className="text-right px-4 py-3 font-medium text-slate-600">Unit Price</th>
-                <th className="text-right px-4 py-3 font-medium text-slate-600">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.items.map((item, i) => (
-                <tr key={item.id} className={`border-b ${i % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
-                  <td className="px-4 py-2.5">
-                    <p className="font-medium">{item.medicine.name}</p>
-                    <p className="text-xs text-slate-400 font-mono">{item.medicine.code}</p>
-                  </td>
-                  <td className="px-4 py-2.5 text-center">{item.quantity}</td>
-                  <td className="px-4 py-2.5 text-right">{formatPKR(item.unitPrice)}</td>
-                  <td className="px-4 py-2.5 text-right font-medium">{formatPKR(item.lineTotal)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead>
+                <tr className="border-b bg-slate-50">
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Batch #</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Expiry</th>
+                  <th className="text-center px-4 py-3 font-medium text-slate-600">Qty</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">MRP</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Trade Price</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Disc %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Tax %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-C %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">AIT-P %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase Price</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Total</th>
                 </tr>
-              ))}
-              <tr className="font-bold border-t">
-                <td colSpan={3} className="px-4 py-3 text-right">Total</td>
-                <td className="px-4 py-3 text-right text-base">{formatPKR(invoice.totalAmount)}</td>
-              </tr>
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {invoice.items.map((item, i) => (
+                  <tr key={item.id} className={`border-b ${i % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
+                    <td className="px-4 py-2.5">
+                      <p className="font-medium whitespace-nowrap">{item.medicine.name}</p>
+                      <p className="text-xs text-slate-400 font-mono">{item.medicine.code}</p>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs">{item.batchNumber}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">{formatDate(item.expiryDate)}</td>
+                    <td className="px-4 py-2.5 text-center">{item.quantity}</td>
+                    <td className="px-4 py-2.5 text-right">{item.mrp != null ? formatPKR(item.mrp) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right">{formatPKR(item.tradePrice)}</td>
+                    <td className="px-4 py-2.5 text-right">{Number(item.discountPercent)}%</td>
+                    <td className="px-4 py-2.5 text-right">{Number(item.salesTaxPercent)}%</td>
+                    <td className="px-4 py-2.5 text-right">{Number(item.aitCollectiblePercent)}%</td>
+                    <td className="px-4 py-2.5 text-right">{Number(item.aitPayablePercent)}%</td>
+                    <td className="px-4 py-2.5 text-right">{formatPKR(item.purchasePrice)}</td>
+                    <td className="px-4 py-2.5 text-right font-medium">{formatPKR(item.lineTotal)}</td>
+                  </tr>
+                ))}
+                <tr className="font-bold border-t">
+                  <td colSpan={11} className="px-4 py-3 text-right">Total</td>
+                  <td className="px-4 py-3 text-right text-base">{formatPKR(invoice.totalAmount)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 

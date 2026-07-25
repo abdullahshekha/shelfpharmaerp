@@ -31,6 +31,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       manufacturerId: body.manufacturerId,
       category: body.category ?? null,
       packSize: body.packSize ?? null,
+      salesTaxApplicable: body.salesTaxApplicable ?? false,
       minStockLevel: body.minStockLevel ?? 10,
       isActive: body.isActive ?? true,
     },

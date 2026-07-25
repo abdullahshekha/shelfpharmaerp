@@ -3,29 +3,7 @@ import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
-  const body = await req.json()
-
-  if (!body.batchNumber || !body.expiryDate || !body.quantityIn || !body.purchasePrice || !body.tradePrice) {
-    return NextResponse.json({ error: 'batchNumber, expiryDate, quantityIn, purchasePrice and tradePrice are required' }, { status: 400 })
-  }
-
-  const batch = await prisma.medicineBatch.create({
-    data: {
-      medicineId: id,
-      batchNumber: body.batchNumber,
-      expiryDate: new Date(body.expiryDate),
-      quantityIn: parseInt(body.quantityIn),
-      currentQty: parseInt(body.quantityIn),
-      purchasePrice: parseFloat(body.purchasePrice),
-      tradePrice: parseFloat(body.tradePrice),
-      mrp: body.mrp ? parseFloat(body.mrp) : null,
-    },
-  })
-
-  return NextResponse.json({ data: batch }, { status: 201 })
-}
+// Batches are created via Purchase Invoices, not directly on the item — see /api/purchase-invoices.
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

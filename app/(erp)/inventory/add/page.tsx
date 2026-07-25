@@ -22,6 +22,7 @@ export default function ItemCreationPage() {
     manufacturerId: '',
     category: '',
     packSize: '',
+    salesTaxApplicable: 'false',
     minStockLevel: '10',
   })
 
@@ -42,6 +43,7 @@ export default function ItemCreationPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...form,
+        salesTaxApplicable: form.salesTaxApplicable === 'true',
         minStockLevel: parseInt(form.minStockLevel),
       }),
     })
@@ -125,6 +127,21 @@ export default function ItemCreationPage() {
                 <Input id="minStockLevel" type="number" value={form.minStockLevel}
                   onChange={e => setForm(f => ({ ...f, minStockLevel: e.target.value }))} />
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Sales Tax Applicable *</Label>
+              <Select
+                items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
+                value={form.salesTaxApplicable}
+                onValueChange={v => setForm(f => ({ ...f, salesTaxApplicable: v ?? 'false' }))}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">Yes</SelectItem>
+                  <SelectItem value="false">No</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex justify-end gap-3 pt-2">

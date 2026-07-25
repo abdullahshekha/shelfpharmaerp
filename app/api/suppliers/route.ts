@@ -26,6 +26,15 @@ export async function POST(req: NextRequest) {
   if (!['OPEN_MARKET', 'OFFICIAL_DISTRIBUTOR'].includes(body.type)) {
     return NextResponse.json({ error: 'Type must be OPEN_MARKET or OFFICIAL_DISTRIBUTOR' }, { status: 400 })
   }
+
+  const isFiler = !!body.isFiler
+  if (isFiler && !body.ntnNumber?.trim()) {
+    return NextResponse.json({ error: 'NTN Number is required for a Filer supplier' }, { status: 400 })
+  }
+  if (isFiler && body.strnStatus === 'REGISTERED' && !body.strnNumber?.trim()) {
+    return NextResponse.json({ error: 'STRN Number is required when STRN is Registered' }, { status: 400 })
+  }
+
   const supplier = await prisma.supplier.create({
     data: {
       name: body.name.trim(),
@@ -34,6 +43,11 @@ export async function POST(req: NextRequest) {
       phone: body.phone ?? null,
       address: body.address ?? null,
       notes: body.notes ?? null,
+      isFiler,
+      ntnNumber: isFiler ? (body.ntnNumber?.trim() ?? null) : null,
+      strnStatus: isFiler ? (body.strnStatus ?? null) : null,
+      strnNumber: isFiler && body.strnStatus === 'REGISTERED' ? (body.strnNumber?.trim() ?? null) : null,
+      drugLicenseNumber: body.drugLicenseNumber?.trim() || null,
     },
   })
   return NextResponse.json({ data: supplier }, { status: 201 })

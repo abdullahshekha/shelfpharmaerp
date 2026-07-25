@@ -31,7 +31,10 @@ const TYPE_LABELS: Record<string, string> = {
   OFFICIAL_DISTRIBUTOR: 'Official Distributor',
 }
 
-const emptyForm = { name: '', type: 'OFFICIAL_DISTRIBUTOR', contactPerson: '', phone: '', address: '', notes: '' }
+const emptyForm = {
+  name: '', type: 'OFFICIAL_DISTRIBUTOR', contactPerson: '', phone: '', address: '', notes: '',
+  isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '', drugLicenseNumber: '',
+}
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -61,11 +64,17 @@ export default function SuppliersPage() {
   const createSupplier = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name.trim()) { toast.error('Name required'); return }
+    const isFiler = form.isFiler === 'true'
+    if (isFiler && !form.ntnNumber.trim()) { toast.error('NTN Number is required for a Filer supplier'); return }
+    if (isFiler && form.strnStatus === 'REGISTERED' && !form.strnNumber.trim()) {
+      toast.error('STRN Number is required when STRN is Registered')
+      return
+    }
     setSaving(true)
     const res = await fetch('/api/suppliers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, isFiler }),
     })
     if (res.ok) {
       toast.success('Supplier added')
@@ -134,6 +143,55 @@ export default function SuppliersPage() {
                 <Label>Address</Label>
                 <Input placeholder="Company address" value={form.address} onChange={set('address')} />
               </div>
+
+              <div className="space-y-1.5">
+                <Label>Filer *</Label>
+                <Select
+                  items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
+                  value={form.isFiler}
+                  onValueChange={v => setForm(f => ({ ...f, isFiler: v ?? 'false', ...(v !== 'true' ? { ntnNumber: '', strnStatus: '', strnNumber: '' } : {}) }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Drug License Number</Label>
+                <Input placeholder="Optional" value={form.drugLicenseNumber} onChange={set('drugLicenseNumber')} />
+              </div>
+
+              {form.isFiler === 'true' && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>NTN Number *</Label>
+                    <Input placeholder="1234567-8" value={form.ntnNumber} onChange={set('ntnNumber')} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>STRN Status *</Label>
+                    <Select
+                      items={[{ value: 'REGISTERED', label: 'Registered' }, { value: 'UNREGISTERED', label: 'Unregistered' }]}
+                      value={form.strnStatus || undefined}
+                      onValueChange={v => setForm(f => ({ ...f, strnStatus: v ?? '', ...(v !== 'REGISTERED' ? { strnNumber: '' } : {}) }))}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Select STRN status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="REGISTERED">Registered</SelectItem>
+                        <SelectItem value="UNREGISTERED">Unregistered</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {form.strnStatus === 'REGISTERED' && (
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <Label>STRN Number *</Label>
+                      <Input placeholder="03-12-3456-789-01" value={form.strnNumber} onChange={set('strnNumber')} />
+                    </div>
+                  )}
+                </>
+              )}
+
               <div className="space-y-1.5 col-span-2">
                 <Label>Notes</Label>
                 <Input placeholder="Payment terms, special conditions..." value={form.notes} onChange={set('notes')} />
