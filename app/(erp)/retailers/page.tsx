@@ -45,11 +45,11 @@ export default function RetailersPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Retailers</h1>
-          <p className="text-slate-500 text-sm">{total} retailers</p>
+          <h1 className="text-2xl font-bold text-slate-900">Customers</h1>
+          <p className="text-slate-500 text-sm">{total} customers</p>
         </div>
         <Link href="/retailers/add">
-          <Button size="sm" className="gap-2"><Plus size={16} /> Add Retailer</Button>
+          <Button size="sm" className="gap-2"><Plus size={16} /> Add Customer</Button>
         </Link>
       </div>
 
@@ -69,7 +69,7 @@ export default function RetailersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-slate-50 text-slate-600">
-                  <th className="text-left px-4 py-3 font-medium">Retailer</th>
+                  <th className="text-left px-4 py-3 font-medium">Customer</th>
                   <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Area</th>
                   <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Sales Rep</th>
                   <th className="text-right px-4 py-3 font-medium hidden md:table-cell">Orders</th>
@@ -86,7 +86,7 @@ export default function RetailersPage() {
                   ))
                 ) : retailers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="text-center py-12 text-slate-400">No retailers found</td>
+                    <td colSpan={4} className="text-center py-12 text-slate-400">No customers found</td>
                   </tr>
                 ) : (
                   retailers.map((r) => (

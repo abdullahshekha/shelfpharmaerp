@@ -54,8 +54,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       items: invoice.order.items.map(item => ({
         id: item.id,
         quantity: item.quantity,
+        mrp: item.mrp != null ? Number(item.mrp) : null,
         unitPrice: Number(item.unitPrice),
         offerPercent: Number(item.offerPercent),
+        salesTax: Number(item.salesTax),
         lineTotal: Number(item.lineTotal),
         medicine: { name: item.medicine.name, code: item.medicine.code },
       })),

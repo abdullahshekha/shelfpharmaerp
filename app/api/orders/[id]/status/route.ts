@@ -23,7 +23,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (!existing) {
         const subtotal = Number(updated.totalAmount)
         const discount = Number(updated.discountAmount)
-        const total = subtotal - discount
+        const taxAmount = updated.items.reduce((sum, i) => sum + Number(i.salesTaxAmount), 0)
+        const total = subtotal - discount + taxAmount
 
         const dueDate = new Date()
         dueDate.setDate(dueDate.getDate() + (updated.retailer.creditDays ?? 0))
@@ -35,7 +36,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             retailerId: updated.retailerId,
             subtotal,
             discountAmount: discount,
-            taxAmount: 0,
+            taxAmount,
             totalAmount: total,
             dueDate,
           },

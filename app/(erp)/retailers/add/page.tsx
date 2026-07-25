@@ -14,16 +14,19 @@ import { toast } from 'sonner'
 interface SalesRep { id: string; name: string }
 interface Area { id: string; name: string }
 
-export default function AddRetailerPage() {
+const CUSTOMER_TYPES = ['Medical Stores', 'Chain Pharmacy', 'Hospitals', 'Institutions', 'Marts', 'Pharmacy', 'WholeSalers']
+
+export default function AddCustomerPage() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [salesReps, setSalesReps] = useState<SalesRep[]>([])
   const [areas, setAreas] = useState<Area[]>([])
   const [form, setForm] = useState({
     name: '', ownerName: '', phone: '', whatsappNumber: '',
-    areaId: '', address: '', drugLicenseNumber: '',
+    areaId: '', address: '', customerType: '', drugLicenseNumber: '',
     drugLicenseExpiry: '', creditLimit: '0', creditDays: '0',
     paymentMode: 'CASH', salesRepId: '', notes: '',
+    isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '',
   })
 
   useEffect(() => {
@@ -39,6 +42,12 @@ export default function AddRetailerPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name) { toast.error('Name is required'); return }
+    const isFiler = form.isFiler === 'true'
+    if (isFiler && !form.ntnNumber.trim()) { toast.error('NTN Number is required for a Filer customer'); return }
+    if (isFiler && form.strnStatus === 'REGISTERED' && !form.strnNumber.trim()) {
+      toast.error('STRN Number is required when STRN is Registered')
+      return
+    }
     setSaving(true)
     const res = await fetch('/api/retailers', {
       method: 'POST',
@@ -46,17 +55,20 @@ export default function AddRetailerPage() {
       body: JSON.stringify({
         ...form,
         areaId: form.areaId || null,
+        customerType: form.customerType || null,
         creditLimit: isCheque ? (parseFloat(form.creditLimit) || 0) : 0,
         creditDays: isCheque ? (parseInt(form.creditDays) || 0) : 0,
         drugLicenseExpiry: form.drugLicenseExpiry || null,
         salesRepId: form.salesRepId || null,
+        isFiler,
       }),
     })
     if (res.ok) {
-      toast.success('Retailer added')
+      toast.success('Customer added')
       router.push('/retailers')
     } else {
-      toast.error('Failed to add retailer')
+      const j = await res.json()
+      toast.error(j.error ?? 'Failed to add customer')
     }
     setSaving(false)
   }
@@ -65,21 +77,35 @@ export default function AddRetailerPage() {
     <div className="max-w-2xl space-y-4">
       <div className="flex items-center gap-3">
         <Link href="/retailers"><Button variant="ghost" size="icon"><ArrowLeft size={18} /></Button></Link>
-        <h1 className="text-2xl font-bold">Add Retailer</h1>
+        <h1 className="text-2xl font-bold">Add Customer</h1>
       </div>
 
       <form onSubmit={handleSubmit}>
         <Card>
-          <CardHeader><CardTitle className="text-base">Retailer Information</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Customer Information</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5 col-span-2">
-                <Label>Shop Name *</Label>
+                <Label>Customer Name *</Label>
                 <Input placeholder="ABC Pharmacy" value={form.name} onChange={set('name')} />
               </div>
               <div className="space-y-1.5">
                 <Label>Owner Name</Label>
                 <Input placeholder="Muhammad Ali" value={form.ownerName} onChange={set('ownerName')} />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Customer Type</Label>
+                <Select
+                  items={CUSTOMER_TYPES.map(t => ({ value: t, label: t }))}
+                  value={form.customerType || undefined}
+                  onValueChange={v => setForm(f => ({ ...f, customerType: v ?? '' }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select customer type" /></SelectTrigger>
+                  <SelectContent>
+                    {CUSTOMER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Payment Mode */}
@@ -150,6 +176,50 @@ export default function AddRetailerPage() {
                 <Input type="date" value={form.drugLicenseExpiry} onChange={set('drugLicenseExpiry')} />
               </div>
 
+              {/* Filer status */}
+              <div className="space-y-1.5">
+                <Label>Filer *</Label>
+                <Select
+                  items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
+                  value={form.isFiler}
+                  onValueChange={v => setForm(f => ({ ...f, isFiler: v ?? 'false', ...(v !== 'true' ? { ntnNumber: '', strnStatus: '', strnNumber: '' } : {}) }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.isFiler === 'true' && (
+                <div className="space-y-1.5">
+                  <Label>NTN Number *</Label>
+                  <Input placeholder="1234567-8" value={form.ntnNumber} onChange={set('ntnNumber')} />
+                </div>
+              )}
+              {form.isFiler === 'true' && (
+                <div className="space-y-1.5">
+                  <Label>STRN Status *</Label>
+                  <Select
+                    items={[{ value: 'REGISTERED', label: 'Registered' }, { value: 'UNREGISTERED', label: 'Unregistered' }]}
+                    value={form.strnStatus || undefined}
+                    onValueChange={v => setForm(f => ({ ...f, strnStatus: v ?? '', ...(v !== 'REGISTERED' ? { strnNumber: '' } : {}) }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select STRN status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="REGISTERED">Registered</SelectItem>
+                      <SelectItem value="UNREGISTERED">Unregistered</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {form.isFiler === 'true' && form.strnStatus === 'REGISTERED' && (
+                <div className="space-y-1.5">
+                  <Label>STRN Number *</Label>
+                  <Input placeholder="03-12-3456-789-01" value={form.strnNumber} onChange={set('strnNumber')} />
+                </div>
+              )}
+
               {/* Credit fields — only visible for Cheque */}
               {isCheque && (
                 <>
@@ -177,7 +247,7 @@ export default function AddRetailerPage() {
 
             <div className="flex justify-end gap-3 pt-2">
               <Link href="/retailers"><Button type="button" variant="outline">Cancel</Button></Link>
-              <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Add Retailer'}</Button>
+              <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Add Customer'}</Button>
             </div>
           </CardContent>
         </Card>

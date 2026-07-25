@@ -40,6 +40,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const paymentMode = body.paymentMode ?? 'CASH'
 
+  const isFiler = !!body.isFiler
+  if (isFiler && !body.ntnNumber?.trim()) {
+    return NextResponse.json({ error: 'NTN Number is required for a Filer customer' }, { status: 400 })
+  }
+  if (isFiler && body.strnStatus === 'REGISTERED' && !body.strnNumber?.trim()) {
+    return NextResponse.json({ error: 'STRN Number is required when STRN is Registered' }, { status: 400 })
+  }
+
   const retailer = await prisma.retailer.update({
     where: { id },
     data: {
@@ -49,8 +57,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       whatsappNumber: body.whatsappNumber ?? null,
       areaId: body.areaId ?? null,
       address: body.address ?? null,
+      customerType: body.customerType ?? null,
       drugLicenseNumber: body.drugLicenseNumber ?? null,
       drugLicenseExpiry: body.drugLicenseExpiry ? new Date(body.drugLicenseExpiry) : null,
+      isFiler,
+      ntnNumber: isFiler ? (body.ntnNumber?.trim() ?? null) : null,
+      strnStatus: isFiler ? (body.strnStatus ?? null) : null,
+      strnNumber: isFiler && body.strnStatus === 'REGISTERED' ? (body.strnNumber?.trim() ?? null) : null,
       creditLimit: paymentMode === 'CHEQUE' ? (body.creditLimit ?? 0) : 0,
       creditDays: paymentMode === 'CHEQUE' ? (body.creditDays ?? 0) : 0,
       paymentMode,

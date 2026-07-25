@@ -170,7 +170,7 @@ export default function OrderDetailPage() {
 
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
-          <CardHeader><CardTitle className="text-base">Retailer</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Customer</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
             <Link href={`/retailers/${order.retailer.id}`} className="font-medium text-blue-600 hover:underline">
               {order.retailer.name}

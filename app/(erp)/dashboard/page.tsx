@@ -119,7 +119,7 @@ export default function DashboardPage() {
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Top Retailers */}
         <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users size={16} className="text-blue-500" /> Top 10 Retailers (This Month)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users size={16} className="text-blue-500" /> Top 10 Customers (This Month)</CardTitle></CardHeader>
           <CardContent>
             {loading || !sales ? (
               <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-5 bg-slate-100 rounded animate-pulse" />)}</div>

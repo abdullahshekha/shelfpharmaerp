@@ -93,7 +93,7 @@ export default function EmployeeDetailPage() {
 
       {employee.retailers.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Assigned Retailers ({employee.retailers.length})</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Assigned Customers ({employee.retailers.length})</CardTitle></CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <tbody>

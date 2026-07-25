@@ -136,7 +136,7 @@ export default function ReportsPage() {
             </div>
           )}
           <Card>
-            <CardHeader><CardTitle className="text-base">By Retailer</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">By Customer</CardTitle></CardHeader>
             <CardContent className="p-0">
               {loading ? (
                 <div className="p-6 space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-10 bg-slate-100 rounded animate-pulse" />)}</div>
@@ -147,7 +147,7 @@ export default function ReportsPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-slate-50">
-                        <th className="text-left px-4 py-3 font-medium text-slate-600">Retailer</th>
+                        <th className="text-left px-4 py-3 font-medium text-slate-600">Customer</th>
                         {AGING_BUCKETS.map(b => (
                           <th key={b.key} className="text-right px-3 py-3 font-medium text-slate-600 hidden sm:table-cell">{b.label}</th>
                         ))}
@@ -214,7 +214,7 @@ export default function ReportsPage() {
 
           <div className="grid lg:grid-cols-2 gap-6">
             <Card>
-              <CardHeader><CardTitle className="text-base">Top 10 Retailers (This Month)</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base">Top 10 Customers (This Month)</CardTitle></CardHeader>
               <CardContent className="p-0">
                 {loading || !sales ? (
                   <div className="p-4 space-y-2">{[1,2,3].map(i => <div key={i} className="h-8 bg-slate-100 rounded animate-pulse" />)}</div>

@@ -150,7 +150,7 @@ export default function DeliveriesPage() {
               <table className="w-full text-sm">
                 <thead className="print:table-header-group">
                   <tr className="border-b bg-slate-50">
-                    <th className="text-left px-4 py-2 font-medium text-slate-600">Retailer</th>
+                    <th className="text-left px-4 py-2 font-medium text-slate-600">Customer</th>
                     <th className="text-left px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">Order #</th>
                     <th className="text-right px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">Amount</th>
                     <th className="text-left px-4 py-2 font-medium text-slate-600 print:hidden">Driver</th>

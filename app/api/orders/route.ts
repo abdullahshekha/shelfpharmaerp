@@ -48,8 +48,25 @@ export async function GET(req: NextRequest) {
   })
 }
 
+interface OrderItemInput {
+  medicineId: string
+  quantity: number
+  mrp?: number | null
+  unitPrice: number
+  offerPercent?: number
+  salesTax?: number
+  bonusQty?: number
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json()
+  const items: OrderItemInput[] = body.items
+
+  const medicines = await prisma.medicine.findMany({
+    where: { id: { in: items.map((i) => i.medicineId) } },
+    select: { id: true, salesTaxApplicable: true },
+  })
+  const medicineMap = new Map(medicines.map((m) => [m.id, m]))
 
   const order = await prisma.$transaction(async (tx) => {
     const orderNumber = generateOrderNumber()
@@ -62,20 +79,25 @@ export async function POST(req: NextRequest) {
         source: body.source ?? 'MANUAL',
         notes: body.notes ?? null,
         items: {
-          create: body.items.map((item: {
-            medicineId: string
-            quantity: number
-            unitPrice: number
-            offerPercent?: number
-            bonusQty?: number
-          }) => ({
-            medicineId: item.medicineId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            offerPercent: item.offerPercent ?? 0,
-            bonusQty: item.bonusQty ?? 0,
-            lineTotal: item.quantity * item.unitPrice * (1 - (item.offerPercent ?? 0) / 100),
-          })),
+          create: items.map((item) => {
+            const medicine = medicineMap.get(item.medicineId)
+            const offerPercent = item.offerPercent ?? 0
+            // Sales tax only applies if the medicine is flagged for it.
+            const salesTax = medicine?.salesTaxApplicable ? (item.salesTax ?? 0) : 0
+            const salesTaxAmount = salesTax * item.quantity
+            const lineTotal = item.quantity * item.unitPrice * (1 - offerPercent / 100)
+            return {
+              medicineId: item.medicineId,
+              quantity: item.quantity,
+              mrp: item.mrp ?? null,
+              unitPrice: item.unitPrice,
+              offerPercent,
+              salesTax,
+              salesTaxAmount,
+              bonusQty: item.bonusQty ?? 0,
+              lineTotal,
+            }
+          }),
         },
       },
       include: { items: true },

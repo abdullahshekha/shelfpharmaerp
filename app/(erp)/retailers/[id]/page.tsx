@@ -21,11 +21,15 @@ interface Area { id: string; name: string }
 interface Retailer {
   id: string; name: string; ownerName: string | null; phone: string | null
   whatsappNumber: string | null; area: Area | null; areaId: string | null
-  address: string | null; drugLicenseNumber: string | null; drugLicenseExpiry: string | null
+  address: string | null; customerType: string | null
+  drugLicenseNumber: string | null; drugLicenseExpiry: string | null
+  isFiler: boolean; ntnNumber: string | null; strnStatus: string | null; strnNumber: string | null
   creditLimit: number; creditDays: number; paymentMode: string; notes: string | null
   salesRepId: string | null; salesRep: { id: string; name: string } | null
   orders: Order[]; invoices: Invoice[]; outstandingBalance: number
 }
+
+const CUSTOMER_TYPES = ['Medical Stores', 'Chain Pharmacy', 'Hospitals', 'Institutions', 'Marts', 'Pharmacy', 'WholeSalers']
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING: 'bg-slate-100 text-slate-700', CONFIRMED: 'bg-blue-100 text-blue-700',
@@ -44,8 +48,9 @@ export default function RetailerDetailPage() {
   const [saving, setSaving] = useState(false)
   const [editForm, setEditForm] = useState({
     name: '', ownerName: '', phone: '', whatsappNumber: '',
-    areaId: '', address: '', drugLicenseNumber: '', drugLicenseExpiry: '',
+    areaId: '', address: '', customerType: '', drugLicenseNumber: '', drugLicenseExpiry: '',
     creditLimit: '', creditDays: '', paymentMode: 'CASH', notes: '',
+    isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '',
   })
 
   const fetchRetailer = () =>
@@ -66,12 +71,17 @@ export default function RetailerDetailPage() {
           whatsappNumber: r.whatsappNumber ?? '',
           areaId: r.areaId ?? '',
           address: r.address ?? '',
+          customerType: r.customerType ?? '',
           drugLicenseNumber: r.drugLicenseNumber ?? '',
           drugLicenseExpiry: r.drugLicenseExpiry ? r.drugLicenseExpiry.slice(0, 10) : '',
           creditLimit: String(r.creditLimit ?? 0),
           creditDays: String(r.creditDays ?? 0),
           paymentMode: r.paymentMode ?? 'CASH',
           notes: r.notes ?? '',
+          isFiler: r.isFiler ? 'true' : 'false',
+          ntnNumber: r.ntnNumber ?? '',
+          strnStatus: r.strnStatus ?? '',
+          strnNumber: r.strnNumber ?? '',
         })
       })
       .finally(() => setLoading(false))
@@ -96,6 +106,12 @@ export default function RetailerDetailPage() {
 
   const saveEdit = async () => {
     if (!editForm.name.trim()) { toast.error('Name is required'); return }
+    const isFiler = editForm.isFiler === 'true'
+    if (isFiler && !editForm.ntnNumber.trim()) { toast.error('NTN Number is required for a Filer customer'); return }
+    if (isFiler && editForm.strnStatus === 'REGISTERED' && !editForm.strnNumber.trim()) {
+      toast.error('STRN Number is required when STRN is Registered')
+      return
+    }
     setSaving(true)
     const res = await fetch(`/api/retailers/${id}`, {
       method: 'PUT',
@@ -103,18 +119,21 @@ export default function RetailerDetailPage() {
       body: JSON.stringify({
         ...editForm,
         areaId: editForm.areaId || null,
+        customerType: editForm.customerType || null,
         creditLimit: isCheque ? (parseFloat(editForm.creditLimit) || 0) : 0,
         creditDays: isCheque ? (parseInt(editForm.creditDays) || 0) : 0,
         drugLicenseExpiry: editForm.drugLicenseExpiry || null,
         salesRepId: retailer?.salesRepId ?? null,
+        isFiler,
       }),
     })
     if (res.ok) {
-      toast.success('Retailer updated')
+      toast.success('Customer updated')
       setEditing(false)
       fetchRetailer()
     } else {
-      toast.error('Failed to save changes')
+      const j = await res.json()
+      toast.error(j.error ?? 'Failed to save changes')
     }
     setSaving(false)
   }
@@ -132,15 +151,15 @@ export default function RetailerDetailPage() {
   }
 
   const deleteRetailer = async () => {
-    if (!confirm('Delete this retailer?')) return
+    if (!confirm('Delete this customer?')) return
     const res = await fetch(`/api/retailers/${id}`, { method: 'DELETE' })
     if (res.ok) {
       const j = await res.json()
       if (j.pending) { toast.info(j.message); return }
-      toast.success('Retailer deleted')
+      toast.success('Customer deleted')
       router.push('/retailers')
     } else {
-      toast.error('Failed to delete retailer')
+      toast.error('Failed to delete customer')
     }
   }
 
@@ -148,7 +167,7 @@ export default function RetailerDetailPage() {
     setEditForm(f => ({ ...f, [field]: e.target.value }))
 
   if (loading) return <div className="animate-pulse p-8 text-slate-400">Loading...</div>
-  if (!retailer) return <div className="p-8 text-slate-400">Retailer not found.</div>
+  if (!retailer) return <div className="p-8 text-slate-400">Customer not found.</div>
 
   const creditPct = retailer.creditLimit > 0 ? Math.min((retailer.outstandingBalance / retailer.creditLimit) * 100, 100) : 0
   const licenseExpiry = retailer.drugLicenseExpiry ? new Date(retailer.drugLicenseExpiry) : null
@@ -168,7 +187,7 @@ export default function RetailerDetailPage() {
           </div>
         </div>
         <div className="ml-auto flex gap-2">
-          <Link href={`/orders/new?retailerId=${retailer.id}`}><Button size="sm">New Order</Button></Link>
+          <Link href={`/orders/new?retailerId=${retailer.id}`}><Button size="sm">New Sales Invoice</Button></Link>
           <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditing(true)}>
             <Pencil size={14} /> Edit
           </Button>
@@ -183,17 +202,30 @@ export default function RetailerDetailPage() {
         <Card className="border-blue-200 bg-blue-50">
           <CardContent className="pt-4 space-y-4">
             <div className="flex items-center justify-between">
-              <p className="font-semibold text-blue-900">Edit Retailer Details</p>
+              <p className="font-semibold text-blue-900">Edit Customer Details</p>
               <button onClick={() => setEditing(false)}><X size={16} className="text-slate-400" /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1 col-span-2">
-                <Label className="text-xs">Shop Name *</Label>
+                <Label className="text-xs">Customer Name *</Label>
                 <Input className="h-8 text-sm bg-white" value={editForm.name} onChange={set('name')} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Owner Name</Label>
                 <Input className="h-8 text-sm bg-white" value={editForm.ownerName} onChange={set('ownerName')} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Customer Type</Label>
+                <Select
+                  items={CUSTOMER_TYPES.map(t => ({ value: t, label: t }))}
+                  value={editForm.customerType || undefined}
+                  onValueChange={v => setEditForm(f => ({ ...f, customerType: v ?? '' }))}
+                >
+                  <SelectTrigger className="h-8 text-sm bg-white"><SelectValue placeholder="Select customer type" /></SelectTrigger>
+                  <SelectContent>
+                    {CUSTOMER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Payment Mode</Label>
@@ -238,6 +270,48 @@ export default function RetailerDetailPage() {
                 <Label className="text-xs">License Expiry</Label>
                 <Input className="h-8 text-sm bg-white" type="date" value={editForm.drugLicenseExpiry} onChange={set('drugLicenseExpiry')} />
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Filer *</Label>
+                <Select
+                  items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
+                  value={editForm.isFiler}
+                  onValueChange={v => setEditForm(f => ({ ...f, isFiler: v ?? 'false', ...(v !== 'true' ? { ntnNumber: '', strnStatus: '', strnNumber: '' } : {}) }))}
+                >
+                  <SelectTrigger className="h-8 text-sm bg-white"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {editForm.isFiler === 'true' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">NTN Number *</Label>
+                  <Input className="h-8 text-sm bg-white" value={editForm.ntnNumber} onChange={set('ntnNumber')} />
+                </div>
+              )}
+              {editForm.isFiler === 'true' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">STRN Status *</Label>
+                  <Select
+                    items={[{ value: 'REGISTERED', label: 'Registered' }, { value: 'UNREGISTERED', label: 'Unregistered' }]}
+                    value={editForm.strnStatus || undefined}
+                    onValueChange={v => setEditForm(f => ({ ...f, strnStatus: v ?? '', ...(v !== 'REGISTERED' ? { strnNumber: '' } : {}) }))}
+                  >
+                    <SelectTrigger className="h-8 text-sm bg-white"><SelectValue placeholder="Select STRN status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="REGISTERED">Registered</SelectItem>
+                      <SelectItem value="UNREGISTERED">Unregistered</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {editForm.isFiler === 'true' && editForm.strnStatus === 'REGISTERED' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">STRN Number *</Label>
+                  <Input className="h-8 text-sm bg-white" value={editForm.strnNumber} onChange={set('strnNumber')} />
+                </div>
+              )}
               {isCheque ? (
                 <>
                   <div className="space-y-1">
@@ -273,6 +347,7 @@ export default function RetailerDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">Contact Details</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
+            {retailer.customerType && <Row label="Customer Type" value={retailer.customerType} />}
             {retailer.ownerName && <Row label="Owner" value={retailer.ownerName} />}
             {retailer.phone && (
               <div className="flex justify-between">
@@ -325,7 +400,11 @@ export default function RetailerDetailPage() {
                 )}
               </>
             ) : (
-              <p className="text-slate-400 text-xs">Cash retailer — no credit terms apply.</p>
+              <p className="text-slate-400 text-xs">Cash customer — no credit terms apply.</p>
+            )}
+            {retailer.isFiler && retailer.ntnNumber && <Row label="NTN" value={retailer.ntnNumber} />}
+            {retailer.isFiler && (
+              <Row label="STRN" value={retailer.strnStatus === 'REGISTERED' ? (retailer.strnNumber ?? '—') : 'Unregistered'} />
             )}
             {retailer.drugLicenseNumber && <Row label="Drug License #" value={retailer.drugLicenseNumber} />}
             {licenseExpiry && (

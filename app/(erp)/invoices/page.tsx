@@ -84,7 +84,7 @@ function RetailerInvoicesTab() {
             <thead>
               <tr className="border-b bg-slate-50 text-slate-600">
                 <th className="text-left px-4 py-3 font-medium">Invoice #</th>
-                <th className="text-left px-4 py-3 font-medium">Retailer</th>
+                <th className="text-left px-4 py-3 font-medium">Customer</th>
                 <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Date</th>
                 <th className="text-left px-4 py-3 font-medium">Status</th>
                 <th className="text-right px-4 py-3 font-medium">Amount</th>

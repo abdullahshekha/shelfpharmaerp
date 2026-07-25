@@ -120,7 +120,7 @@ export default function WhatsappPage() {
                   <ImageIcon size={48} />
                 </div>
                 <p className="text-slate-700 font-medium">
-                  {dragging ? 'Drop image here' : 'Click or drag to upload a retailer order image'}
+                  {dragging ? 'Drop image here' : 'Click or drag to upload a customer order image'}
                 </p>
                 <p className="text-slate-400 text-sm">JPEG, PNG · Handwritten order photos from WhatsApp</p>
                 <Button size="sm" className="gap-2 mt-2" type="button" onClick={e => { e.stopPropagation(); fileRef.current?.click() }}>
@@ -168,13 +168,13 @@ export default function WhatsappPage() {
             <div className="p-12 text-center text-slate-400">
               <MessageSquare size={36} className="mx-auto mb-3 text-slate-300" />
               <p className="font-medium">No orders yet</p>
-              <p className="text-sm mt-1">Upload a retailer order image above to get started</p>
+              <p className="text-sm mt-1">Upload a customer order image above to get started</p>
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-slate-50">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Retailer</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Customer</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600 hidden sm:table-cell">Time</th>
                   <th className="text-center px-4 py-3 font-medium text-slate-600">Items</th>
                   <th className="text-center px-4 py-3 font-medium text-slate-600">Status</th>

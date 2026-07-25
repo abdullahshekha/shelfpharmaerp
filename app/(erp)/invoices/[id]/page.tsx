@@ -35,7 +35,7 @@ interface Invoice {
   status: string
   notes: string | null
   retailer: { name: string; ownerName: string | null; phone: string | null; area: string | null; address: string | null; drugLicenseNumber: string | null }
-  order: { orderNumber: string; items: { id: string; quantity: number; unitPrice: number; offerPercent: number; lineTotal: number; medicine: { name: string; code: string } }[] }
+  order: { orderNumber: string; items: { id: string; quantity: number; mrp: number | null; unitPrice: number; offerPercent: number; salesTax: number; lineTotal: number; medicine: { name: string; code: string } }[] }
   payments: Payment[]
 }
 
@@ -224,8 +224,10 @@ export default function InvoiceDetailPage() {
               <tr className="border-b bg-slate-50">
                 <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
                 <th className="text-center px-4 py-3 font-medium text-slate-600">Qty</th>
-                <th className="text-right px-4 py-3 font-medium text-slate-600">Unit Price</th>
-                <th className="text-center px-4 py-3 font-medium text-slate-600">Offer</th>
+                <th className="text-right px-4 py-3 font-medium text-slate-600">MRP</th>
+                <th className="text-right px-4 py-3 font-medium text-slate-600">Trade Price</th>
+                <th className="text-center px-4 py-3 font-medium text-slate-600">Disc %</th>
+                <th className="text-right px-4 py-3 font-medium text-slate-600">S. Tax</th>
                 <th className="text-right px-4 py-3 font-medium text-slate-600">Amount</th>
               </tr>
             </thead>
@@ -237,25 +239,33 @@ export default function InvoiceDetailPage() {
                     <div className="text-xs text-slate-400 font-mono">{item.medicine.code}</div>
                   </td>
                   <td className="px-4 py-2 text-center">{item.quantity}</td>
+                  <td className="px-4 py-2 text-right">{item.mrp != null ? formatPKR(item.mrp) : '—'}</td>
                   <td className="px-4 py-2 text-right">{formatPKR(item.unitPrice)}</td>
                   <td className="px-4 py-2 text-center">{Number(item.offerPercent) > 0 ? `${item.offerPercent}%` : '—'}</td>
+                  <td className="px-4 py-2 text-right">{Number(item.salesTax) > 0 ? formatPKR(item.salesTax) : '—'}</td>
                   <td className="px-4 py-2 text-right font-medium">{formatPKR(item.lineTotal)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="border-t">
-                <td colSpan={4} className="px-4 py-2 text-right text-slate-600">Subtotal</td>
+                <td colSpan={6} className="px-4 py-2 text-right text-slate-600">Subtotal</td>
                 <td className="px-4 py-2 text-right">{formatPKR(invoice.subtotal)}</td>
               </tr>
               {Number(invoice.discountAmount) > 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-2 text-right text-slate-600">Discount</td>
+                  <td colSpan={6} className="px-4 py-2 text-right text-slate-600">Discount</td>
                   <td className="px-4 py-2 text-right text-red-600">-{formatPKR(invoice.discountAmount)}</td>
                 </tr>
               )}
+              {Number(invoice.taxAmount) > 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-2 text-right text-slate-600">Tax</td>
+                  <td className="px-4 py-2 text-right">{formatPKR(invoice.taxAmount)}</td>
+                </tr>
+              )}
               <tr className="font-bold">
-                <td colSpan={4} className="px-4 py-3 text-right">Total</td>
+                <td colSpan={6} className="px-4 py-3 text-right">Total</td>
                 <td className="px-4 py-3 text-right text-lg">{formatPKR(invoice.totalAmount)}</td>
               </tr>
             </tfoot>

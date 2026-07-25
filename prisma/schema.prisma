@@ -34,8 +34,39 @@ model Supplier {
   drugLicenseNumber String?
   isActive          Boolean           @default(true)
   purchaseInvoices  PurchaseInvoice[]
+  supplierReturns   SupplierReturn[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+}
+
+model SupplierReturn {
+  id           String               @id @default(cuid())
+  returnNumber String               @unique
+  supplierId   String
+  supplier     Supplier             @relation(fields: [supplierId], references: [id])
+  returnDate   DateTime             @default(now())
+  totalAmount  Decimal              @default(0) @db.Decimal(10, 2)
+  notes        String?
+  items        SupplierReturnItem[]
+  createdAt    DateTime             @default(now())
+
+  @@index([supplierId])
+}
+
+model SupplierReturnItem {
+  id               String         @id @default(cuid())
+  supplierReturnId String
+  supplierReturn   SupplierReturn @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  medicineId       String
+  medicine         Medicine       @relation(fields: [medicineId], references: [id])
+  batchId          String
+  batch            MedicineBatch  @relation(fields: [batchId], references: [id])
+  quantity         Int
+  purchasePrice    Decimal        @db.Decimal(10, 2)
+  lineTotal        Decimal        @db.Decimal(10, 2)
+  reason           String?
+
+  @@index([supplierReturnId])
 }
 
 model PurchaseInvoice {
@@ -144,42 +175,44 @@ model Manufacturer {
 }
 
 model Medicine {
-  id                 String                @id @default(cuid())
-  code               String                @unique
-  name               String
-  genericName        String?
-  manufacturerId     String
-  manufacturer       Manufacturer          @relation(fields: [manufacturerId], references: [id])
-  category           String?
-  packSize           String?
-  bonusQty           String?
-  bonusNote          String?
-  salesTaxApplicable Boolean               @default(false)
-  minStockLevel      Int                   @default(10)
-  isActive           Boolean               @default(true)
-  batches            MedicineBatch[]
-  orderItems         OrderItem[]
-  offerListItems     OfferListItem[]
-  purchaseItems      PurchaseInvoiceItem[]
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
+  id                  String                @id @default(cuid())
+  code                String                @unique
+  name                String
+  genericName         String?
+  manufacturerId      String
+  manufacturer        Manufacturer          @relation(fields: [manufacturerId], references: [id])
+  category            String?
+  packSize            String?
+  bonusQty            String?
+  bonusNote           String?
+  salesTaxApplicable  Boolean               @default(false)
+  minStockLevel       Int                   @default(10)
+  isActive            Boolean               @default(true)
+  batches             MedicineBatch[]
+  orderItems          OrderItem[]
+  offerListItems      OfferListItem[]
+  purchaseItems       PurchaseInvoiceItem[]
+  supplierReturnItems SupplierReturnItem[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   @@index([name])
   @@index([code])
 }
 
 model MedicineBatch {
-  id            String   @id @default(cuid())
+  id            String               @id @default(cuid())
   medicineId    String
-  medicine      Medicine @relation(fields: [medicineId], references: [id])
+  medicine      Medicine             @relation(fields: [medicineId], references: [id])
   batchNumber   String
   expiryDate    DateTime
   quantityIn    Int
   currentQty    Int
-  purchasePrice Decimal  @db.Decimal(10, 2)
-  tradePrice    Decimal  @db.Decimal(10, 2)
-  mrp           Decimal? @db.Decimal(10, 2)
-  createdAt     DateTime @default(now())
+  purchasePrice Decimal              @db.Decimal(10, 2)
+  tradePrice    Decimal              @db.Decimal(10, 2)
+  mrp           Decimal?             @db.Decimal(10, 2)
+  returnItems   SupplierReturnItem[]
+  createdAt     DateTime             @default(now())
 
   @@index([medicineId])
   @@index([expiryDate])
@@ -217,8 +250,13 @@ model Retailer {
   areaId            String?
   area              Area?           @relation(fields: [areaId], references: [id])
   address           String?
+  customerType      String? // Medical Stores | Chain Pharmacy | Hospitals | Institutions | Marts | Pharmacy | WholeSalers
   drugLicenseNumber String?
   drugLicenseExpiry DateTime?
+  isFiler           Boolean         @default(false)
+  ntnNumber         String?
+  strnStatus        String? // REGISTERED | UNREGISTERED — only meaningful when isFiler
+  strnNumber        String?
   creditLimit       Decimal         @default(0) @db.Decimal(10, 2)
   creditDays        Int             @default(0)
   paymentMode       String          @default("CASH")
@@ -266,16 +304,19 @@ model Order {
 }
 
 model OrderItem {
-  id           String   @id @default(cuid())
-  orderId      String
-  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  medicineId   String
-  medicine     Medicine @relation(fields: [medicineId], references: [id])
-  quantity     Int
-  unitPrice    Decimal  @db.Decimal(10, 2)
-  offerPercent Decimal  @default(0) @db.Decimal(10, 2)
-  bonusQty     Int      @default(0)
-  lineTotal    Decimal  @db.Decimal(10, 2)
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  medicineId     String
+  medicine       Medicine @relation(fields: [medicineId], references: [id])
+  quantity       Int
+  mrp            Decimal? @db.Decimal(10, 2)
+  unitPrice      Decimal  @db.Decimal(10, 2)
+  offerPercent   Decimal  @default(0) @db.Decimal(10, 2)
+  salesTax       Decimal  @default(0) @db.Decimal(10, 2)
+  salesTaxAmount Decimal  @default(0) @db.Decimal(10, 2)
+  bonusQty       Int      @default(0)
+  lineTotal      Decimal  @db.Decimal(10, 2)
 
   @@index([orderId])
 }
@@ -299,6 +340,7 @@ model OfferListItem {
   offerPercent Decimal   @default(0) @db.Decimal(10, 2)
   bonusQty     Int       @default(0)
   specialPrice Decimal?  @db.Decimal(10, 2)
+  salesTax     Decimal   @default(0) @db.Decimal(10, 2)
 
   @@unique([offerListId, medicineId])
 }

@@ -132,7 +132,7 @@ export default function WhatsappReviewPage() {
   }
 
   const confirmOrder = async (force = false) => {
-    if (!retailerId) { toast.error('Select a retailer first'); return }
+    if (!retailerId) { toast.error('Select a customer first'); return }
     const included = lines.filter(l => l.included && l.selectedMedicineId)
     if (included.length === 0) { toast.error('No items to confirm'); return }
 
@@ -211,7 +211,7 @@ export default function WhatsappReviewPage() {
         <div className="space-y-4">
           {/* Retailer selection */}
           <Card className="overflow-visible">
-            <CardHeader><CardTitle className="text-base">Retailer</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">Customer</CardTitle></CardHeader>
             <CardContent>
               {retailerId ? (
                 <div className="flex items-center justify-between p-2 bg-blue-50 rounded">
@@ -224,7 +224,7 @@ export default function WhatsappReviewPage() {
                 <div className="relative">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <Input
-                    placeholder="Search retailer…"
+                    placeholder="Search customer…"
                     className="pl-8 text-sm"
                     value={retailerSearch}
                     onChange={e => { setRetailerSearch(e.target.value); setRetailerId('') }}

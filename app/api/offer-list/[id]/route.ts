@@ -49,6 +49,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             offerPercent: item.offerPercent ?? 0,
             bonusQty: item.bonusQty ?? 0,
             specialPrice: item.specialPrice ?? null,
+            salesTax: item.salesTax ?? 0,
           },
           create: {
             offerListId: id,
@@ -56,6 +57,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             offerPercent: item.offerPercent ?? 0,
             bonusQty: item.bonusQty ?? 0,
             specialPrice: item.specialPrice ?? null,
+            salesTax: item.salesTax ?? 0,
           },
         })
       }

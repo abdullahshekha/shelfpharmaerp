@@ -68,7 +68,7 @@ export default function OrdersPage() {
           <p className="text-slate-500 text-sm">{total} orders</p>
         </div>
         <Link href="/orders/new">
-          <Button size="sm" className="gap-2"><Plus size={16} /> New Order</Button>
+          <Button size="sm" className="gap-2"><Plus size={16} /> Sales Invoice</Button>
         </Link>
       </div>
 
@@ -101,7 +101,7 @@ export default function OrdersPage() {
               <thead>
                 <tr className="border-b bg-slate-50 text-slate-600">
                   <th className="text-left px-4 py-3 font-medium">Order #</th>
-                  <th className="text-left px-4 py-3 font-medium">Retailer</th>
+                  <th className="text-left px-4 py-3 font-medium">Customer</th>
                   <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Date</th>
                   <th className="text-left px-4 py-3 font-medium">Status</th>
                   <th className="text-right px-4 py-3 font-medium">Total</th>

@@ -40,6 +40,29 @@ interface InvoiceItem {
 
 interface Payment { id: string; amount: number; paymentDate: string; method: string; reference: string | null }
 
+interface Batch { id: string; batchNumber: string; expiryDate: string; currentQty: number; purchasePrice: number }
+
+interface ReturnItem {
+  medicineId: string
+  medicineName: string
+  batches: Batch[]
+  batchId: string
+  quantity: number
+  reason: string
+}
+
+interface SupplierReturn {
+  id: string
+  returnNumber: string
+  returnDate: string
+  totalAmount: number
+  notes: string | null
+  items: {
+    id: string; quantity: number; purchasePrice: number; lineTotal: number; reason: string | null
+    medicine: { name: string; code: string }
+  }[]
+}
+
 interface PurchaseInvoice {
   id: string
   invoiceNumber: string
@@ -65,6 +88,7 @@ interface Supplier {
   isFiler: boolean; ntnNumber: string | null; strnStatus: string | null
   strnNumber: string | null; drugLicenseNumber: string | null
   purchaseInvoices: PurchaseInvoice[]
+  supplierReturns: SupplierReturn[]
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -115,13 +139,15 @@ function itemPriceWarning(item: InvoiceItem): { oldPrice: number } | null {
   return null
 }
 
-/** Supplier's current outstanding balance across all not-fully-paid purchase invoices. */
+/** Supplier's current outstanding balance: unpaid purchase invoices, minus returned goods credited back. */
 function computeSupplierOutstanding(supplier: Supplier): number {
-  return supplier.purchaseInvoices.reduce((sum, inv) => {
+  const invoiceBalance = supplier.purchaseInvoices.reduce((sum, inv) => {
     if (inv.status === 'PAID') return sum
     const paid = inv.payments.reduce((s, p) => s + Number(p.amount), 0)
     return sum + (Number(inv.totalAmount) - paid)
   }, 0)
+  const returnsTotal = supplier.supplierReturns.reduce((sum, r) => sum + Number(r.totalAmount), 0)
+  return invoiceBalance - returnsTotal
 }
 
 export default function SupplierDetailPage() {
@@ -144,6 +170,16 @@ export default function SupplierDetailPage() {
   const [payingInvoiceId, setPayingInvoiceId] = useState<string | null>(null)
   const [paymentForm, setPaymentForm] = useState(emptyPayment)
   const [savingPayment, setSavingPayment] = useState(false)
+
+  // Return invoice form
+  const [showReturnForm, setShowReturnForm] = useState(false)
+  const [returnDate, setReturnDate] = useState(new Date().toISOString().slice(0, 10))
+  const [returnNotes, setReturnNotes] = useState('')
+  const [returnItems, setReturnItems] = useState<ReturnItem[]>([])
+  const [returnMedSearch, setReturnMedSearch] = useState('')
+  const [returnMedResults, setReturnMedResults] = useState<Medicine[]>([])
+  const [showReturnMedDrop, setShowReturnMedDrop] = useState(false)
+  const [savingReturn, setSavingReturn] = useState(false)
 
   const fetchSupplier = useCallback(async () => {
     setLoading(true)
@@ -198,6 +234,83 @@ export default function SupplierDetailPage() {
 
   const updateItem = (medicineId: string, patch: Partial<InvoiceItem>) => {
     setItems(prev => prev.map(i => i.medicineId === medicineId ? { ...i, ...patch } : i))
+  }
+
+  // Medicine search for return form
+  useEffect(() => {
+    if (!returnMedSearch) { setReturnMedResults([]); return }
+    const t = setTimeout(async () => {
+      const res = await fetch(`/api/inventory?search=${encodeURIComponent(returnMedSearch)}&pageSize=8`)
+      const j = await res.json()
+      setReturnMedResults(j.data ?? [])
+      setShowReturnMedDrop(true)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [returnMedSearch])
+
+  const addReturnItem = async (med: Medicine) => {
+    setReturnMedSearch('')
+    setShowReturnMedDrop(false)
+    const res = await fetch(`/api/inventory/${med.id}`)
+    const j = await res.json()
+    const batches: Batch[] = (j.data?.batches ?? [])
+      .filter((b: { currentQty: number }) => b.currentQty > 0)
+      .map((b: { id: string; batchNumber: string; expiryDate: string; currentQty: number; purchasePrice: number }) => ({
+        id: b.id, batchNumber: b.batchNumber, expiryDate: b.expiryDate, currentQty: b.currentQty, purchasePrice: Number(b.purchasePrice),
+      }))
+    if (batches.length === 0) {
+      toast.error(`${med.name} has no in-stock batches to return`)
+      return
+    }
+    setReturnItems(prev => [...prev, {
+      medicineId: med.id,
+      medicineName: med.name,
+      batches,
+      batchId: batches[0].id,
+      quantity: 1,
+      reason: '',
+    }])
+  }
+
+  const updateReturnItem = (medicineId: string, patch: Partial<ReturnItem>) => {
+    setReturnItems(prev => prev.map(i => i.medicineId === medicineId ? { ...i, ...patch } : i))
+  }
+
+  const createReturn = async () => {
+    if (returnItems.length === 0) { toast.error('Add at least one medicine'); return }
+    for (const item of returnItems) {
+      const batch = item.batches.find(b => b.id === item.batchId)
+      if (!item.quantity || (batch && item.quantity > batch.currentQty)) {
+        toast.error(`${item.medicineName}: quantity must be between 1 and ${batch?.currentQty ?? 0}`)
+        return
+      }
+    }
+    setSavingReturn(true)
+    const res = await fetch(`/api/suppliers/${id}/returns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        returnDate,
+        notes: returnNotes || null,
+        items: returnItems.map(i => ({
+          medicineId: i.medicineId,
+          batchId: i.batchId,
+          quantity: i.quantity,
+          reason: i.reason || null,
+        })),
+      }),
+    })
+    if (res.ok) {
+      toast.success('Return invoice created')
+      setShowReturnForm(false)
+      setReturnItems([])
+      setReturnNotes('')
+      fetchSupplier()
+    } else {
+      const j = await res.json()
+      toast.error(j.error ?? 'Failed to create return')
+    }
+    setSavingReturn(false)
   }
 
   const isFiler = supplier?.isFiler ?? false
@@ -295,9 +408,14 @@ export default function SupplierDetailPage() {
             )}
           </div>
         </div>
-        <Button onClick={() => { setPreviousPayable(String(computeSupplierOutstanding(supplier))); setShowInvoiceForm(true) }} className="gap-2">
-          <Plus size={16} /> New Purchase Invoice
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowReturnForm(true)} className="gap-2">
+            <Plus size={16} /> Return Invoice
+          </Button>
+          <Button onClick={() => { setPreviousPayable(String(computeSupplierOutstanding(supplier))); setShowInvoiceForm(true) }} className="gap-2">
+            <Plus size={16} /> New Purchase Invoice
+          </Button>
+        </div>
       </div>
 
       {/* Supplier info */}
@@ -522,6 +640,136 @@ export default function SupplierDetailPage() {
         </Card>
       )}
 
+      {/* Return invoice form */}
+      {showReturnForm && (
+        <Card className="border-orange-200">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              Return Invoice
+              <button onClick={() => { setShowReturnForm(false); setReturnItems([]) }}><X size={16} className="text-slate-400" /></button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Return Date</Label>
+                <Input type="date" className="h-8 text-sm" value={returnDate} onChange={e => setReturnDate(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Notes</Label>
+                <Input className="h-8 text-sm" placeholder="Optional notes" value={returnNotes} onChange={e => setReturnNotes(e.target.value)} />
+              </div>
+            </div>
+
+            {returnItems.length > 0 && (
+              <div className="overflow-x-auto -mx-2 px-2">
+                <table className="w-full text-sm min-w-[700px]">
+                  <thead>
+                    <tr className="border-b text-slate-600 text-xs">
+                      <th className="text-left py-1.5 pr-2">Medicine</th>
+                      <th className="text-left py-1.5 px-1 w-56">Batch</th>
+                      <th className="text-center py-1.5 px-1 w-20">Qty</th>
+                      <th className="text-right py-1.5 px-1 w-24">Purchase Price</th>
+                      <th className="text-right py-1.5 px-1 w-24">Total</th>
+                      <th className="text-left py-1.5 px-1">Reason</th>
+                      <th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returnItems.map(item => {
+                      const batch = item.batches.find(b => b.id === item.batchId)
+                      const lineTotal = (batch ? batch.purchasePrice : 0) * item.quantity
+                      return (
+                        <tr key={item.medicineId} className="border-b">
+                          <td className="py-1.5 pr-2 font-medium whitespace-nowrap">{item.medicineName}</td>
+                          <td className="py-1.5 px-1">
+                            <Select
+                              items={item.batches.map(b => ({ value: b.id, label: `${b.batchNumber} (exp ${formatDate(b.expiryDate)}, ${b.currentQty} in stock)` }))}
+                              value={item.batchId}
+                              onValueChange={v => updateReturnItem(item.medicineId, { batchId: v ?? item.batchId })}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-full"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {item.batches.map(b => (
+                                  <SelectItem key={b.id} value={b.id}>
+                                    {b.batchNumber} (exp {formatDate(b.expiryDate)}, {b.currentQty} in stock)
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="py-1.5 px-1 text-center">
+                            <Input type="number" min="1" max={batch?.currentQty ?? 1} className="w-16 h-7 text-xs text-center mx-auto"
+                              value={item.quantity}
+                              onChange={e => updateReturnItem(item.medicineId, { quantity: parseInt(e.target.value) || 1 })} />
+                          </td>
+                          <td className="py-1.5 px-1 text-right whitespace-nowrap">{formatPKR(batch?.purchasePrice ?? 0)}</td>
+                          <td className="py-1.5 px-1 text-right font-medium whitespace-nowrap">{formatPKR(lineTotal)}</td>
+                          <td className="py-1.5 px-1">
+                            <Input placeholder="Optional" className="h-7 text-xs"
+                              value={item.reason}
+                              onChange={e => updateReturnItem(item.medicineId, { reason: e.target.value })} />
+                          </td>
+                          <td className="py-1.5 px-1">
+                            <button className="text-slate-400 hover:text-red-500"
+                              onClick={() => setReturnItems(prev => prev.filter(i => i.medicineId !== item.medicineId))}>
+                              <X size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="Search medicine to return..."
+                className="pl-9 text-sm"
+                value={returnMedSearch}
+                onChange={e => setReturnMedSearch(e.target.value)}
+                onBlur={() => setTimeout(() => setShowReturnMedDrop(false), 200)}
+              />
+              {showReturnMedDrop && returnMedResults.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {returnMedResults.map(m => (
+                    <button key={m.id} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between"
+                      onMouseDown={() => addReturnItem(m)}>
+                      <span className="font-medium">{m.name}</span>
+                      <span className="text-slate-400 font-mono text-xs">{m.code}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {returnItems.length > 0 && (
+              <div className="flex justify-end">
+                <div className="w-full sm:w-72 flex justify-between font-bold text-base border-t pt-1">
+                  <span>Return Total</span>
+                  <span>
+                    {formatPKR(returnItems.reduce((s, i) => {
+                      const b = i.batches.find(bb => bb.id === i.batchId)
+                      return s + (b ? b.purchasePrice : 0) * i.quantity
+                    }, 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setShowReturnForm(false); setReturnItems([]) }}>Cancel</Button>
+              <Button size="sm" onClick={createReturn} disabled={savingReturn || returnItems.length === 0}>
+                {savingReturn ? 'Creating...' : 'Create Return'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Purchase Invoices */}
       <Card>
         <CardHeader><CardTitle className="text-base">Purchase Invoices ({supplier.purchaseInvoices.length})</CardTitle></CardHeader>
@@ -647,6 +895,37 @@ export default function SupplierDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Return Invoices */}
+      {supplier.supplierReturns.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Return Invoices ({supplier.supplierReturns.length})</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y">
+              {supplier.supplierReturns.map(ret => (
+                <div key={ret.id} className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-mono font-medium text-sm">{ret.returnNumber}</p>
+                      <p className="text-xs text-slate-500">{formatDate(ret.returnDate)} · {ret.items.length} items</p>
+                    </div>
+                    <p className="font-bold text-orange-600">-{formatPKR(ret.totalAmount)}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded p-2 space-y-1">
+                    {ret.items.map(item => (
+                      <div key={item.id} className="flex justify-between text-xs text-slate-600">
+                        <span>{item.medicine.name}{item.reason && <span className="text-slate-400"> — {item.reason}</span>}</span>
+                        <span>{item.quantity} × {formatPKR(item.purchasePrice)} = {formatPKR(item.lineTotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {ret.notes && <p className="text-xs text-slate-500 italic">{ret.notes}</p>}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -127,11 +127,13 @@ const styles = StyleSheet.create({
   },
 
   // Column widths
-  colName: { width: '40%' },
-  colQty: { width: '8%', textAlign: 'center' },
-  colPrice: { width: '18%', textAlign: 'right' },
-  colOffer: { width: '10%', textAlign: 'center' },
-  colAmount: { width: '24%', textAlign: 'right' },
+  colName: { width: '24%' },
+  colQty: { width: '7%', textAlign: 'center' },
+  colMrp: { width: '13%', textAlign: 'right' },
+  colPrice: { width: '15%', textAlign: 'right' },
+  colOffer: { width: '8%', textAlign: 'center' },
+  colTax: { width: '12%', textAlign: 'right' },
+  colAmount: { width: '21%', textAlign: 'right' },
 
   // Totals
   totalsSection: {
@@ -320,8 +322,10 @@ export interface InvoicePDFProps {
       items: {
         id: string
         quantity: number
+        mrp: number | null
         unitPrice: number
         offerPercent: number
+        salesTax: number
         lineTotal: number
         medicine: { name: string; code: string }
       }[]
@@ -424,8 +428,10 @@ export function InvoicePDF({ invoice }: InvoicePDFProps) {
           <View style={styles.tableHeader}>
             <Text style={{ ...styles.tableHeaderCell, ...styles.colName }}>Medicine</Text>
             <Text style={{ ...styles.tableHeaderCell, ...styles.colQty }}>Qty</Text>
-            <Text style={{ ...styles.tableHeaderCell, ...styles.colPrice }}>Unit Price</Text>
-            <Text style={{ ...styles.tableHeaderCell, ...styles.colOffer }}>Offer</Text>
+            <Text style={{ ...styles.tableHeaderCell, ...styles.colMrp }}>MRP</Text>
+            <Text style={{ ...styles.tableHeaderCell, ...styles.colPrice }}>Trade Price</Text>
+            <Text style={{ ...styles.tableHeaderCell, ...styles.colOffer }}>Disc %</Text>
+            <Text style={{ ...styles.tableHeaderCell, ...styles.colTax }}>S. Tax</Text>
             <Text style={{ ...styles.tableHeaderCell, ...styles.colAmount }}>Amount</Text>
           </View>
           {invoice.order.items.map((item, i) => (
@@ -435,9 +441,13 @@ export function InvoicePDF({ invoice }: InvoicePDFProps) {
                 <Text style={styles.medicineCode}>{item.medicine.code}</Text>
               </View>
               <Text style={{ ...styles.tableCell, ...styles.colQty }}>{item.quantity}</Text>
+              <Text style={{ ...styles.tableCell, ...styles.colMrp }}>{item.mrp != null ? fmtPKR(item.mrp) : '—'}</Text>
               <Text style={{ ...styles.tableCell, ...styles.colPrice }}>{fmtPKR(item.unitPrice)}</Text>
               <Text style={{ ...styles.tableCell, ...styles.colOffer }}>
                 {Number(item.offerPercent) > 0 ? `${item.offerPercent}%` : '—'}
+              </Text>
+              <Text style={{ ...styles.tableCell, ...styles.colTax }}>
+                {Number(item.salesTax) > 0 ? fmtPKR(item.salesTax) : '—'}
               </Text>
               <Text style={{ ...styles.tableCellBold, ...styles.colAmount }}>{fmtPKR(item.lineTotal)}</Text>
             </View>
