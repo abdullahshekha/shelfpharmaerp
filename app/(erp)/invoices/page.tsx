@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
-import { ChevronLeft, ChevronRight, Search, FileText, Building2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { DateRangePicker, type DateRange } from '@/components/shared/DateRangePicker'
 
@@ -76,6 +76,9 @@ function RetailerInvoicesTab() {
           <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500"
             onClick={() => { setStatus(''); setDateRange(null) }}>Clear</Button>
         )}
+        <Link href="/orders/new" className="ml-auto">
+          <Button size="sm" className="gap-2"><Plus size={16} /> New Sales Invoice</Button>
+        </Link>
       </div>
 
       <Card>
@@ -255,6 +258,9 @@ function PurchaseInvoicesTab() {
             Clear
           </Button>
         )}
+        <Link href="/suppliers" className="ml-auto">
+          <Button size="sm" className="gap-2"><Plus size={16} /> New Purchase Invoice</Button>
+        </Link>
       </div>
 
       <Card>

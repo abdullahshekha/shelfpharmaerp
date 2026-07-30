@@ -64,7 +64,7 @@ export default function CustomerGroupsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/offer-list"><Button variant="ghost" size="icon"><ArrowLeft size={18} /></Button></Link>
+          <Link href="/retailers"><Button variant="ghost" size="icon"><ArrowLeft size={18} /></Button></Link>
           <div>
             <h1 className="text-2xl font-bold">Customer Groups</h1>
             <p className="text-slate-500 text-sm">{groups.length} groups · used to assign Offer Lists to customers</p>
