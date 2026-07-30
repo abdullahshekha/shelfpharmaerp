@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const lists = await prisma.offerList.findMany({
     orderBy: { createdAt: 'desc' },
-    include: { _count: { select: { items: true } } },
+    include: { _count: { select: { items: true, assignments: true, customers: true } } },
   })
   return NextResponse.json({ data: lists })
 }
@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
 
   const list = await prisma.offerList.create({
     data: {
+      name: body.name?.trim() || null,
       listNumber,
       listDate: body.listDate ? new Date(body.listDate) : new Date(),
       createdBy: body.createdBy ?? null,

@@ -7,16 +7,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatDate } from '@/lib/utils/format'
-import { Plus, Eye, Zap, Download, Trash2 } from 'lucide-react'
+import { Plus, Eye, Zap, Download, Trash2, Users, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
+import Link from 'next/link'
 
 interface OfferList {
   id: string
+  name: string | null
   listNumber: string
   listDate: string
   isActive: boolean
   createdAt: string
-  _count: { items: number }
+  _count: { items: number; assignments: number; customers: number }
 }
 
 export default function OfferListPage() {
@@ -24,6 +26,7 @@ export default function OfferListPage() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [name, setName] = useState('')
   const [listDate, setListDate] = useState(new Date().toISOString().slice(0, 10))
 
   const fetchLists = useCallback(async () => {
@@ -41,11 +44,12 @@ export default function OfferListPage() {
     const res = await fetch('/api/offer-list', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ listDate }),
+      body: JSON.stringify({ name, listDate }),
     })
     if (res.ok) {
       toast.success('Offer list created')
       setShowForm(false)
+      setName('')
       fetchLists()
     } else {
       toast.error('Failed to create')
@@ -84,9 +88,16 @@ export default function OfferListPage() {
           <h1 className="text-2xl font-bold">Offer List</h1>
           <p className="text-slate-500 text-sm">{lists.length} lists</p>
         </div>
-        <Button size="sm" className="gap-2" onClick={() => setShowForm(!showForm)}>
-          <Plus size={16} /> New Offer List
-        </Button>
+        <div className="flex gap-2">
+          <Link href="/customer-groups">
+            <Button size="sm" variant="outline" className="gap-2">
+              <Settings2 size={16} /> Customer Groups
+            </Button>
+          </Link>
+          <Button size="sm" className="gap-2" onClick={() => setShowForm(!showForm)}>
+            <Plus size={16} /> New Offer List
+          </Button>
+        </div>
       </div>
 
       {/* Create form */}
@@ -95,6 +106,10 @@ export default function OfferListPage() {
           <CardContent className="pt-4 space-y-4">
             <p className="font-medium text-blue-900">Create New Offer List</p>
             <div className="flex items-end gap-4">
+              <div className="space-y-1.5 flex-1 max-w-sm">
+                <Label>Name</Label>
+                <Input placeholder="e.g. July Monthly Offer" value={name} onChange={e => setName(e.target.value)} />
+              </div>
               <div className="space-y-1.5">
                 <Label>List Date</Label>
                 <Input type="date" value={listDate} onChange={e => setListDate(e.target.value)} className="w-44" />
@@ -105,7 +120,7 @@ export default function OfferListPage() {
               <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
             </div>
             <p className="text-xs text-blue-700">
-              List number is auto-assigned. After creation, go to the list to add medicines and set offers.
+              List number is auto-assigned. After creation, open the list and hit Refresh to pull in every in-stock medicine.
             </p>
           </CardContent>
         </Card>
@@ -119,12 +134,16 @@ export default function OfferListPage() {
               <p className="font-semibold text-green-900 flex items-center gap-2">
                 <Zap size={16} className="text-green-600" />
                 Active List: <span className="font-mono">#{activeList.listNumber}</span>
+                {activeList.name && <span className="font-normal text-green-800">— {activeList.name}</span>}
               </p>
               <p className="text-sm text-green-700">
                 {activeList._count.items} medicines · Date: {formatDate(activeList.listDate)}
               </p>
             </div>
             <div className="flex gap-2">
+              <Link href={`/offer-list/${activeList.id}`}>
+                <Button size="sm" variant="outline" className="gap-1">Open</Button>
+              </Link>
               <a href={`/api/offer-list/export?id=${activeList.id}`} target="_blank" rel="noreferrer">
                 <Button size="sm" variant="outline" className="gap-1">
                   <Eye size={14} /> Preview
@@ -152,61 +171,57 @@ export default function OfferListPage() {
               <p className="text-sm mt-1">Create your first offer list to get started</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-slate-50">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">List #</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Date</th>
-                  <th className="text-center px-4 py-3 font-medium text-slate-600">Items</th>
-                  <th className="text-center px-4 py-3 font-medium text-slate-600">Status</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {lists.map(list => (
-                  <tr key={list.id} className="border-b hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono font-bold">{list.listNumber}</td>
-                    <td className="px-4 py-3">{formatDate(list.listDate)}</td>
-                    <td className="px-4 py-3 text-center">{list._count.items}</td>
-                    <td className="px-4 py-3 text-center">
-                      {list.isActive
-                        ? <Badge className="bg-green-100 text-green-800">Active</Badge>
-                        : <Badge variant="outline" className="text-slate-500">Inactive</Badge>
-                      }
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 justify-end">
-                        <a href={`/api/offer-list/export?id=${list.id}`} target="_blank" rel="noreferrer">
-                          <Button size="sm" variant="ghost" className="gap-1 text-xs"><Eye size={12} /> Preview</Button>
-                        </a>
-                        {!list.isActive && (
-                          <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => activate(list.id)}>
-                            <Zap size={12} /> Activate
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 gap-1" onClick={() => deleteList(list.id, list.isActive)}>
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-slate-50">
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">List #</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">Name</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">Date</th>
+                    <th className="text-center px-4 py-3 font-medium text-slate-600">Items</th>
+                    <th className="text-center px-4 py-3 font-medium text-slate-600">Customers</th>
+                    <th className="text-center px-4 py-3 font-medium text-slate-600">Status</th>
+                    <th className="px-4 py-3" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {lists.map(list => (
+                    <tr key={list.id} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => window.location.assign(`/offer-list/${list.id}`)}>
+                      <td className="px-4 py-3 font-mono font-bold">{list.listNumber}</td>
+                      <td className="px-4 py-3">{list.name ?? <span className="text-slate-400">—</span>}</td>
+                      <td className="px-4 py-3">{formatDate(list.listDate)}</td>
+                      <td className="px-4 py-3 text-center">{list._count.items}</td>
+                      <td className="px-4 py-3 text-center">
+                        {list._count.customers > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-slate-600">
+                            <Users size={12} /> {list._count.customers}
+                          </span>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {list.isActive
+                          ? <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Active</Badge>
+                          : <Badge variant="outline" className="text-slate-500">Inactive</Badge>
+                        }
+                      </td>
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2 justify-end">
+                          {!list.isActive && (
+                            <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => activate(list.id)}>
+                              <Zap size={12} /> Activate
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 gap-1" onClick={() => deleteList(list.id, list.isActive)}>
+                            <Trash2 size={12} />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </CardContent>
-      </Card>
-
-      <Card className="border-slate-200 bg-slate-50">
-        <CardContent className="pt-4 text-sm text-slate-600 space-y-1">
-          <p className="font-medium">How to set up an offer list:</p>
-          <ol className="list-decimal ml-4 space-y-1 text-slate-500">
-            <li>Create a new list (auto-numbers from the last one)</li>
-            <li>Hit <strong>Preview</strong> — all 787 medicines appear at their stored trade prices and offers</li>
-            <li>To customise per-medicine offer %, use the PUT /api/offer-list/[id] endpoint with an items array</li>
-            <li>Click <strong>Activate</strong> to make it the live list (deactivates any previous active list)</li>
-            <li><strong>Export HTML</strong> downloads a standalone file matching the original OfferList.html format exactly</li>
-          </ol>
         </CardContent>
       </Card>
     </div>

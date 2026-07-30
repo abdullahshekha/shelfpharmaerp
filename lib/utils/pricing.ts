@@ -6,6 +6,11 @@ interface BatchForPricing {
   mrp: unknown
 }
 
+interface BatchWithOfferData extends BatchForPricing {
+  discountPercent: unknown
+  bonusQuantity: number
+}
+
 /** The batch that stock is drawn from first (First-Expiry-First-Out). */
 export function getFefoBatch<T extends BatchForPricing>(batches: T[]): T | null {
   const inStock = batches.filter((b) => b.currentQty > 0)
@@ -22,6 +27,28 @@ export function getEffectivePrice<T extends BatchForPricing>(batches: T[]): { tr
   return {
     tradePrice: Number(batch.tradePrice as string | number),
     mrp: batch.mrp != null ? Number(batch.mrp as string | number) : null,
+  }
+}
+
+/**
+ * Offer List pricing for a medicine, taken from its FEFO batch: Trade Price plus the
+ * Disc % and bonus quantity that batch was purchased at (see MedicineBatch.discountPercent/
+ * bonusQuantity, snapshotted from the Purchase Invoice line when the batch was created).
+ * Null means no in-stock batch exists for this medicine.
+ */
+export function getEffectiveOffer<T extends BatchWithOfferData>(batches: T[]): {
+  tradePrice: number | null
+  mrp: number | null
+  offerPercent: number
+  bonusQty: number
+} {
+  const batch = getFefoBatch(batches)
+  if (!batch) return { tradePrice: null, mrp: null, offerPercent: 0, bonusQty: 0 }
+  return {
+    tradePrice: Number(batch.tradePrice as string | number),
+    mrp: batch.mrp != null ? Number(batch.mrp as string | number) : null,
+    offerPercent: Number(batch.discountPercent as string | number),
+    bonusQty: batch.bonusQuantity,
   }
 }
 

@@ -191,6 +191,7 @@ model Medicine {
   batches             MedicineBatch[]
   orderItems          OrderItem[]
   offerListItems      OfferListItem[]
+  offerListCustomerItems OfferListCustomerItem[]
   purchaseItems       PurchaseInvoiceItem[]
   supplierReturnItems SupplierReturnItem[]
   createdAt           DateTime              @default(now())
@@ -201,18 +202,20 @@ model Medicine {
 }
 
 model MedicineBatch {
-  id            String               @id @default(cuid())
-  medicineId    String
-  medicine      Medicine             @relation(fields: [medicineId], references: [id])
-  batchNumber   String
-  expiryDate    DateTime
-  quantityIn    Int
-  currentQty    Int
-  purchasePrice Decimal              @db.Decimal(10, 2)
-  tradePrice    Decimal              @db.Decimal(10, 2)
-  mrp           Decimal?             @db.Decimal(10, 2)
-  returnItems   SupplierReturnItem[]
-  createdAt     DateTime             @default(now())
+  id              String               @id @default(cuid())
+  medicineId      String
+  medicine        Medicine             @relation(fields: [medicineId], references: [id])
+  batchNumber     String
+  expiryDate      DateTime
+  quantityIn      Int
+  currentQty      Int
+  purchasePrice   Decimal              @db.Decimal(10, 2)
+  tradePrice      Decimal              @db.Decimal(10, 2)
+  mrp             Decimal?             @db.Decimal(10, 2)
+  discountPercent Decimal              @default(0) @db.Decimal(5, 2)  // snapshot of PurchaseInvoiceItem.discountPercent at creation — drives Offer List "Offer %"
+  bonusQuantity   Int                  @default(0)                    // snapshot of PurchaseInvoiceItem.bonusQuantity at creation — drives Offer List "Bonus"
+  returnItems     SupplierReturnItem[]
+  createdAt       DateTime             @default(now())
 
   @@index([medicineId])
   @@index([expiryDate])
@@ -268,12 +271,34 @@ model Retailer {
   invoices          Invoice[]
   payments          Payment[]
   whatsappOrders    WhatsappOrder[]
+  groupMemberships  CustomerGroupMember[]
+  offerListEntries  OfferListCustomer[]
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
   @@index([whatsappNumber])
   @@index([name])
   @@index([areaId])
+}
+
+model CustomerGroup {
+  id                  String                @id @default(cuid())
+  name                String                @unique
+  members             CustomerGroupMember[]
+  offerListAssignments OfferListAssignment[]
+  createdAt           DateTime              @default(now())
+}
+
+model CustomerGroupMember {
+  id              String        @id @default(cuid())
+  customerGroupId String
+  customerGroup   CustomerGroup @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
+  retailerId      String
+  retailer        Retailer      @relation(fields: [retailerId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@unique([customerGroupId, retailerId])
+  @@index([retailerId])
 }
 
 model Order {
@@ -322,19 +347,22 @@ model OrderItem {
 }
 
 model OfferList {
-  id         String          @id @default(cuid())
-  listNumber String          @unique
-  listDate   DateTime
-  isActive   Boolean         @default(false)
-  createdBy  String?
-  items      OfferListItem[]
-  createdAt  DateTime        @default(now())
+  id          String                @id @default(cuid())
+  name        String?
+  listNumber  String                @unique
+  listDate    DateTime
+  isActive    Boolean               @default(false)
+  createdBy   String?
+  items       OfferListItem[]
+  assignments OfferListAssignment[]
+  customers   OfferListCustomer[]
+  createdAt   DateTime              @default(now())
 }
 
 model OfferListItem {
   id           String    @id @default(cuid())
   offerListId  String
-  offerList    OfferList @relation(fields: [offerListId], references: [id])
+  offerList    OfferList @relation(fields: [offerListId], references: [id], onDelete: Cascade)
   medicineId   String
   medicine     Medicine  @relation(fields: [medicineId], references: [id])
   offerPercent Decimal   @default(0) @db.Decimal(10, 2)
@@ -343,6 +371,43 @@ model OfferListItem {
   salesTax     Decimal   @default(0) @db.Decimal(10, 2)
 
   @@unique([offerListId, medicineId])
+}
+
+// Which Customer Groups an Offer List has been sent/assigned to.
+model OfferListAssignment {
+  id              String        @id @default(cuid())
+  offerListId     String
+  offerList       OfferList     @relation(fields: [offerListId], references: [id], onDelete: Cascade)
+  customerGroupId String
+  customerGroup   CustomerGroup @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([offerListId, customerGroupId])
+}
+
+// One quantity-entry sheet per customer per offer list — created when a group assignment
+// expands to its member retailers. A retailer in multiple assigned groups still gets one sheet.
+model OfferListCustomer {
+  id          String                  @id @default(cuid())
+  offerListId String
+  offerList   OfferList               @relation(fields: [offerListId], references: [id], onDelete: Cascade)
+  retailerId  String
+  retailer    Retailer                @relation(fields: [retailerId], references: [id])
+  items       OfferListCustomerItem[]
+  createdAt   DateTime                @default(now())
+
+  @@unique([offerListId, retailerId])
+}
+
+model OfferListCustomerItem {
+  id                  String            @id @default(cuid())
+  offerListCustomerId String
+  offerListCustomer   OfferListCustomer @relation(fields: [offerListCustomerId], references: [id], onDelete: Cascade)
+  medicineId          String
+  medicine            Medicine          @relation(fields: [medicineId], references: [id])
+  quantity            Int               @default(0)
+
+  @@unique([offerListCustomerId, medicineId])
 }
 
 model Invoice {

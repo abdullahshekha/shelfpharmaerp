@@ -187,6 +187,8 @@ export async function POST(req: NextRequest) {
         purchasePrice: item.purchasePrice,
         tradePrice: item.tradePrice,
         mrp: item.mrp,
+        discountPercent: item.discountPercent,
+        bonusQuantity: item.bonusQuantity,
       })),
     })
 

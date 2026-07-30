@@ -11,11 +11,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       items: {
         include: {
           medicine: {
-            include: { manufacturer: { select: { name: true } } },
+            include: {
+              manufacturer: { select: { name: true } },
+              batches: { select: { currentQty: true } },
+            },
           },
         },
         orderBy: { medicine: { name: 'asc' } },
       },
+      assignments: { include: { customerGroup: { select: { id: true, name: true } } } },
+      _count: { select: { customers: true } },
     },
   })
   if (!list) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -35,6 +40,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const list = await tx.offerList.update({
       where: { id },
       data: {
+        name: body.name !== undefined ? (body.name?.trim() || null) : undefined,
         isActive: body.isActive ?? undefined,
         listDate: body.listDate ? new Date(body.listDate) : undefined,
       },
