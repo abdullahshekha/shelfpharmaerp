@@ -11,8 +11,9 @@ import { formatPKR } from '@/lib/utils/format'
 import { UserCog, Plus, X, Phone, Trash2, KeyRound } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { roleLabel } from '@/lib/constants'
 
-const ROLES = ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP', 'WAREHOUSE', 'ACCOUNTANT'] as const
+const ROLES = ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP', 'SALESMAN', 'DRIVER', 'WAREHOUSE', 'ACCOUNTANT'] as const
 type Role = typeof ROLES[number]
 
 const ROLE_COLORS: Record<Role, string> = {
@@ -20,6 +21,8 @@ const ROLE_COLORS: Record<Role, string> = {
   MANAGER:     'bg-blue-100 text-blue-800',
   TEAM_LEAD:   'bg-cyan-100 text-cyan-700',
   SALES_REP:   'bg-green-100 text-green-700',
+  SALESMAN:    'bg-teal-100 text-teal-700',
+  DRIVER:      'bg-amber-100 text-amber-700',
   WAREHOUSE:   'bg-slate-100 text-slate-700',
   ACCOUNTANT:  'bg-orange-100 text-orange-700',
 }
@@ -29,6 +32,8 @@ const ROLE_DESC: Record<Role, string> = {
   MANAGER:    'Full access, deletes need admin approval',
   TEAM_LEAD:  'View + orders + payments',
   SALES_REP:  'Own retailers + orders only',
+  SALESMAN:   'Deliveries assigned to them + customer name/phone only',
+  DRIVER:     'HR/Accounts record only — no ERP login',
   WAREHOUSE:  'Inventory batches only',
   ACCOUNTANT: 'Invoices + supplier payments only',
 }
@@ -151,7 +156,7 @@ export default function HRPage() {
                           : 'border-slate-300 text-slate-500 hover:border-slate-400 bg-white'
                       }`}
                     >
-                      {r.replace(/_/g, ' ')}
+                      {roleLabel(r)}
                     </button>
                   ))}
                 </div>
@@ -197,7 +202,7 @@ export default function HRPage() {
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" onClick={() => { setShowForm(false); setForm(emptyForm) }}>Cancel</Button>
               <Button size="sm" onClick={createEmployee} disabled={saving}>
-                {saving ? 'Saving...' : `Add ${form.role.replace(/_/g, ' ')}`}
+                {saving ? 'Saving...' : `Add ${roleLabel(form.role)}`}
               </Button>
             </div>
           </CardContent>
@@ -209,7 +214,7 @@ export default function HRPage() {
         <Button size="sm" variant={!roleFilter ? 'default' : 'outline'} onClick={() => setRoleFilter('')}>All</Button>
         {ROLES.map(r => (
           <Button key={r} size="sm" variant={roleFilter === r ? 'default' : 'outline'} onClick={() => setRoleFilter(r)}>
-            {r.replace(/_/g, ' ')}
+            {roleLabel(r)}
           </Button>
         ))}
       </div>
@@ -244,7 +249,7 @@ export default function HRPage() {
                     <td className="px-4 py-3 font-medium">{emp.name}</td>
                     <td className="px-4 py-3">
                       <Badge className={`text-xs ${ROLE_COLORS[emp.role as Role] ?? 'bg-slate-100 text-slate-700'}`}>
-                        {emp.role.replace(/_/g, ' ')}
+                        {roleLabel(emp.role)}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-slate-500 hidden sm:table-cell">

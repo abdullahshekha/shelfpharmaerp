@@ -355,7 +355,7 @@ export default function InvoicesPage() {
           }`}
         >
           <FileText size={15} />
-          Retailer Invoices
+          Sales Invoice
         </button>
         <button
           onClick={() => setTab('purchase')}

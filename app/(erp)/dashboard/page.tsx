@@ -207,9 +207,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Sales Rep Performance */}
+        {/* Order Booker Performance */}
         <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users size={16} className="text-purple-500" /> Sales Rep Performance (This Month)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users size={16} className="text-purple-500" /> Order Booker Performance (This Month)</CardTitle></CardHeader>
           <CardContent>
             {loading || !sales ? (
               <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-5 bg-slate-100 rounded animate-pulse" />)}</div>

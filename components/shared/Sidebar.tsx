@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { roleLabel } from '@/lib/constants'
 
 interface NavItem { href: string; label: string; icon: React.ElementType; roles?: string[] }
 
@@ -21,7 +22,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/whatsapp',    label: 'WhatsApp Orders',  icon: MessageSquare,   roles: ['ADMIN', 'MANAGER'] },
   { href: '/offer-list',  label: 'Offer List',       icon: ListOrdered,     roles: ['ADMIN', 'MANAGER'] },
   { href: '/invoices',    label: 'Invoices',         icon: FileText,        roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'ACCOUNTANT'] },
-  { href: '/deliveries',  label: 'Deliveries',       icon: Truck,           roles: ['ADMIN', 'MANAGER'] },
+  { href: '/deliveries',  label: 'Deliveries',       icon: Truck,           roles: ['ADMIN', 'MANAGER', 'SALESMAN'] },
   { href: '/suppliers',   label: 'Suppliers',        icon: Building2,       roles: ['ADMIN', 'MANAGER', 'ACCOUNTANT'] },
   { href: '/hr',          label: 'HR',               icon: UserCog,         roles: ['ADMIN', 'MANAGER'] },
   { href: '/reports',     label: 'Reports',          icon: BarChart3,       roles: ['ADMIN', 'MANAGER'] },
@@ -113,7 +114,7 @@ export function Sidebar({ onClose, role = 'ADMIN', unreadCount = 0 }: SidebarPro
       <div className="p-3 border-t border-slate-700 space-y-2">
         <div className="px-1 flex items-center gap-2">
           <Bell size={13} className="text-slate-500" />
-          <p className="text-xs text-slate-500 capitalize">{role.toLowerCase().replace('_', ' ')}</p>
+          <p className="text-xs text-slate-500 capitalize">{roleLabel(role).toLowerCase()}</p>
         </div>
         <p className="text-xs text-slate-500 px-1">PECHS Ext. Block 6, Karachi</p>
         <button

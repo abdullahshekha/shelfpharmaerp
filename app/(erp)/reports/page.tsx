@@ -260,7 +260,7 @@ export default function ReportsPage() {
             </Card>
 
             <Card>
-              <CardHeader><CardTitle className="text-base">Sales Rep Performance (This Month)</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base">Order Booker Performance (This Month)</CardTitle></CardHeader>
               <CardContent className="p-0">
                 {loading || !sales ? (
                   <div className="p-4 space-y-2">{[1,2].map(i => <div key={i} className="h-8 bg-slate-100 rounded animate-pulse" />)}</div>

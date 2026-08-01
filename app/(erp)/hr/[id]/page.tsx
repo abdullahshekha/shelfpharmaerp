@@ -9,6 +9,7 @@ import { formatPKR, formatDate } from '@/lib/utils/format'
 import { ArrowLeft, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { roleLabel } from '@/lib/constants'
 
 const STATUS_COLORS: Record<string, string> = {
   PRESENT: 'bg-green-100 text-green-700',
@@ -57,7 +58,7 @@ export default function EmployeeDetailPage() {
         <Link href="/hr"><Button variant="ghost" size="icon"><ArrowLeft size={18} /></Button></Link>
         <div className="flex-1">
           <h1 className="text-2xl font-bold">{employee.name}</h1>
-          <Badge className="mt-1">{employee.role}</Badge>
+          <Badge className="mt-1">{roleLabel(employee.role)}</Badge>
         </div>
         <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50 gap-1" onClick={deleteEmployee}>
           <Trash2 size={14} /> Deactivate

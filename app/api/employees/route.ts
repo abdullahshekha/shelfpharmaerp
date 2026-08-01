@@ -4,16 +4,18 @@ import { hashPassword } from '@/lib/utils/auth'
 
 export const dynamic = 'force-dynamic'
 
-const VALID_ROLES = ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP', 'WAREHOUSE', 'ACCOUNTANT']
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP', 'SALESMAN', 'DRIVER', 'WAREHOUSE', 'ACCOUNTANT']
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const role = searchParams.get('role') ?? ''
+  const roles = role.split(',').map(r => r.trim()).filter(Boolean)
 
   const employees = await prisma.employee.findMany({
     where: {
       isActive: true,
-      ...(role && { role }),
+      ...(roles.length === 1 && { role: roles[0] }),
+      ...(roles.length > 1 && { role: { in: roles } }),
     },
     select: { id: true, name: true, role: true, phone: true, username: true },
     orderBy: { name: 'asc' },

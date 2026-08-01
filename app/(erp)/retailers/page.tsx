@@ -73,7 +73,7 @@ export default function RetailersPage() {
                 <tr className="border-b bg-slate-50 text-slate-600">
                   <th className="text-left px-4 py-3 font-medium">Customer</th>
                   <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Area</th>
-                  <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Sales Rep</th>
+                  <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Order Booker</th>
                   <th className="text-right px-4 py-3 font-medium hidden md:table-cell">Orders</th>
                 </tr>
               </thead>

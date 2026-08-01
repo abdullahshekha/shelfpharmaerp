@@ -65,7 +65,7 @@ export default function DeliveriesPage() {
 
   useEffect(() => { fetchDeliveries() }, [fetchDeliveries])
   useEffect(() => {
-    fetch('/api/employees?role=DRIVER').then(r => r.json()).then(j => setDrivers(j.data ?? []))
+    fetch('/api/employees?role=DRIVER,SALESMAN').then(r => r.json()).then(j => setDrivers(j.data ?? []))
   }, [])
 
   const updateDelivery = async (id: string, patch: object) => {
