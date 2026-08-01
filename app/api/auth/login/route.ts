@@ -23,11 +23,15 @@ export async function POST(req: NextRequest) {
   // Per-employee login
   const employee = await prisma.employee.findFirst({
     where: { username, isActive: true },
-    select: { id: true, name: true, role: true, passwordHash: true },
+    select: { id: true, name: true, role: true, passwordHash: true, loginBlocked: true },
   })
 
   if (!employee || !employee.passwordHash) {
     return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 })
+  }
+
+  if (employee.loginBlocked) {
+    return NextResponse.json({ error: 'This account is blocked from logging in' }, { status: 403 })
   }
 
   const hash = hashPassword(password)

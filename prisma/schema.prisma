@@ -234,6 +234,7 @@ model Employee {
   isActive        Boolean          @default(true)
   username        String?          @unique
   passwordHash    String?
+  loginBlocked    Boolean          @default(false) // blocks ERP login without deactivating the employee record
   retailers       Retailer[]
   orders          Order[]
   deliveries      Delivery[]

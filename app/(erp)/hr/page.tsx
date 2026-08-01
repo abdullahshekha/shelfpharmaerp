@@ -11,32 +11,7 @@ import { formatPKR } from '@/lib/utils/format'
 import { UserCog, Plus, X, Phone, Trash2, KeyRound } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { roleLabel } from '@/lib/constants'
-
-const ROLES = ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP', 'SALESMAN', 'DRIVER', 'WAREHOUSE', 'ACCOUNTANT'] as const
-type Role = typeof ROLES[number]
-
-const ROLE_COLORS: Record<Role, string> = {
-  ADMIN:       'bg-purple-100 text-purple-800',
-  MANAGER:     'bg-blue-100 text-blue-800',
-  TEAM_LEAD:   'bg-cyan-100 text-cyan-700',
-  SALES_REP:   'bg-green-100 text-green-700',
-  SALESMAN:    'bg-teal-100 text-teal-700',
-  DRIVER:      'bg-amber-100 text-amber-700',
-  WAREHOUSE:   'bg-slate-100 text-slate-700',
-  ACCOUNTANT:  'bg-orange-100 text-orange-700',
-}
-
-const ROLE_DESC: Record<Role, string> = {
-  ADMIN:      'Full access',
-  MANAGER:    'Full access, deletes need admin approval',
-  TEAM_LEAD:  'View + orders + payments',
-  SALES_REP:  'Own retailers + orders only',
-  SALESMAN:   'Deliveries assigned to them + customer name/phone only',
-  DRIVER:     'HR/Accounts record only — no ERP login',
-  WAREHOUSE:  'Inventory batches only',
-  ACCOUNTANT: 'Invoices + supplier payments only',
-}
+import { roleLabel, ROLES, ROLE_COLORS, ROLE_DESC, type Role } from '@/lib/constants'
 
 interface Employee {
   id: string; name: string; role: string; phone: string | null

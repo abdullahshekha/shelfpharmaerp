@@ -361,7 +361,7 @@ export default function RetailerDetailPage() {
             {retailer.address && <Row label="Address" value={retailer.address} />}
             {retailer.notes && <Row label="Notes" value={retailer.notes} />}
             <div className="flex justify-between items-center pt-1">
-              <span className="text-slate-500 flex items-center gap-1"><UserCheck size={13} /> Order Booker</span>
+              <span className="text-slate-500 flex items-center gap-1"><UserCheck size={13} /> ORDER BOOKER</span>
               <Select
                 items={[{ value: 'none', label: 'No sales rep' }, ...salesReps.map(rep => ({ value: rep.id, label: rep.name }))]}
                 value={retailer.salesRepId ?? 'none'} onValueChange={v => assignSalesRep(v === 'none' ? null : (v ?? null))}

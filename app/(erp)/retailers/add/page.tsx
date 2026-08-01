@@ -153,7 +153,7 @@ export default function AddCustomerPage() {
               </div>
 
               <div className="space-y-1.5 col-span-2">
-                <Label>Assigned Order Booker</Label>
+                <Label>Assigned ORDER BOOKER</Label>
                 <Select
                   items={[{ value: 'none', label: 'No sales rep' }, ...salesReps.map(rep => ({ value: rep.id, label: rep.name }))]}
                   value={form.salesRepId || 'none'} onValueChange={v => setForm(f => ({ ...f, salesRepId: v === 'none' ? '' : (v ?? '') }))}
