@@ -14,17 +14,19 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
+import { DrugLicensesEditor, type DrugLicenseForm } from '@/components/retailers/DrugLicensesEditor'
 
 interface Order { id: string; orderNumber: string; orderDate: string; status: string; totalAmount: number }
 interface Invoice { id: string; invoiceNumber: string; invoiceDate: string; totalAmount: number; status: string }
 interface SalesRep { id: string; name: string }
 interface Area { id: string; name: string }
+interface DrugLicense { id: string; licenseNumber: string; formNumber: string | null; expiryDate: string | null }
 
 interface Retailer {
   id: string; name: string; ownerName: string | null; phone: string | null
   whatsappNumber: string | null; area: Area | null; areaId: string | null
   address: string | null; customerType: string | null
-  drugLicenseNumber: string | null; drugLicenseExpiry: string | null
+  drugLicenses: DrugLicense[]
   isFiler: boolean; ntnNumber: string | null; strnStatus: string | null; strnNumber: string | null
   creditLimit: number; creditDays: number; paymentMode: string; notes: string | null
   salesRepId: string | null; salesRep: { id: string; name: string } | null
@@ -50,10 +52,11 @@ export default function RetailerDetailPage() {
   const [saving, setSaving] = useState(false)
   const [editForm, setEditForm] = useState({
     name: '', ownerName: '', phone: '', whatsappNumber: '',
-    areaId: '', address: '', customerType: '', drugLicenseNumber: '', drugLicenseExpiry: '',
+    areaId: '', address: '', customerType: '',
     creditLimit: '', creditDays: '', paymentMode: 'CASH', notes: '',
     isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '',
   })
+  const [editDrugLicenses, setEditDrugLicenses] = useState<DrugLicenseForm[]>([])
 
   const fetchRetailer = () =>
     fetch(`/api/retailers/${id}`)
@@ -74,8 +77,6 @@ export default function RetailerDetailPage() {
           areaId: r.areaId ?? '',
           address: r.address ?? '',
           customerType: r.customerType ?? '',
-          drugLicenseNumber: r.drugLicenseNumber ?? '',
-          drugLicenseExpiry: r.drugLicenseExpiry ? r.drugLicenseExpiry.slice(0, 10) : '',
           creditLimit: String(r.creditLimit ?? 0),
           creditDays: String(r.creditDays ?? 0),
           paymentMode: r.paymentMode ?? 'CASH',
@@ -85,6 +86,16 @@ export default function RetailerDetailPage() {
           strnStatus: r.strnStatus ?? '',
           strnNumber: r.strnNumber ?? '',
         })
+        const licenses: DrugLicense[] = r.drugLicenses ?? []
+        setEditDrugLicenses(
+          licenses.length > 0
+            ? licenses.map(l => ({
+                licenseNumber: l.licenseNumber,
+                formNumber: l.formNumber ?? '',
+                expiryDate: l.expiryDate ? l.expiryDate.slice(0, 10) : '',
+              }))
+            : [{ licenseNumber: '', formNumber: '', expiryDate: '' }]
+        )
       })
       .finally(() => setLoading(false))
 
@@ -124,7 +135,7 @@ export default function RetailerDetailPage() {
         customerType: editForm.customerType || null,
         creditLimit: isCheque ? (parseFloat(editForm.creditLimit) || 0) : 0,
         creditDays: isCheque ? (parseInt(editForm.creditDays) || 0) : 0,
-        drugLicenseExpiry: editForm.drugLicenseExpiry || null,
+        drugLicenses: editDrugLicenses,
         salesRepId: retailer?.salesRepId ?? null,
         isFiler,
       }),
@@ -172,8 +183,7 @@ export default function RetailerDetailPage() {
   if (!retailer) return <div className="p-8 text-slate-400">Customer not found.</div>
 
   const creditPct = retailer.creditLimit > 0 ? Math.min((retailer.outstandingBalance / retailer.creditLimit) * 100, 100) : 0
-  const licenseExpiry = retailer.drugLicenseExpiry ? new Date(retailer.drugLicenseExpiry) : null
-  const licenseNearExpiry = licenseExpiry && licenseExpiry < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+  const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -266,14 +276,7 @@ export default function RetailerDetailPage() {
                 <Label className="text-xs">Address</Label>
                 <Input className="h-8 text-sm bg-white" value={editForm.address} onChange={set('address')} />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Drug License #</Label>
-                <Input className="h-8 text-sm bg-white" value={editForm.drugLicenseNumber} onChange={set('drugLicenseNumber')} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">License Expiry</Label>
-                <Input className="h-8 text-sm bg-white" type="date" value={editForm.drugLicenseExpiry} onChange={set('drugLicenseExpiry')} />
-              </div>
+              <DrugLicensesEditor licenses={editDrugLicenses} onChange={setEditDrugLicenses} inputClassName="h-8 text-sm bg-white" />
               <div className="space-y-1">
                 <Label className="text-xs">Filer *</Label>
                 <Select
@@ -410,13 +413,23 @@ export default function RetailerDetailPage() {
             {retailer.isFiler && (
               <Row label="STRN" value={retailer.strnStatus === 'REGISTERED' ? (retailer.strnNumber ?? '—') : 'Unregistered'} />
             )}
-            {retailer.drugLicenseNumber && <Row label="Drug License #" value={retailer.drugLicenseNumber} />}
-            {licenseExpiry && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">License Expiry</span>
-                <span className={licenseNearExpiry ? 'text-red-600 font-medium' : 'font-medium'}>
-                  {formatDate(licenseExpiry)}{licenseNearExpiry && ' ⚠'}
-                </span>
+            {retailer.drugLicenses.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-slate-500">Drug Licenses</span>
+                {retailer.drugLicenses.map(l => {
+                  const expiry = l.expiryDate ? new Date(l.expiryDate) : null
+                  const nearExpiry = expiry && expiry < soon
+                  return (
+                    <div key={l.id} className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
+                      <span className="font-medium">{l.licenseNumber}{l.formNumber && ` (Form ${l.formNumber})`}</span>
+                      {expiry && (
+                        <span className={nearExpiry ? 'text-red-600 font-medium' : 'text-slate-500'}>
+                          {formatDate(expiry)}{nearExpiry && ' ⚠'}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </CardContent>

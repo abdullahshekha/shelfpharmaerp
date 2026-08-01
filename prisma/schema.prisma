@@ -255,8 +255,7 @@ model Retailer {
   area              Area?           @relation(fields: [areaId], references: [id])
   address           String?
   customerType      String? // Medical Stores | Chain Pharmacy | Hospitals | Institutions | Marts | Pharmacy | WholeSalers
-  drugLicenseNumber String?
-  drugLicenseExpiry DateTime?
+  drugLicenses      DrugLicense[]
   drapRegistered    Boolean         @default(false)
   latitude          Decimal?        @db.Decimal(9, 6)
   longitude         Decimal?        @db.Decimal(9, 6)
@@ -283,6 +282,20 @@ model Retailer {
   @@index([whatsappNumber])
   @@index([name])
   @@index([areaId])
+}
+
+// A customer may hold multiple drug licenses (e.g. separate premises/categories) — each with its
+// own License #, Form #, and expiry.
+model DrugLicense {
+  id            String    @id @default(cuid())
+  retailerId    String
+  retailer      Retailer  @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+  licenseNumber String
+  formNumber    String?
+  expiryDate    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([retailerId])
 }
 
 model Order {

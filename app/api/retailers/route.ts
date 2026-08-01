@@ -73,8 +73,15 @@ export async function POST(req: NextRequest) {
       areaId: body.areaId ?? null,
       address: body.address ?? null,
       customerType: body.customerType ?? null,
-      drugLicenseNumber: body.drugLicenseNumber ?? null,
-      drugLicenseExpiry: body.drugLicenseExpiry ? new Date(body.drugLicenseExpiry) : null,
+      drugLicenses: {
+        create: ((body.drugLicenses ?? []) as { licenseNumber: string; formNumber?: string; expiryDate?: string }[])
+          .filter((l) => l.licenseNumber?.trim())
+          .map((l) => ({
+            licenseNumber: l.licenseNumber.trim(),
+            formNumber: l.formNumber?.trim() || null,
+            expiryDate: l.expiryDate ? new Date(l.expiryDate) : null,
+          })),
+      },
       isFiler,
       ntnNumber: isFiler ? (body.ntnNumber?.trim() ?? null) : null,
       strnStatus: isFiler ? (body.strnStatus ?? null) : null,

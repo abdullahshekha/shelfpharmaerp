@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
+import { DrugLicensesEditor, type DrugLicenseForm } from '@/components/retailers/DrugLicensesEditor'
 
 interface SalesRep { id: string; name: string }
 interface Area { id: string; name: string }
@@ -27,12 +28,15 @@ export default function AddCustomerPage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [form, setForm] = useState({
     name: '', ownerName: '', phone: '', whatsappNumber: '',
-    areaId: '', address: '', customerType: '', drugLicenseNumber: '',
-    drugLicenseExpiry: '', creditLimit: '0', creditDays: '0',
+    areaId: '', address: '', customerType: '',
+    creditLimit: '0', creditDays: '0',
     paymentMode: 'CASH', salesRepId: '', notes: '',
     isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '',
     drapRegistered: false, latitude: '', longitude: '', storePhotoUrl: '',
   })
+  const [drugLicenses, setDrugLicenses] = useState<DrugLicenseForm[]>([
+    { licenseNumber: '', formNumber: '', expiryDate: '' },
+  ])
 
   useEffect(() => {
     if (!isOrderBooker) {
@@ -69,12 +73,12 @@ export default function AddCustomerPage() {
     const fd = new FormData()
     fd.append('photo', file)
     const res = await fetch('/api/retailers/upload-photo', { method: 'POST', body: fd })
+    const j = await res.json().catch(() => ({}))
     if (res.ok) {
-      const j = await res.json()
       setForm(f => ({ ...f, storePhotoUrl: j.data.url }))
       toast.success('Photo uploaded')
     } else {
-      toast.error('Failed to upload photo')
+      toast.error(j.error ?? 'Failed to upload photo')
     }
     setUploadingPhoto(false)
   }
@@ -98,7 +102,7 @@ export default function AddCustomerPage() {
         customerType: form.customerType || null,
         creditLimit: isCheque ? (parseFloat(form.creditLimit) || 0) : 0,
         creditDays: isCheque ? (parseInt(form.creditDays) || 0) : 0,
-        drugLicenseExpiry: form.drugLicenseExpiry || null,
+        drugLicenses,
         // Order Booker's assignment is forced server-side regardless of what's sent
         salesRepId: isOrderBooker ? undefined : (form.salesRepId || null),
         isFiler,
@@ -254,14 +258,7 @@ export default function AddCustomerPage() {
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <Label>Drug License #</Label>
-                <Input value={form.drugLicenseNumber} onChange={set('drugLicenseNumber')} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>License Expiry</Label>
-                <Input type="date" value={form.drugLicenseExpiry} onChange={set('drugLicenseExpiry')} />
-              </div>
+              <DrugLicensesEditor licenses={drugLicenses} onChange={setDrugLicenses} />
 
               <div className="space-y-1.5 col-span-2 flex items-center gap-2">
                 <input

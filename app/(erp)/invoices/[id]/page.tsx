@@ -34,7 +34,7 @@ interface Invoice {
   totalAmount: number
   status: string
   notes: string | null
-  retailer: { name: string; ownerName: string | null; phone: string | null; area: string | null; address: string | null; drugLicenseNumber: string | null }
+  retailer: { name: string; ownerName: string | null; phone: string | null; area: string | null; address: string | null }
   order: { orderNumber: string; items: { id: string; quantity: number; mrp: number | null; unitPrice: number; offerPercent: number; salesTax: number; lineTotal: number; medicine: { name: string; code: string } }[] }
   payments: Payment[]
 }

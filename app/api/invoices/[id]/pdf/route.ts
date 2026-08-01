@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const invoice = await prisma.invoice.findUnique({
     where: { id },
     include: {
-      retailer: { include: { area: { select: { name: true } } } },
+      retailer: { include: { area: { select: { name: true } }, drugLicenses: { select: { licenseNumber: true } } } },
       order: {
         include: {
           items: {
@@ -47,7 +47,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       phone: invoice.retailer.phone,
       area: invoice.retailer.area?.name ?? null,
       address: invoice.retailer.address,
-      drugLicenseNumber: invoice.retailer.drugLicenseNumber,
+      drugLicenseNumber: invoice.retailer.drugLicenses.map(l => l.licenseNumber).join(', ') || null,
     },
     order: {
       orderNumber: invoice.order.orderNumber,

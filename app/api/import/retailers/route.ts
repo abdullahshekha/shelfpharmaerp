@@ -54,11 +54,10 @@ export async function POST(req: NextRequest) {
           whatsappNumber: row.whatsapp_number?.trim() || null,
           areaId: undefined, // area import requires pre-created Area records
           address: row.address?.trim() || null,
-          drugLicenseNumber: row.drug_license_number?.trim() || null,
-          drugLicenseExpiry: row.drug_license_expiry ? new Date(row.drug_license_expiry) : null,
           creditLimit: parseFloat(row.credit_limit) || 0,
           creditDays: parseInt(row.credit_days) || 0,
           notes: row.notes?.trim() || null,
+          // Drug licenses aren't touched on re-import — edit them from the customer's detail page
         },
         create: {
           code: row.phone?.trim() || null,
@@ -68,8 +67,9 @@ export async function POST(req: NextRequest) {
           whatsappNumber: row.whatsapp_number?.trim() || null,
           areaId: undefined, // area import requires pre-created Area records
           address: row.address?.trim() || null,
-          drugLicenseNumber: row.drug_license_number?.trim() || null,
-          drugLicenseExpiry: row.drug_license_expiry ? new Date(row.drug_license_expiry) : null,
+          drugLicenses: row.drug_license_number?.trim()
+            ? { create: [{ licenseNumber: row.drug_license_number.trim(), expiryDate: row.drug_license_expiry ? new Date(row.drug_license_expiry) : null }] }
+            : undefined,
           creditLimit: parseFloat(row.credit_limit) || 0,
           creditDays: parseInt(row.credit_days) || 0,
           notes: row.notes?.trim() || null,
