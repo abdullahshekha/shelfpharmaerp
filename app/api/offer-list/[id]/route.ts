@@ -67,11 +67,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // Upsert items if provided — purchasePercent is never accepted here, it's only ever set by /refresh
     if (body.items && Array.isArray(body.items)) {
       for (const item of body.items) {
+        const commentType = item.commentType ?? 'NONE'
         const fields = {
-          offerPercent: item.offerPercent ?? 0,
+          // Net Price is an absolute override — Offer % is locked to 0 whenever it's selected
+          offerPercent: commentType === 'NET_PRICE' ? 0 : (item.offerPercent ?? 0),
           specialPrice: item.specialPrice ?? null,
           salesTax: item.salesTax ?? 0,
-          commentType: item.commentType ?? 'NONE',
+          commentType,
           commentNetPrice: item.commentNetPrice ?? null,
           commentMinOrderQty: item.commentMinOrderQty ?? null,
           commentQtyFree: item.commentQtyFree ?? null,

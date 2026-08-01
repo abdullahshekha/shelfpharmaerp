@@ -25,14 +25,14 @@ export function formatOfferComment(item: OfferCommentFields, expiryMMYY: string 
     case 'EXPIRY':
       return expiryMMYY ?? '—'
     case 'NET_PRICE':
-      return item.commentNetPrice != null ? `${Number(item.commentNetPrice).toFixed(2)} Net` : '—'
+      return item.commentNetPrice != null ? `${Number(item.commentNetPrice).toFixed(1)} Net` : '—'
     case 'BONUS':
       return item.commentMinOrderQty != null && item.commentQtyFree != null
         ? `${item.commentMinOrderQty} + ${item.commentQtyFree}`
         : '—'
     case 'EXTRA_PERCENT':
       return item.commentMinOrderQty != null && item.commentExtraPercent != null
-        ? `${item.commentMinOrderQty} pcs. ${(Number(item.offerPercent) + Number(item.commentExtraPercent)).toFixed(2)}%`
+        ? `${item.commentMinOrderQty} pcs. ${(Number(item.offerPercent) + Number(item.commentExtraPercent)).toFixed(1)}%`
         : '—'
     default:
       return '—'

@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { formatDate } from '@/lib/utils/format'
+import { formatDate, formatPKR } from '@/lib/utils/format'
 import { ArrowLeft, Eye, Download, FileText, Zap, RefreshCw, Users, Plus, X, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
@@ -238,6 +238,7 @@ export default function OfferListDetailPage() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase %</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600 w-24">Offer %</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600 w-64">Comments</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">T.P.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -246,16 +247,7 @@ export default function OfferListDetailPage() {
                     return (
                       <tr key={item.id} className={`border-b hover:bg-slate-50 align-top ${loss ? 'bg-red-50/60' : ''}`}>
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.medicine.code}</td>
-                        <td className="px-4 py-3 font-medium">
-                          <div className="flex items-center gap-1.5">
-                            {loss && (
-                              <span title="Selling below Purchase Price — this loses money">
-                                <AlertTriangle size={14} className="text-red-500 shrink-0" />
-                              </span>
-                            )}
-                            {item.medicine.name}
-                          </div>
-                        </td>
+                        <td className="px-4 py-3 font-medium">{item.medicine.name}</td>
                         <td className="px-4 py-3 text-slate-500">{item.medicine.manufacturer.name}</td>
                         <td className="px-4 py-3 text-center">{item.stock}</td>
                         <td className="px-4 py-3 text-center text-slate-500">{item.expiryMMYY ?? '—'}</td>
@@ -265,20 +257,31 @@ export default function OfferListDetailPage() {
                             type="number" min="0" max="100" step="0.5"
                             className="w-20 h-8 text-xs text-right ml-auto"
                             value={item.offerPercent}
+                            disabled={item.commentType === 'NET_PRICE'}
                             onChange={e => updateItem(item.medicineId, { offerPercent: parseFloat(e.target.value) || 0 })}
                           />
                         </td>
                         <td className="px-4 py-3 space-y-1.5">
-                          <Select
-                            items={COMMENT_TYPES.map(c => ({ value: c.value, label: c.label }))}
-                            value={item.commentType}
-                            onValueChange={v => updateItem(item.medicineId, { commentType: (v ?? 'NONE') as CommentType })}
-                          >
-                            <SelectTrigger size="sm" className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {COMMENT_TYPES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <div className="flex items-center gap-1.5">
+                            {loss && (
+                              <span title="Selling below Purchase Price — this loses money">
+                                <AlertTriangle size={14} className="text-red-500 shrink-0" />
+                              </span>
+                            )}
+                            <Select
+                              items={COMMENT_TYPES.map(c => ({ value: c.value, label: c.label }))}
+                              value={item.commentType}
+                              onValueChange={v => {
+                                const commentType = (v ?? 'NONE') as CommentType
+                                updateItem(item.medicineId, commentType === 'NET_PRICE' ? { commentType, offerPercent: 0 } : { commentType })
+                              }}
+                            >
+                              <SelectTrigger size="sm" className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {COMMENT_TYPES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
 
                           {item.commentType === 'NET_PRICE' && (
                             <Input
@@ -323,6 +326,7 @@ export default function OfferListDetailPage() {
 
                           <p className="text-xs text-slate-400 italic">{formatOfferComment(item, item.expiryMMYY)}</p>
                         </td>
+                        <td className="px-4 py-3 text-right font-medium">{item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
                       </tr>
                     )
                   })}
