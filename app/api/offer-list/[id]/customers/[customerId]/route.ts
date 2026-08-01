@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getFefoBatch } from '@/lib/utils/pricing'
+import { formatOfferComment } from '@/lib/utils/offer-comment'
 
 export const dynamic = 'force-dynamic'
+
+function expiryToMMYY(expiryDate: Date): string {
+  return `${String(expiryDate.getMonth() + 1).padStart(2, '0')}/${String(expiryDate.getFullYear()).slice(-2)}`
+}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string; customerId: string }> }) {
   const { id, customerId } = await params
@@ -12,26 +18,37 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       retailer: { select: { id: true, name: true, phone: true } },
       offerList: { select: { id: true, name: true, listNumber: true } },
       items: {
-        include: { medicine: { include: { manufacturer: { select: { name: true } } } } },
+        include: {
+          medicine: {
+            include: {
+              manufacturer: { select: { name: true } },
+              batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true } },
+            },
+          },
+        },
         orderBy: { medicine: { name: 'asc' } },
       },
     },
   })
   if (!sheet || sheet.offerListId !== id) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Pull each item's Offer %/Bonus/TP from the parent offer list, since OfferListCustomerItem only stores quantity.
+  // Pull each item's Offer %/Comments/TP from the parent offer list, since OfferListCustomerItem only stores quantity.
   const offerItems = await prisma.offerListItem.findMany({ where: { offerListId: id } })
   const offerByMedicine = new Map(offerItems.map((i) => [i.medicineId, i]))
 
   const items = sheet.items.map((item) => {
     const offer = offerByMedicine.get(item.medicineId)
+    const fefoBatch = getFefoBatch(item.medicine.batches)
+    const expiryMMYY = fefoBatch ? expiryToMMYY(fefoBatch.expiryDate) : null
+    const offerPercent = offer?.offerPercent ?? 0
+    const comments = offer ? formatOfferComment({ ...offer, offerPercent }, expiryMMYY) : '—'
     return {
       id: item.id,
-      medicine: item.medicine,
+      medicine: { id: item.medicine.id, code: item.medicine.code, name: item.medicine.name, manufacturer: item.medicine.manufacturer },
       quantity: item.quantity,
-      offerPercent: offer?.offerPercent ?? 0,
-      bonusQty: offer?.bonusQty ?? 0,
+      offerPercent,
       specialPrice: offer?.specialPrice ?? null,
+      comments,
     }
   })
 

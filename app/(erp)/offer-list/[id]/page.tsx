@@ -6,27 +6,30 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDate, formatPKR } from '@/lib/utils/format'
-import { ArrowLeft, Eye, Download, Zap, RefreshCw, Users, Plus, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { formatDate } from '@/lib/utils/format'
+import { ArrowLeft, Eye, Download, FileText, Zap, RefreshCw, Users, Plus, X, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
-
-interface Medicine {
-  id: string
-  code: string
-  name: string
-  manufacturer: { name: string }
-  batches: { currentQty: number }[]
-}
+import { COMMENT_TYPES, formatOfferComment, isOfferAtLoss, type CommentType } from '@/lib/utils/offer-comment'
 
 interface OfferListItem {
   id: string
   medicineId: string
-  medicine: Medicine
+  medicine: { id: string; code: string; name: string; manufacturer: { name: string } }
+  purchasePercent: number
   offerPercent: number
-  bonusQty: number
   specialPrice: number | null
   salesTax: number
+  commentType: CommentType
+  commentNetPrice: number | null
+  commentMinOrderQty: number | null
+  commentQtyFree: number | null
+  commentExtraPercent: number | null
+  stock: number
+  expiryMMYY: string | null
+  purchasePrice: number | null
 }
 
 interface OfferListDetail {
@@ -50,6 +53,9 @@ interface AssignedCustomer {
 export default function OfferListDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [list, setList] = useState<OfferListDetail | null>(null)
+  const [items, setItems] = useState<OfferListItem[]>([])
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [customers, setCustomers] = useState<AssignedCustomer[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -65,13 +71,45 @@ export default function OfferListDetailPage() {
     ])
     const listJson = await listRes.json()
     setList(listJson.data ?? null)
+    setItems(listJson.data?.items ?? [])
+    setDirty(false)
     setCustomers((await customersRes.json()).data ?? [])
     setLoading(false)
   }, [id])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  const updateItem = (medicineId: string, patch: Partial<OfferListItem>) => {
+    setItems(prev => prev.map(it => (it.medicineId === medicineId ? { ...it, ...patch } : it)))
+    setDirty(true)
+  }
+
+  const saveChanges = async () => {
+    setSaving(true)
+    const res = await fetch(`/api/offer-list/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: items.map(it => ({
+          medicineId: it.medicineId,
+          offerPercent: it.offerPercent,
+          specialPrice: it.specialPrice,
+          salesTax: it.salesTax,
+          commentType: it.commentType,
+          commentNetPrice: it.commentNetPrice,
+          commentMinOrderQty: it.commentMinOrderQty,
+          commentQtyFree: it.commentQtyFree,
+          commentExtraPercent: it.commentExtraPercent,
+        })),
+      }),
+    })
+    if (res.ok) { toast.success('Changes saved'); fetchAll() }
+    else toast.error('Failed to save changes')
+    setSaving(false)
+  }
+
   const refresh = async () => {
+    if (dirty && !confirm('You have unsaved changes that will be discarded. Refresh anyway?')) return
     setRefreshing(true)
     const res = await fetch(`/api/offer-list/${id}/refresh`, { method: 'POST' })
     if (res.ok) {
@@ -147,7 +185,7 @@ export default function OfferListDetailPage() {
               {list.name && <span>— {list.name}</span>}
               {list.isActive && <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Active</Badge>}
             </h1>
-            <p className="text-slate-500 text-sm">{list.items.length} medicines · Date: {formatDate(list.listDate)}</p>
+            <p className="text-slate-500 text-sm">{items.length} medicines · Date: {formatDate(list.listDate)}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -163,19 +201,29 @@ export default function OfferListDetailPage() {
             <Button size="sm" variant="outline" className="gap-1"><Eye size={14} /> Preview</Button>
           </a>
           <a href={`/api/offer-list/export?id=${list.id}`} download={`OfferList-${list.listNumber}.html`}>
-            <Button size="sm" className="gap-1"><Download size={14} /> Export</Button>
+            <Button size="sm" variant="outline" className="gap-1"><Download size={14} /> Export</Button>
+          </a>
+          <a href={`/api/offer-list/pdf?id=${list.id}`} target="_blank" rel="noreferrer">
+            <Button size="sm" className="gap-1"><FileText size={14} /> Print PDF</Button>
           </a>
         </div>
       </div>
 
       {/* Items */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Medicines ({list.items.length})</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Medicines ({items.length})</CardTitle>
+          {dirty && (
+            <Button size="sm" onClick={saveChanges} disabled={saving}>
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          )}
+        </CardHeader>
         <CardContent className="p-0">
-          {list.items.length === 0 ? (
+          {items.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <p className="font-medium">No medicines yet</p>
-              <p className="text-sm mt-1">Hit Refresh to pull in every in-stock medicine with its current Max Off. %, Bonus and Trade Price</p>
+              <p className="text-sm mt-1">Hit Refresh to pull in every in-stock medicine with its current Purchase %, Offer % and Trade Price</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -186,23 +234,95 @@ export default function OfferListDetailPage() {
                     <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600">Manufacturer</th>
                     <th className="text-center px-4 py-3 font-medium text-slate-600">Stock</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600">Max Off. %</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600">Bonus</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600">T.P</th>
+                    <th className="text-center px-4 py-3 font-medium text-slate-600">Expiry</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase %</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600 w-24">Offer %</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600 w-64">Comments</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {list.items.map(item => {
-                    const stock = item.medicine.batches.reduce((s, b) => s + b.currentQty, 0)
+                  {items.map(item => {
+                    const loss = isOfferAtLoss(item, item.specialPrice, item.purchasePrice)
                     return (
-                      <tr key={item.id} className="border-b hover:bg-slate-50">
+                      <tr key={item.id} className={`border-b hover:bg-slate-50 align-top ${loss ? 'bg-red-50/60' : ''}`}>
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.medicine.code}</td>
-                        <td className="px-4 py-3 font-medium">{item.medicine.name}</td>
+                        <td className="px-4 py-3 font-medium">
+                          <div className="flex items-center gap-1.5">
+                            {loss && (
+                              <span title="Selling below Purchase Price — this loses money">
+                                <AlertTriangle size={14} className="text-red-500 shrink-0" />
+                              </span>
+                            )}
+                            {item.medicine.name}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{item.medicine.manufacturer.name}</td>
-                        <td className="px-4 py-3 text-center">{stock}</td>
-                        <td className="px-4 py-3 text-right">{Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}%` : '—'}</td>
-                        <td className="px-4 py-3 text-right">{item.bonusQty > 0 ? item.bonusQty : '—'}</td>
-                        <td className="px-4 py-3 text-right font-medium">{item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
+                        <td className="px-4 py-3 text-center">{item.stock}</td>
+                        <td className="px-4 py-3 text-center text-slate-500">{item.expiryMMYY ?? '—'}</td>
+                        <td className="px-4 py-3 text-right">{Number(item.purchasePercent) > 0 ? `${Number(item.purchasePercent).toFixed(2)}%` : '—'}</td>
+                        <td className="px-4 py-3">
+                          <Input
+                            type="number" min="0" max="100" step="0.5"
+                            className="w-20 h-8 text-xs text-right ml-auto"
+                            value={item.offerPercent}
+                            onChange={e => updateItem(item.medicineId, { offerPercent: parseFloat(e.target.value) || 0 })}
+                          />
+                        </td>
+                        <td className="px-4 py-3 space-y-1.5">
+                          <Select
+                            items={COMMENT_TYPES.map(c => ({ value: c.value, label: c.label }))}
+                            value={item.commentType}
+                            onValueChange={v => updateItem(item.medicineId, { commentType: (v ?? 'NONE') as CommentType })}
+                          >
+                            <SelectTrigger size="sm" className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {COMMENT_TYPES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+
+                          {item.commentType === 'NET_PRICE' && (
+                            <Input
+                              type="number" min="0" step="0.01" placeholder="Net Price"
+                              className="w-28 h-7 text-xs"
+                              value={item.commentNetPrice ?? ''}
+                              onChange={e => updateItem(item.medicineId, { commentNetPrice: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                            />
+                          )}
+                          {item.commentType === 'BONUS' && (
+                            <div className="flex gap-1">
+                              <Input
+                                type="number" min="0" placeholder="Min Qty"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentMinOrderQty ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentMinOrderQty: e.target.value === '' ? null : parseInt(e.target.value) })}
+                              />
+                              <Input
+                                type="number" min="0" placeholder="Qty Free"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentQtyFree ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentQtyFree: e.target.value === '' ? null : parseInt(e.target.value) })}
+                              />
+                            </div>
+                          )}
+                          {item.commentType === 'EXTRA_PERCENT' && (
+                            <div className="flex gap-1">
+                              <Input
+                                type="number" min="0" placeholder="Min Qty"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentMinOrderQty ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentMinOrderQty: e.target.value === '' ? null : parseInt(e.target.value) })}
+                              />
+                              <Input
+                                type="number" min="0" step="0.5" placeholder="Extra %"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentExtraPercent ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentExtraPercent: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                              />
+                            </div>
+                          )}
+
+                          <p className="text-xs text-slate-400 italic">{formatOfferComment(item, item.expiryMMYY)}</p>
+                        </td>
                       </tr>
                     )
                   })}

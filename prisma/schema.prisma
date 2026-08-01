@@ -339,15 +339,20 @@ model OfferList {
 }
 
 model OfferListItem {
-  id           String    @id @default(cuid())
-  offerListId  String
-  offerList    OfferList @relation(fields: [offerListId], references: [id], onDelete: Cascade)
-  medicineId   String
-  medicine     Medicine  @relation(fields: [medicineId], references: [id])
-  offerPercent Decimal   @default(0) @db.Decimal(10, 2)
-  bonusQty     Int       @default(0)
-  specialPrice Decimal?  @db.Decimal(10, 2)
-  salesTax     Decimal   @default(0) @db.Decimal(10, 2)
+  id                  String    @id @default(cuid())
+  offerListId         String
+  offerList           OfferList @relation(fields: [offerListId], references: [id], onDelete: Cascade)
+  medicineId          String
+  medicine            Medicine  @relation(fields: [medicineId], references: [id])
+  purchasePercent     Decimal   @default(0) @db.Decimal(10, 2) // computed at creation time, frozen after (see refresh route)
+  offerPercent        Decimal   @default(0) @db.Decimal(10, 2) // editable — what's actually quoted to the customer
+  specialPrice        Decimal?  @db.Decimal(10, 2)             // Trade Price, set at creation, frozen after
+  salesTax            Decimal   @default(0) @db.Decimal(10, 2)
+  commentType         String    @default("NONE") // NONE | EXPIRY | NET_PRICE | BONUS | EXTRA_PERCENT
+  commentNetPrice     Decimal?  @db.Decimal(10, 2)
+  commentMinOrderQty  Int?
+  commentQtyFree      Int?
+  commentExtraPercent Decimal?  @db.Decimal(5, 2)
 
   @@unique([offerListId, medicineId])
 }

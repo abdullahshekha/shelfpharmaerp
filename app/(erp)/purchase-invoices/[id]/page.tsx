@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
+import { calcPurchasePercent } from '@/lib/utils/pricing'
 import { ArrowLeft, Plus, ExternalLink, Download } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -275,7 +276,7 @@ export default function PurchaseInvoiceDetailPage() {
                   <th className="text-right px-4 py-3 font-medium text-slate-600">MRP</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Trade Price</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Disc %</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Purchase %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">S. Tax</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Adv Tax-C %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Adv Tax-P %</th>
@@ -297,7 +298,7 @@ export default function PurchaseInvoiceDetailPage() {
                     <td className="px-4 py-2.5 text-right">{item.mrp != null ? formatPKR(item.mrp) : '—'}</td>
                     <td className="px-4 py-2.5 text-right">{formatPKR(item.tradePrice)}</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.discountPercent)}%</td>
-                    <td className="px-4 py-2.5 text-right">{Number(item.tradeOfferPercent).toFixed(2)}%</td>
+                    <td className="px-4 py-2.5 text-right">{calcPurchasePercent(Number(item.discountPercent), Number(item.tradeOfferPercent)).toFixed(2)}%</td>
                     <td className="px-4 py-2.5 text-right">{formatPKR(item.salesTax)}</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.aitCollectiblePercent)}%</td>
                     <td className="px-4 py-2.5 text-right">{Number(item.aitPayablePercent)}%</td>

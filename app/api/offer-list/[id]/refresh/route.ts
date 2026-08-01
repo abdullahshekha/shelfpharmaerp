@@ -4,10 +4,12 @@ import { getEffectiveOffer } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
-// Full resync: every in-stock medicine gets an OfferListItem with Max Off. %/Bonus/TP taken from
-// its FEFO batch (Max Off. % is the combined max discount off Trade Price from that batch's
-// Disc % and Bonus Qty — see calcMaxOfferPercent); medicines that have gone out of stock are
-// dropped. Sales Tax is left as-is on existing rows since it isn't sourced from Purchase Invoice data.
+// Full resync: brand-new in-stock medicines get an OfferListItem seeded with Purchase %/Offer %/
+// Trade Price from their FEFO batch (Purchase % is the combined max discount off Trade Price from
+// that batch's Disc % and Bonus Qty — see calcPurchasePercent); medicines that have gone out of
+// stock are dropped. Existing items are never touched here — Offer %, Comments, and Trade Price
+// are staff-curated once set, and Stock/Expiry Date are read live off the medicine's batches at
+// GET time rather than snapshotted, so they never go stale.
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
@@ -19,7 +21,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     select: {
       id: true,
       salesTaxApplicable: true,
-      batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, discountPercent: true, bonusQuantity: true, quantityIn: true } },
+      batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, discountPercent: true, bonusQuantity: true, quantityIn: true, purchasePrice: true } },
     },
   })
 
@@ -39,27 +41,22 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       await tx.offerListItem.deleteMany({ where: { id: { in: removed.map((i) => i.id) } } })
     }
 
-    for (const { medicine, offer } of inStock) {
-      await tx.offerListItem.upsert({
-        where: { offerListId_medicineId: { offerListId: id, medicineId: medicine.id } },
-        update: {
-          offerPercent: offer.maxOfferPercent,
-          bonusQty: offer.bonusQty,
-          specialPrice: offer.tradePrice,
-        },
-        create: {
+    for (const { medicine, offer } of added) {
+      await tx.offerListItem.create({
+        data: {
           offerListId: id,
           medicineId: medicine.id,
-          offerPercent: offer.maxOfferPercent,
-          bonusQty: offer.bonusQty,
+          purchasePercent: offer.purchasePercent,
+          offerPercent: offer.purchasePercent,
           specialPrice: offer.tradePrice,
           salesTax: 0,
+          commentType: 'NONE',
         },
       })
     }
   })
 
   return NextResponse.json({
-    data: { total: inStock.length, added: added.length, removed: removed.length, updated: inStock.length - added.length },
+    data: { total: inStock.length, added: added.length, removed: removed.length, updated: 0 },
   })
 }

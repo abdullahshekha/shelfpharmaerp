@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getEffectivePrice } from '@/lib/utils/pricing'
+import { getEffectivePrice, getFefoBatch } from '@/lib/utils/pricing'
+import { formatOfferComment } from '@/lib/utils/offer-comment'
 
 export const dynamic = 'force-dynamic'
+
+function expiryToMMYY(expiryDate: Date): string {
+  return `${String(expiryDate.getMonth() + 1).padStart(2, '0')}/${String(expiryDate.getFullYear()).slice(-2)}`
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -40,16 +45,18 @@ export async function GET(req: NextRequest) {
     itemRows += `<tr class="mfg-row"><td colspan="6">${mfg}</td></tr>\n`
     for (const item of byMfg.get(mfg)!) {
       rowIndex++
-      const maxOffDisplay = Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}%` : '—'
-      const bonusDisplay = item.bonusQty > 0 ? String(item.bonusQty) : (item.medicine.bonusQty ?? '—')
+      const offerDisplay = Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}%` : '—'
+      const fefoBatch = getFefoBatch(item.medicine.batches)
+      const expiryMMYY = fefoBatch ? expiryToMMYY(fefoBatch.expiryDate) : null
+      const comments = formatOfferComment(item, expiryMMYY)
       const effectiveTradePrice = getEffectivePrice(item.medicine.batches).tradePrice
       const price = (item.specialPrice != null ? Number(item.specialPrice) : effectiveTradePrice ?? 0).toFixed(2)
       itemRows += `<tr class="item">
   <td class="col-code">${item.medicine.code}</td>
   <td class="col-name">${item.medicine.name}</td>
   <td class="col-order"><input type="number" min="0" max="1000" placeholder="Qty" id="nameid${rowIndex}"></td>
-  <td class="col-num">${maxOffDisplay}</td>
-  <td class="col-num">${bonusDisplay}</td>
+  <td class="col-num">${offerDisplay}</td>
+  <td class="col-num">${comments}</td>
   <td class="col-num col-price">Rs. ${price}</td>
 </tr>\n`
     }
@@ -320,8 +327,8 @@ $(document).ready(function(){
         <th>Code</th>
         <th>Item Name</th>
         <th style="text-align:center;">Order</th>
-        <th style="text-align:right;">Max Off %</th>
-        <th style="text-align:right;">Bonus</th>
+        <th style="text-align:right;">Offer %</th>
+        <th style="text-align:right;">Comments</th>
         <th style="text-align:right;">T.P</th>
       </tr>
     </thead>

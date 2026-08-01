@@ -15,8 +15,8 @@ interface SheetItem {
   medicine: { id: string; code: string; name: string; manufacturer: { name: string } }
   quantity: number
   offerPercent: number
-  bonusQty: number
   specialPrice: number | null
+  comments: string
 }
 
 interface Sheet {
@@ -92,8 +92,8 @@ export default function OfferListCustomerSheetPage() {
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Code</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Manufacturer</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Max Off. %</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Bonus</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Comments</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">T.P</th>
                   <th className="text-center px-4 py-3 font-medium text-slate-600 w-24">Qty</th>
                 </tr>
@@ -105,7 +105,7 @@ export default function OfferListCustomerSheetPage() {
                     <td className="px-4 py-3 font-medium">{item.medicine.name}</td>
                     <td className="px-4 py-3 text-slate-500">{item.medicine.manufacturer.name}</td>
                     <td className="px-4 py-3 text-right">{Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}%` : '—'}</td>
-                    <td className="px-4 py-3 text-right">{item.bonusQty > 0 ? item.bonusQty : '—'}</td>
+                    <td className="px-4 py-3 text-slate-500">{item.comments}</td>
                     <td className="px-4 py-3 text-right font-medium">{item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
                     <td className="px-4 py-3 text-center">
                       <Input

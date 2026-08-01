@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getFefoBatch } from '@/lib/utils/pricing'
+import { isOfferAtLoss } from '@/lib/utils/offer-comment'
 
 export const dynamic = 'force-dynamic'
+
+function expiryToMMYY(expiryDate: Date): string {
+  return `${String(expiryDate.getMonth() + 1).padStart(2, '0')}/${String(expiryDate.getFullYear()).slice(-2)}`
+}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -13,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           medicine: {
             include: {
               manufacturer: { select: { name: true } },
-              batches: { select: { currentQty: true } },
+              batches: { select: { currentQty: true, expiryDate: true, purchasePrice: true, tradePrice: true, mrp: true } },
             },
           },
         },
@@ -24,7 +30,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   })
   if (!list) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json({ data: list })
+
+  const items = list.items.map((item) => {
+    const batches = item.medicine.batches
+    const stock = batches.reduce((s, b) => s + b.currentQty, 0)
+    const fefoBatch = getFefoBatch(batches)
+    const expiryMMYY = fefoBatch ? expiryToMMYY(fefoBatch.expiryDate) : null
+    const purchasePrice = fefoBatch ? Number(fefoBatch.purchasePrice) : null
+    const tradePrice = item.specialPrice != null ? Number(item.specialPrice) : null
+    const isLoss = isOfferAtLoss(item, tradePrice, purchasePrice)
+    return { ...item, stock, expiryMMYY, purchasePrice, isLoss }
+  })
+
+  return NextResponse.json({ data: { ...list, items } })
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -46,25 +64,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     })
 
-    // Upsert items if provided
+    // Upsert items if provided — purchasePercent is never accepted here, it's only ever set by /refresh
     if (body.items && Array.isArray(body.items)) {
       for (const item of body.items) {
+        const fields = {
+          offerPercent: item.offerPercent ?? 0,
+          specialPrice: item.specialPrice ?? null,
+          salesTax: item.salesTax ?? 0,
+          commentType: item.commentType ?? 'NONE',
+          commentNetPrice: item.commentNetPrice ?? null,
+          commentMinOrderQty: item.commentMinOrderQty ?? null,
+          commentQtyFree: item.commentQtyFree ?? null,
+          commentExtraPercent: item.commentExtraPercent ?? null,
+        }
         await tx.offerListItem.upsert({
           where: { offerListId_medicineId: { offerListId: id, medicineId: item.medicineId } },
-          update: {
-            offerPercent: item.offerPercent ?? 0,
-            bonusQty: item.bonusQty ?? 0,
-            specialPrice: item.specialPrice ?? null,
-            salesTax: item.salesTax ?? 0,
-          },
-          create: {
-            offerListId: id,
-            medicineId: item.medicineId,
-            offerPercent: item.offerPercent ?? 0,
-            bonusQty: item.bonusQty ?? 0,
-            specialPrice: item.specialPrice ?? null,
-            salesTax: item.salesTax ?? 0,
-          },
+          update: fields,
+          create: { offerListId: id, medicineId: item.medicineId, ...fields },
         })
       }
     }
