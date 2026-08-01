@@ -9,6 +9,7 @@ interface BatchForPricing {
 interface BatchWithOfferData extends BatchForPricing {
   discountPercent: unknown
   bonusQuantity: number
+  quantityIn: number
 }
 
 /** The batch that stock is drawn from first (First-Expiry-First-Out). */
@@ -31,23 +32,25 @@ export function getEffectivePrice<T extends BatchForPricing>(batches: T[]): { tr
 }
 
 /**
- * Offer List pricing for a medicine, taken from its FEFO batch: Trade Price plus the
- * Disc % and bonus quantity that batch was purchased at (see MedicineBatch.discountPercent/
- * bonusQuantity, snapshotted from the Purchase Invoice line when the batch was created).
- * Null means no in-stock batch exists for this medicine.
+ * Offer List pricing for a medicine, taken from its FEFO batch: Trade Price, the bonus quantity
+ * that batch was purchased at, and Max Off. % — the maximum discount that can be given on Trade
+ * Price while still covering cost, derived from that batch's Disc % and Bonus Qty (see
+ * calcMaxOfferPercent). Null means no in-stock batch exists for this medicine.
  */
 export function getEffectiveOffer<T extends BatchWithOfferData>(batches: T[]): {
   tradePrice: number | null
   mrp: number | null
-  offerPercent: number
+  maxOfferPercent: number
   bonusQty: number
 } {
   const batch = getFefoBatch(batches)
-  if (!batch) return { tradePrice: null, mrp: null, offerPercent: 0, bonusQty: 0 }
+  if (!batch) return { tradePrice: null, mrp: null, maxOfferPercent: 0, bonusQty: 0 }
+  const discountPercent = Number(batch.discountPercent as string | number)
+  const tradeOfferPercent = calcTradeOfferPercent(batch.quantityIn - batch.bonusQuantity, batch.bonusQuantity)
   return {
     tradePrice: Number(batch.tradePrice as string | number),
     mrp: batch.mrp != null ? Number(batch.mrp as string | number) : null,
-    offerPercent: Number(batch.discountPercent as string | number),
+    maxOfferPercent: calcMaxOfferPercent(discountPercent, tradeOfferPercent),
     bonusQty: batch.bonusQuantity,
   }
 }
@@ -61,6 +64,18 @@ export function calcTradeOfferPercent(actualQuantity: number, bonusQuantity: num
   const totalQuantity = actualQuantity + bonusQuantity
   if (totalQuantity <= 0 || bonusQuantity <= 0) return 0
   return (bonusQuantity / totalQuantity) * 100
+}
+
+/**
+ * Max Off. % for the Offer List: the largest discount we can give off Trade Price and still
+ * recover Purchase Price, combining Disc % and the bonus-derived Trade Offer % the same way
+ * calcPurchasePrice does — multiplicatively, not summed (see that function's comment for why).
+ * This is just 100 − combinedDiscountFactor×100, i.e. the inverse of calcPurchasePrice expressed
+ * as a percent off Trade Price rather than an absolute price.
+ */
+export function calcMaxOfferPercent(discountPercent: number, tradeOfferPercent: number): number {
+  const combinedDiscountFactor = (1 - discountPercent / 100) * (1 - tradeOfferPercent / 100)
+  return (1 - combinedDiscountFactor) * 100
 }
 
 interface PurchasePriceInput {

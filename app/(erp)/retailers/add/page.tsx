@@ -10,11 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { CUSTOMER_TYPES } from '@/lib/constants'
 
 interface SalesRep { id: string; name: string }
 interface Area { id: string; name: string }
-
-const CUSTOMER_TYPES = ['Medical Stores', 'Chain Pharmacy', 'Hospitals', 'Institutions', 'Marts', 'Pharmacy', 'WholeSalers']
 
 export default function AddCustomerPage() {
   const router = useRouter()

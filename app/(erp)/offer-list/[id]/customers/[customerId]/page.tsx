@@ -92,7 +92,7 @@ export default function OfferListCustomerSheetPage() {
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Code</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Manufacturer</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Max Off. %</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Bonus</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">T.P</th>
                   <th className="text-center px-4 py-3 font-medium text-slate-600 w-24">Qty</th>

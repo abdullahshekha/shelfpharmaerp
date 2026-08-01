@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Search, Plus, Phone, Users } from 'lucide-react'
+import { Search, Plus, Phone } from 'lucide-react'
 import Link from 'next/link'
 
 interface Retailer {
@@ -49,9 +49,6 @@ export default function RetailersPage() {
           <p className="text-slate-500 text-sm">{total} customers</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/customer-groups">
-            <Button size="sm" variant="outline" className="gap-2"><Users size={16} /> Customer Groups</Button>
-          </Link>
           <Link href="/retailers/add">
             <Button size="sm" className="gap-2"><Plus size={16} /> Add Customer</Button>
           </Link>

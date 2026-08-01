@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         },
         orderBy: { medicine: { name: 'asc' } },
       },
-      assignments: { include: { customerGroup: { select: { id: true, name: true } } } },
+      assignments: { select: { customerType: true } },
       _count: { select: { customers: true } },
     },
   })

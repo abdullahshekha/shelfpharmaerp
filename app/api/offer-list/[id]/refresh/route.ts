@@ -4,10 +4,10 @@ import { getEffectiveOffer } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
 
-// Full resync: every in-stock medicine gets an OfferListItem with Offer %/Bonus/TP taken from
-// its FEFO batch (which snapshots the Disc % and bonus qty it was purchased at); medicines that
-// have gone out of stock are dropped. Sales Tax is left as-is on existing rows since it isn't
-// sourced from Purchase Invoice data.
+// Full resync: every in-stock medicine gets an OfferListItem with Max Off. %/Bonus/TP taken from
+// its FEFO batch (Max Off. % is the combined max discount off Trade Price from that batch's
+// Disc % and Bonus Qty — see calcMaxOfferPercent); medicines that have gone out of stock are
+// dropped. Sales Tax is left as-is on existing rows since it isn't sourced from Purchase Invoice data.
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
@@ -19,7 +19,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     select: {
       id: true,
       salesTaxApplicable: true,
-      batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, discountPercent: true, bonusQuantity: true } },
+      batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, discountPercent: true, bonusQuantity: true, quantityIn: true } },
     },
   })
 
@@ -43,14 +43,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       await tx.offerListItem.upsert({
         where: { offerListId_medicineId: { offerListId: id, medicineId: medicine.id } },
         update: {
-          offerPercent: offer.offerPercent,
+          offerPercent: offer.maxOfferPercent,
           bonusQty: offer.bonusQty,
           specialPrice: offer.tradePrice,
         },
         create: {
           offerListId: id,
           medicineId: medicine.id,
-          offerPercent: offer.offerPercent,
+          offerPercent: offer.maxOfferPercent,
           bonusQty: offer.bonusQty,
           specialPrice: offer.tradePrice,
           salesTax: 0,

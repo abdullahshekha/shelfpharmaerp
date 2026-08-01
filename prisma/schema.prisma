@@ -271,7 +271,6 @@ model Retailer {
   invoices          Invoice[]
   payments          Payment[]
   whatsappOrders    WhatsappOrder[]
-  groupMemberships  CustomerGroupMember[]
   offerListEntries  OfferListCustomer[]
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
@@ -279,26 +278,6 @@ model Retailer {
   @@index([whatsappNumber])
   @@index([name])
   @@index([areaId])
-}
-
-model CustomerGroup {
-  id                  String                @id @default(cuid())
-  name                String                @unique
-  members             CustomerGroupMember[]
-  offerListAssignments OfferListAssignment[]
-  createdAt           DateTime              @default(now())
-}
-
-model CustomerGroupMember {
-  id              String        @id @default(cuid())
-  customerGroupId String
-  customerGroup   CustomerGroup @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
-  retailerId      String
-  retailer        Retailer      @relation(fields: [retailerId], references: [id])
-  createdAt       DateTime      @default(now())
-
-  @@unique([customerGroupId, retailerId])
-  @@index([retailerId])
 }
 
 model Order {
@@ -373,20 +352,21 @@ model OfferListItem {
   @@unique([offerListId, medicineId])
 }
 
-// Which Customer Groups an Offer List has been sent/assigned to.
+// Which Customer Types (Medical Stores / Chain Pharmacy / etc. — see lib/constants.ts) an Offer
+// List has been sent/assigned to. Matches Retailer.customerType directly rather than a separate
+// managed grouping concept.
 model OfferListAssignment {
-  id              String        @id @default(cuid())
-  offerListId     String
-  offerList       OfferList     @relation(fields: [offerListId], references: [id], onDelete: Cascade)
-  customerGroupId String
-  customerGroup   CustomerGroup @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
-  createdAt       DateTime      @default(now())
+  id           String    @id @default(cuid())
+  offerListId  String
+  offerList    OfferList @relation(fields: [offerListId], references: [id], onDelete: Cascade)
+  customerType String
+  createdAt    DateTime  @default(now())
 
-  @@unique([offerListId, customerGroupId])
+  @@unique([offerListId, customerType])
 }
 
-// One quantity-entry sheet per customer per offer list — created when a group assignment
-// expands to its member retailers. A retailer in multiple assigned groups still gets one sheet.
+// One quantity-entry sheet per customer per offer list — created when a Customer Type assignment
+// expands to its matching retailers.
 model OfferListCustomer {
   id          String                  @id @default(cuid())
   offerListId String

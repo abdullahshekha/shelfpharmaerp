@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { formatDate, formatPKR } from '@/lib/utils/format'
 import { ArrowLeft, Eye, Download, Zap, RefreshCw, Users, Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { CUSTOMER_TYPES } from '@/lib/constants'
 
 interface Medicine {
   id: string
@@ -28,8 +29,6 @@ interface OfferListItem {
   salesTax: number
 }
 
-interface CustomerGroupRef { id: string; name: string }
-
 interface OfferListDetail {
   id: string
   name: string | null
@@ -37,11 +36,9 @@ interface OfferListDetail {
   listDate: string
   isActive: boolean
   items: OfferListItem[]
-  assignments: { customerGroup: CustomerGroupRef }[]
+  assignments: { customerType: string }[]
   _count: { customers: number }
 }
-
-interface CustomerGroup { id: string; name: string; _count: { members: number } }
 
 interface AssignedCustomer {
   id: string
@@ -54,24 +51,21 @@ export default function OfferListDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [list, setList] = useState<OfferListDetail | null>(null)
   const [customers, setCustomers] = useState<AssignedCustomer[]>([])
-  const [groups, setGroups] = useState<CustomerGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set())
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set())
   const [assigning, setAssigning] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [listRes, customersRes, groupsRes] = await Promise.all([
+    const [listRes, customersRes] = await Promise.all([
       fetch(`/api/offer-list/${id}`),
       fetch(`/api/offer-list/${id}/customers`),
-      fetch('/api/customer-groups'),
     ])
     const listJson = await listRes.json()
     setList(listJson.data ?? null)
     setCustomers((await customersRes.json()).data ?? [])
-    setGroups((await groupsRes.json()).data ?? [])
     setLoading(false)
   }, [id])
 
@@ -100,47 +94,47 @@ export default function OfferListDetailPage() {
     else toast.error('Failed to activate')
   }
 
-  const toggleGroup = (groupId: string) => {
-    setSelectedGroupIds(prev => {
+  const toggleType = (type: string) => {
+    setSelectedTypes(prev => {
       const next = new Set(prev)
-      if (next.has(groupId)) next.delete(groupId)
-      else next.add(groupId)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
       return next
     })
   }
 
-  const assignGroups = async () => {
-    if (selectedGroupIds.size === 0) { toast.error('Select at least one group'); return }
+  const assignTypes = async () => {
+    if (selectedTypes.size === 0) { toast.error('Select at least one customer type'); return }
     setAssigning(true)
     const res = await fetch(`/api/offer-list/${id}/assign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerGroupIds: Array.from(selectedGroupIds) }),
+      body: JSON.stringify({ customerTypes: Array.from(selectedTypes) }),
     })
     if (res.ok) {
-      toast.success('Groups assigned')
+      toast.success('Customer types assigned')
       setShowAssign(false)
-      setSelectedGroupIds(new Set())
+      setSelectedTypes(new Set())
       fetchAll()
     } else {
-      toast.error('Failed to assign groups')
+      toast.error('Failed to assign customer types')
     }
     setAssigning(false)
   }
 
-  const unassignGroup = async (groupId: string) => {
-    if (!confirm('Remove this group from the offer list? Customer quantity sheets already created will stay.')) return
-    const res = await fetch(`/api/offer-list/${id}/assign?customerGroupId=${groupId}`, { method: 'DELETE' })
-    if (res.ok) { toast.success('Group removed'); fetchAll() }
-    else toast.error('Failed to remove group')
+  const unassignType = async (type: string) => {
+    if (!confirm('Remove this customer type from the offer list? Customer quantity sheets already created will stay.')) return
+    const res = await fetch(`/api/offer-list/${id}/assign?customerType=${encodeURIComponent(type)}`, { method: 'DELETE' })
+    if (res.ok) { toast.success('Customer type removed'); fetchAll() }
+    else toast.error('Failed to remove customer type')
   }
 
   if (loading || !list) {
     return <div className="p-6 text-slate-400 text-sm animate-pulse">Loading...</div>
   }
 
-  const assignedGroupIds = new Set(list.assignments.map(a => a.customerGroup.id))
-  const availableGroups = groups.filter(g => !assignedGroupIds.has(g.id))
+  const assignedTypes = new Set(list.assignments.map(a => a.customerType))
+  const availableTypes = CUSTOMER_TYPES.filter(t => !assignedTypes.has(t))
 
   return (
     <div className="space-y-6">
@@ -181,7 +175,7 @@ export default function OfferListDetailPage() {
           {list.items.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <p className="font-medium">No medicines yet</p>
-              <p className="text-sm mt-1">Hit Refresh to pull in every in-stock medicine with its current Offer %, Bonus and Trade Price</p>
+              <p className="text-sm mt-1">Hit Refresh to pull in every in-stock medicine with its current Max Off. %, Bonus and Trade Price</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -192,7 +186,7 @@ export default function OfferListDetailPage() {
                     <th className="text-left px-4 py-3 font-medium text-slate-600">Medicine</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600">Manufacturer</th>
                     <th className="text-center px-4 py-3 font-medium text-slate-600">Stock</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">Max Off. %</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">Bonus</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">T.P</th>
                   </tr>
@@ -219,45 +213,41 @@ export default function OfferListDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Assigned Customer Groups */}
+      {/* Assigned Customer Types */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Assigned Customer Groups</CardTitle>
+          <CardTitle className="text-base">Assigned Customer Types</CardTitle>
           <Button size="sm" variant="outline" className="gap-1" onClick={() => setShowAssign(!showAssign)}>
-            <Plus size={14} /> Assign Groups
+            <Plus size={14} /> Assign Customer Types
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
           {showAssign && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
-              {availableGroups.length === 0 ? (
-                <p className="text-sm text-blue-700">
-                  {groups.length === 0
-                    ? <>No customer groups exist yet. <Link href="/customer-groups" className="underline">Create one</Link> first.</>
-                    : 'All existing groups are already assigned.'}
-                </p>
+              {availableTypes.length === 0 ? (
+                <p className="text-sm text-blue-700">All customer types are already assigned.</p>
               ) : (
                 <>
                   <div className="flex flex-wrap gap-2">
-                    {availableGroups.map(g => (
+                    {availableTypes.map(t => (
                       <button
-                        key={g.id}
-                        onClick={() => toggleGroup(g.id)}
+                        key={t}
+                        onClick={() => toggleType(t)}
                         className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
-                          selectedGroupIds.has(g.id)
+                          selectedTypes.has(t)
                             ? 'bg-blue-600 text-white border-blue-600'
                             : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300'
                         }`}
                       >
-                        {g.name} <span className="opacity-70">({g._count.members})</span>
+                        {t}
                       </button>
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={assignGroups} disabled={assigning}>
+                    <Button size="sm" onClick={assignTypes} disabled={assigning}>
                       {assigning ? 'Assigning...' : 'Assign Selected'}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => { setShowAssign(false); setSelectedGroupIds(new Set()) }}>Cancel</Button>
+                    <Button size="sm" variant="outline" onClick={() => { setShowAssign(false); setSelectedTypes(new Set()) }}>Cancel</Button>
                   </div>
                 </>
               )}
@@ -265,13 +255,13 @@ export default function OfferListDetailPage() {
           )}
 
           {list.assignments.length === 0 ? (
-            <p className="text-sm text-slate-400">No groups assigned yet.</p>
+            <p className="text-sm text-slate-400">No customer types assigned yet.</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {list.assignments.map(a => (
-                <span key={a.customerGroup.id} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full bg-slate-100 text-slate-700">
-                  {a.customerGroup.name}
-                  <button onClick={() => unassignGroup(a.customerGroup.id)} className="text-slate-400 hover:text-red-500">
+                <span key={a.customerType} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full bg-slate-100 text-slate-700">
+                  {a.customerType}
+                  <button onClick={() => unassignType(a.customerType)} className="text-slate-400 hover:text-red-500">
                     <X size={12} />
                   </button>
                 </span>
@@ -288,7 +278,7 @@ export default function OfferListDetailPage() {
           {customers.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <p className="font-medium">No customers yet</p>
-              <p className="text-sm mt-1">Assign a Customer Group above to generate a quantity sheet for each of its members</p>
+              <p className="text-sm mt-1">Assign a Customer Type above to generate a quantity sheet for each matching customer</p>
             </div>
           ) : (
             <div className="overflow-x-auto">

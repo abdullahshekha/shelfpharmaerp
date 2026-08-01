@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatDate } from '@/lib/utils/format'
-import { Plus, Eye, Zap, Download, Trash2, Users, Settings2 } from 'lucide-react'
+import { Plus, Eye, Zap, Download, Trash2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 
@@ -89,11 +89,6 @@ export default function OfferListPage() {
           <p className="text-slate-500 text-sm">{lists.length} lists</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/customer-groups">
-            <Button size="sm" variant="outline" className="gap-2">
-              <Settings2 size={16} /> Customer Groups
-            </Button>
-          </Link>
           <Button size="sm" className="gap-2" onClick={() => setShowForm(!showForm)}>
             <Plus size={16} /> New Offer List
           </Button>

@@ -12,6 +12,7 @@ import { formatPKR, formatDate } from '@/lib/utils/format'
 import { ArrowLeft, Phone, MapPin, Trash2, UserCheck, Pencil, X, Check } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { CUSTOMER_TYPES } from '@/lib/constants'
 
 interface Order { id: string; orderNumber: string; orderDate: string; status: string; totalAmount: number }
 interface Invoice { id: string; invoiceNumber: string; invoiceDate: string; totalAmount: number; status: string }
@@ -28,8 +29,6 @@ interface Retailer {
   salesRepId: string | null; salesRep: { id: string; name: string } | null
   orders: Order[]; invoices: Invoice[]; outstandingBalance: number
 }
-
-const CUSTOMER_TYPES = ['Medical Stores', 'Chain Pharmacy', 'Hospitals', 'Institutions', 'Marts', 'Pharmacy', 'WholeSalers']
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING: 'bg-slate-100 text-slate-700', CONFIRMED: 'bg-blue-100 text-blue-700',
