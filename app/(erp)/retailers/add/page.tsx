@@ -7,36 +7,77 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, MapPin, Camera, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 interface SalesRep { id: string; name: string }
 interface Area { id: string; name: string }
 
 export default function AddCustomerPage() {
   const router = useRouter()
+  const { user } = useCurrentUser()
+  const isOrderBooker = user?.role === 'SALES_REP'
   const [saving, setSaving] = useState(false)
   const [salesReps, setSalesReps] = useState<SalesRep[]>([])
   const [areas, setAreas] = useState<Area[]>([])
+  const [locating, setLocating] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [form, setForm] = useState({
     name: '', ownerName: '', phone: '', whatsappNumber: '',
     areaId: '', address: '', customerType: '', drugLicenseNumber: '',
     drugLicenseExpiry: '', creditLimit: '0', creditDays: '0',
     paymentMode: 'CASH', salesRepId: '', notes: '',
     isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '',
+    drapRegistered: false, latitude: '', longitude: '', storePhotoUrl: '',
   })
 
   useEffect(() => {
-    fetch('/api/employees?role=SALES_REP').then(r => r.json()).then(j => setSalesReps(j.data ?? []))
+    if (!isOrderBooker) {
+      fetch('/api/employees?role=SALES_REP').then(r => r.json()).then(j => setSalesReps(j.data ?? []))
+    }
     fetch('/api/areas').then(r => r.json()).then(j => setAreas(j.data ?? []))
-  }, [])
+  }, [isOrderBooker])
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [field]: e.target.value }))
 
   const isCheque = form.paymentMode === 'CHEQUE'
+
+  const captureLocation = () => {
+    if (!navigator.geolocation) { toast.error('Geolocation is not supported on this device'); return }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setForm(f => ({ ...f, latitude: String(pos.coords.latitude), longitude: String(pos.coords.longitude) }))
+        setLocating(false)
+      },
+      () => {
+        toast.error('Could not get location — check location permission for this browser')
+        setLocating(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    )
+  }
+
+  const uploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingPhoto(true)
+    const fd = new FormData()
+    fd.append('photo', file)
+    const res = await fetch('/api/retailers/upload-photo', { method: 'POST', body: fd })
+    if (res.ok) {
+      const j = await res.json()
+      setForm(f => ({ ...f, storePhotoUrl: j.data.url }))
+      toast.success('Photo uploaded')
+    } else {
+      toast.error('Failed to upload photo')
+    }
+    setUploadingPhoto(false)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,8 +99,12 @@ export default function AddCustomerPage() {
         creditLimit: isCheque ? (parseFloat(form.creditLimit) || 0) : 0,
         creditDays: isCheque ? (parseInt(form.creditDays) || 0) : 0,
         drugLicenseExpiry: form.drugLicenseExpiry || null,
-        salesRepId: form.salesRepId || null,
+        // Order Booker's assignment is forced server-side regardless of what's sent
+        salesRepId: isOrderBooker ? undefined : (form.salesRepId || null),
         isFiler,
+        latitude: form.latitude ? parseFloat(form.latitude) : null,
+        longitude: form.longitude ? parseFloat(form.longitude) : null,
+        storePhotoUrl: form.storePhotoUrl || null,
       }),
     })
     if (res.ok) {
@@ -152,19 +197,62 @@ export default function AddCustomerPage() {
                 <Input placeholder="Shop #12, Main Bahadurabad Road" value={form.address} onChange={set('address')} />
               </div>
 
+              {/* Pin location */}
               <div className="space-y-1.5 col-span-2">
-                <Label>Assigned ORDER BOOKER</Label>
-                <Select
-                  items={[{ value: 'none', label: 'No sales rep' }, ...salesReps.map(rep => ({ value: rep.id, label: rep.name }))]}
-                  value={form.salesRepId || 'none'} onValueChange={v => setForm(f => ({ ...f, salesRepId: v === 'none' ? '' : (v ?? '') }))}
-                >
-                  <SelectTrigger><SelectValue placeholder="Select sales rep (optional)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No sales rep</SelectItem>
-                    {salesReps.map(rep => <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Label>Pin Location</Label>
+                <div className="flex items-center gap-3">
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={captureLocation} disabled={locating}>
+                    {locating ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />}
+                    {locating ? 'Locating...' : form.latitude ? 'Recapture Location' : 'Use My Location'}
+                  </Button>
+                  {form.latitude && form.longitude && (
+                    <span className="text-xs text-slate-500 font-mono">{Number(form.latitude).toFixed(6)}, {Number(form.longitude).toFixed(6)}</span>
+                  )}
+                </div>
               </div>
+
+              {/* Store front photo */}
+              <div className="space-y-1.5 col-span-2">
+                <Label>Store Front Photo</Label>
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex">
+                    <input
+                      type="file" accept="image/*" capture="environment"
+                      className="hidden" onChange={uploadPhoto}
+                    />
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 text-sm cursor-pointer hover:border-slate-400">
+                      {uploadingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                      {uploadingPhoto ? 'Uploading...' : 'Take Photo'}
+                    </span>
+                  </label>
+                  {form.storePhotoUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={form.storePhotoUrl} alt="Store front" className="h-12 w-12 object-cover rounded border border-slate-200" />
+                  )}
+                </div>
+              </div>
+
+              {!isOrderBooker && (
+                <div className="space-y-1.5 col-span-2">
+                  <Label>Assigned ORDER BOOKER</Label>
+                  <Select
+                    items={[{ value: 'none', label: 'No sales rep' }, ...salesReps.map(rep => ({ value: rep.id, label: rep.name }))]}
+                    value={form.salesRepId || 'none'} onValueChange={v => setForm(f => ({ ...f, salesRepId: v === 'none' ? '' : (v ?? '') }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select sales rep (optional)" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No sales rep</SelectItem>
+                      {salesReps.map(rep => <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {isOrderBooker && user && (
+                <div className="space-y-1.5 col-span-2">
+                  <Label>Assigned ORDER BOOKER</Label>
+                  <p className="text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-600">{user.name} (you)</p>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label>Drug License #</Label>
@@ -173,6 +261,15 @@ export default function AddCustomerPage() {
               <div className="space-y-1.5">
                 <Label>License Expiry</Label>
                 <Input type="date" value={form.drugLicenseExpiry} onChange={set('drugLicenseExpiry')} />
+              </div>
+
+              <div className="space-y-1.5 col-span-2 flex items-center gap-2">
+                <input
+                  type="checkbox" id="drapRegistered" className="h-4 w-4 rounded border-slate-300"
+                  checked={form.drapRegistered}
+                  onChange={e => setForm(f => ({ ...f, drapRegistered: e.target.checked }))}
+                />
+                <Label htmlFor="drapRegistered" className="cursor-pointer">DRAP Registered</Label>
               </div>
 
               {/* Filer status */}

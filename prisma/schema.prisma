@@ -257,6 +257,10 @@ model Retailer {
   customerType      String? // Medical Stores | Chain Pharmacy | Hospitals | Institutions | Marts | Pharmacy | WholeSalers
   drugLicenseNumber String?
   drugLicenseExpiry DateTime?
+  drapRegistered    Boolean         @default(false)
+  latitude          Decimal?        @db.Decimal(9, 6)
+  longitude         Decimal?        @db.Decimal(9, 6)
+  storePhotoUrl     String?
   isFiler           Boolean         @default(false)
   ntnNumber         String?
   strnStatus        String? // REGISTERED | UNREGISTERED — only meaningful when isFiler

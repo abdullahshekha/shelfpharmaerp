@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
+import { getUserFromRequest } from '@/lib/utils/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
   const retailer = await prisma.retailer.findUnique({
@@ -27,6 +28,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!retailer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  const user = getUserFromRequest(req)
+  if (user.role === 'SALES_REP' && retailer.salesRepId !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const outstanding = await prisma.invoice.aggregate({
     where: { retailerId: id, status: { in: ['UNPAID', 'PARTIAL', 'OVERDUE'] } },
     _sum: { totalAmount: true },
@@ -37,6 +43,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  if (getUserFromRequest(req).role === 'SALES_REP') {
+    return NextResponse.json({ error: 'Order Booker cannot edit customers' }, { status: 403 })
+  }
   const body = await req.json()
   const paymentMode = body.paymentMode ?? 'CASH'
 

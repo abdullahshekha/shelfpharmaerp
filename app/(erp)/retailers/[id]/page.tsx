@@ -13,6 +13,7 @@ import { ArrowLeft, Phone, MapPin, Trash2, UserCheck, Pencil, X, Check } from 'l
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 interface Order { id: string; orderNumber: string; orderDate: string; status: string; totalAmount: number }
 interface Invoice { id: string; invoiceNumber: string; invoiceDate: string; totalAmount: number; status: string }
@@ -39,6 +40,8 @@ const STATUS_COLORS: Record<string, string> = {
 export default function RetailerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const { user } = useCurrentUser()
+  const isOrderBooker = user?.role === 'SALES_REP'
   const [retailer, setRetailer] = useState<Retailer | null>(null)
   const [salesReps, setSalesReps] = useState<SalesRep[]>([])
   const [areas, setAreas] = useState<Area[]>([])
@@ -185,15 +188,17 @@ export default function RetailerDetailPage() {
             </Badge>
           </div>
         </div>
-        <div className="ml-auto flex gap-2">
-          <Link href={`/orders/new?retailerId=${retailer.id}`}><Button size="sm">New Sales Invoice</Button></Link>
-          <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditing(true)}>
-            <Pencil size={14} /> Edit
-          </Button>
-          <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 gap-1" onClick={deleteRetailer}>
-            <Trash2 size={14} /> Delete
-          </Button>
-        </div>
+        {!isOrderBooker && (
+          <div className="ml-auto flex gap-2">
+            <Link href={`/orders/new?retailerId=${retailer.id}`}><Button size="sm">New Sales Invoice</Button></Link>
+            <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditing(true)}>
+              <Pencil size={14} /> Edit
+            </Button>
+            <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 gap-1" onClick={deleteRetailer}>
+              <Trash2 size={14} /> Delete
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Inline Edit Form */}

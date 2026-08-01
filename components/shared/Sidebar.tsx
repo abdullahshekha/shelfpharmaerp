@@ -18,7 +18,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard',   label: 'Dashboard',       icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD'] },
   { href: '/inventory',   label: 'Inventory',        icon: Package,         roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'WAREHOUSE'] },
   { href: '/retailers',   label: 'Customers',        icon: Users,           roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP'] },
-  { href: '/orders',      label: 'Orders',           icon: ShoppingCart,    roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP'] },
+  { href: '/orders',      label: 'Orders',           icon: ShoppingCart,    roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD'] },
   { href: '/whatsapp',    label: 'WhatsApp Orders',  icon: MessageSquare,   roles: ['ADMIN', 'MANAGER'] },
   { href: '/offer-list',  label: 'Offer List',       icon: ListOrdered,     roles: ['ADMIN', 'MANAGER'] },
   { href: '/invoices',    label: 'Invoices',         icon: FileText,        roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'ACCOUNTANT'] },

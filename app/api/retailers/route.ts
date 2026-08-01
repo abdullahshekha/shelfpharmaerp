@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
+import { getUserFromRequest } from '@/lib/utils/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +12,7 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get('search') ?? ''
   const areaId = searchParams.get('areaId') ?? ''
   const salesRepId = searchParams.get('salesRepId') ?? ''
+  const user = getUserFromRequest(req)
 
   const where: Prisma.RetailerWhereInput = {
     isActive: true,
@@ -22,7 +24,8 @@ export async function GET(req: NextRequest) {
       ],
     }),
     ...(areaId && { areaId }),
-    ...(salesRepId && { salesRepId }),
+    // Order Booker only ever sees their own customers, regardless of any client-supplied filter
+    ...(user.role === 'SALES_REP' ? { salesRepId: user.id } : (salesRepId && { salesRepId })),
   }
 
   const [retailers, total] = await Promise.all([
@@ -48,6 +51,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
+  const user = getUserFromRequest(req)
   if (!body.name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
   const paymentMode = body.paymentMode ?? 'CASH'
@@ -78,8 +82,13 @@ export async function POST(req: NextRequest) {
       creditLimit: paymentMode === 'CHEQUE' ? (body.creditLimit ?? 0) : 0,
       creditDays: paymentMode === 'CHEQUE' ? (body.creditDays ?? 0) : 0,
       paymentMode,
-      salesRepId: body.salesRepId ?? null,
+      // Order Booker can only ever assign a new customer to themselves, never another Order Booker
+      salesRepId: user.role === 'SALES_REP' ? user.id : (body.salesRepId ?? null),
       notes: body.notes ?? null,
+      latitude: body.latitude ?? null,
+      longitude: body.longitude ?? null,
+      storePhotoUrl: body.storePhotoUrl ?? null,
+      drapRegistered: !!body.drapRegistered,
     },
   })
 
