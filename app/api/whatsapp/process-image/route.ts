@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { prisma } from '@/lib/prisma'
 import { extractOrderFromImage, ExtractedItem } from '@/lib/claude/extract-order'
 import { buildFuseIndex, fuzzyMatchMedicine } from '@/lib/utils/fuzzy-match'
 import { getEffectivePrice } from '@/lib/utils/pricing'
-import path from 'path'
-import fs from 'fs'
 
 export const dynamic = 'force-dynamic'
 
+const BUCKET = 'whatsapp-images'
+
 export async function POST(req: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !serviceKey) {
+    return NextResponse.json(
+      { error: 'Image storage is not configured yet — add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, and create a public "whatsapp-images" bucket in Supabase Storage' },
+      { status: 503 }
+    )
+  }
+
   try {
     const formData = await req.formData()
     const file = formData.get('image') as File | null
@@ -18,15 +28,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No image file provided' }, { status: 400 })
     }
 
-    // Save image to public/uploads/whatsapp/
+    // Vercel's serverless functions have a read-only filesystem outside /tmp, so this
+    // uploads to Supabase Storage instead of public/uploads/whatsapp/ — see vercel-serverless-storage memory.
     const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
     const filename = `wa_${Date.now()}.${ext}`
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'whatsapp')
-    fs.mkdirSync(uploadDir, { recursive: true })
-    const filepath = path.join(uploadDir, filename)
     const buffer = Buffer.from(await file.arrayBuffer())
-    fs.writeFileSync(filepath, buffer)
-    const imageUrl = `/uploads/whatsapp/${filename}`
+
+    const supabase = createClient(supabaseUrl, serviceKey)
+    const { error: uploadError } = await supabase.storage.from(BUCKET).upload(filename, buffer, {
+      contentType: file.type || 'image/jpeg',
+    })
+    if (uploadError) {
+      console.error('[whatsapp/process-image] upload', uploadError)
+      return NextResponse.json({ error: uploadError.message }, { status: 500 })
+    }
+    const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(filename)
+    const imageUrl = publicUrlData.publicUrl
 
     // Convert to base64 for Claude
     const base64 = buffer.toString('base64')

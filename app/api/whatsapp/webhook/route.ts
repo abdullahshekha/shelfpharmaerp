@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { prisma } from '@/lib/prisma'
 import { extractOrderFromImage } from '@/lib/claude/extract-order'
 import { buildFuseIndex, fuzzyMatchMedicine } from '@/lib/utils/fuzzy-match'
 import { getEffectivePrice } from '@/lib/utils/pricing'
 import { sendWhatsAppMessage, buildAutoReplyText } from '@/lib/whatsapp/send-message'
-import path from 'path'
-import fs from 'fs'
 
 export const dynamic = 'force-dynamic'
+
+const BUCKET = 'whatsapp-images'
 
 // Meta webhook verification
 export async function GET(req: NextRequest) {
@@ -72,12 +73,25 @@ export async function POST(req: NextRequest) {
     })
     const buffer = Buffer.from(await imageRes.arrayBuffer())
 
-    // Save image
+    // Save image to Supabase Storage — Vercel's serverless filesystem is read-only outside /tmp,
+    // so writing to public/uploads/whatsapp/ (the old pattern) fails once deployed.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !serviceKey) {
+      console.error('[webhook] Image storage not configured — set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY')
+      return NextResponse.json({ status: 'storage_not_configured' })
+    }
     const filename = `wa_${Date.now()}.jpg`
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'whatsapp')
-    fs.mkdirSync(uploadDir, { recursive: true })
-    fs.writeFileSync(path.join(uploadDir, filename), buffer)
-    const imageUrl = `/uploads/whatsapp/${filename}`
+    const supabase = createClient(supabaseUrl, serviceKey)
+    const { error: uploadError } = await supabase.storage.from(BUCKET).upload(filename, buffer, {
+      contentType: 'image/jpeg',
+    })
+    if (uploadError) {
+      console.error('[webhook] Storage upload failed:', uploadError)
+      return NextResponse.json({ status: 'upload_failed' })
+    }
+    const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(filename)
+    const imageUrl = publicUrlData.publicUrl
 
     // Match retailer
     const normalised = phoneNumber.replace(/\D/g, '').slice(-10)
