@@ -138,8 +138,12 @@ export default function OrdersPage() {
                             e.stopPropagation()
                             if (!confirm(`Delete order ${o.orderNumber}?`)) return
                             const res = await fetch(`/api/orders/${o.id}?hard=true`, { method: 'DELETE' })
-                            if (res.ok) { toast.success('Order deleted'); fetchOrders() }
-                            else toast.error('Failed to delete')
+                            const j = await res.json().catch(() => ({}))
+                            if (res.ok) {
+                              if (j.pending) toast.info(j.message)
+                              else toast.success('Order deleted')
+                              fetchOrders()
+                            } else toast.error(j.error ?? 'Failed to delete')
                           }}
                         >
                           <Trash2 size={14} />

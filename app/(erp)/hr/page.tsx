@@ -74,8 +74,12 @@ export default function HRPage() {
     e.stopPropagation()
     if (!confirm(`Deactivate ${name}?`)) return
     const res = await fetch(`/api/employees/${id}`, { method: 'DELETE' })
-    if (res.ok) { toast.success('Employee deactivated'); fetchEmployees() }
-    else toast.error('Failed to deactivate')
+    const j = await res.json().catch(() => ({}))
+    if (res.ok) {
+      if (j.pending) toast.info(j.message)
+      else toast.success('Employee deactivated')
+      fetchEmployees()
+    } else toast.error(j.error ?? 'Failed to deactivate')
   }
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>

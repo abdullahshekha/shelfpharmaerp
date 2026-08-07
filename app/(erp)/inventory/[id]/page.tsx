@@ -113,11 +113,13 @@ export default function MedicineDetailPage() {
   const deleteBatch = async (batchId: string) => {
     if (!confirm('Delete this batch?')) return
     const res = await fetch(`/api/inventory/${id}/batches?batchId=${batchId}`, { method: 'DELETE' })
+    const j = await res.json().catch(() => ({}))
     if (res.ok) {
-      toast.success('Batch deleted')
+      if (j.pending) toast.info(j.message)
+      else toast.success('Batch deleted')
       fetchMedicine()
     } else {
-      toast.error('Failed to delete batch')
+      toast.error(j.error ?? 'Failed to delete batch')
     }
   }
 

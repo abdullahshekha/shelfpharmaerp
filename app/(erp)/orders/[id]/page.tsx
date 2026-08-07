@@ -87,9 +87,15 @@ export default function OrderDetailPage() {
   const cancelOrder = async () => {
     if (!confirm('Cancel this order?')) return
     setUpdating(true)
-    await fetch(`/api/orders/${id}`, { method: 'DELETE' })
-    toast.success('Order cancelled')
-    fetchOrder()
+    const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' })
+    const j = await res.json().catch(() => ({}))
+    if (res.ok) {
+      if (j.pending) toast.info(j.message)
+      else toast.success('Order cancelled')
+      fetchOrder()
+    } else {
+      toast.error(j.error ?? 'Failed to cancel order')
+    }
     setUpdating(false)
   }
 
@@ -101,11 +107,13 @@ export default function OrderDetailPage() {
     if (!confirm(msg)) return
     setUpdating(true)
     const res = await fetch(`/api/orders/${id}?hard=true`, { method: 'DELETE' })
+    const j = await res.json().catch(() => ({}))
     if (res.ok) {
+      if (j.pending) { toast.info(j.message); setUpdating(false); return }
       toast.success('Order deleted')
       router.push('/orders')
     } else {
-      toast.error('Failed to delete order')
+      toast.error(j.error ?? 'Failed to delete order')
       setUpdating(false)
     }
   }

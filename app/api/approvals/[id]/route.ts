@@ -32,6 +32,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         case 'Order':
           await prisma.order.update({ where: { id: approval.recordId }, data: { status: 'CANCELLED' } })
           break
+        case 'Order-Hard': {
+          const orderId = approval.recordId
+          await prisma.$transaction(async (tx) => {
+            await tx.delivery.deleteMany({ where: { orderId } })
+            const invoice = await tx.invoice.findUnique({ where: { orderId } })
+            if (invoice) {
+              await tx.payment.deleteMany({ where: { invoiceId: invoice.id } })
+              await tx.invoice.delete({ where: { id: invoice.id } })
+            }
+            await tx.order.delete({ where: { id: orderId } })
+          })
+          break
+        }
         case 'Invoice':
           await prisma.invoice.update({ where: { id: approval.recordId }, data: { status: 'DRAFT' } })
           break
@@ -40,6 +53,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           break
         case 'Medicine':
           await prisma.medicine.update({ where: { id: approval.recordId }, data: { isActive: false } })
+          break
+        case 'MedicineBatch':
+          await prisma.medicineBatch.delete({ where: { id: approval.recordId } })
+          break
+        case 'Employee':
+          await prisma.employee.update({ where: { id: approval.recordId }, data: { isActive: false } })
+          break
+        case 'Supplier':
+          await prisma.supplier.update({ where: { id: approval.recordId }, data: { isActive: false } })
           break
       }
     } catch {

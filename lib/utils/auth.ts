@@ -53,3 +53,8 @@ export function canDeleteDirectly(role: string): boolean {
 export function canRequestDelete(role: string): boolean {
   return role === 'MANAGER'
 }
+
+// Employee records carry role/salary/login credentials — only ADMIN/MANAGER may create or edit them.
+export function canManageEmployees(role: string): boolean {
+  return role === 'ADMIN' || role === 'MANAGER'
+}

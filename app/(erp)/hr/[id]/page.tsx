@@ -115,8 +115,11 @@ export default function EmployeeDetailPage() {
   const deleteEmployee = async () => {
     if (!confirm('Deactivate this employee?')) return
     const res = await fetch(`/api/employees/${id}`, { method: 'DELETE' })
-    if (res.ok) { toast.success('Employee deactivated'); router.push('/hr') }
-    else toast.error('Failed')
+    const j = await res.json().catch(() => ({}))
+    if (res.ok) {
+      if (j.pending) toast.info(j.message)
+      else { toast.success('Employee deactivated'); router.push('/hr') }
+    } else toast.error(j.error ?? 'Failed')
   }
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { handleDelete } from '@/lib/utils/delete-approval'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,8 +59,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json({ data: supplier })
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  await prisma.supplier.update({ where: { id }, data: { isActive: false } })
-  return NextResponse.json({ success: true })
+  const supplier = await prisma.supplier.findUnique({ where: { id }, select: { name: true } })
+  if (!supplier) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  return handleDelete(req, 'Supplier', id, supplier.name, async () => {
+    await prisma.supplier.update({ where: { id }, data: { isActive: false } })
+  })
 }

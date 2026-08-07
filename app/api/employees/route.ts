@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { hashPassword } from '@/lib/utils/auth'
+import { hashPassword, getUserFromRequest, canManageEmployees } from '@/lib/utils/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +25,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!canManageEmployees(getUserFromRequest(req).role)) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
+  }
   const body = await req.json()
 
   const data: Parameters<typeof prisma.employee.create>[0]['data'] = {

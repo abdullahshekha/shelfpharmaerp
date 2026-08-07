@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { handleDelete } from '@/lib/utils/delete-approval'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +12,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const batchId = searchParams.get('batchId')
   if (!batchId) return NextResponse.json({ error: 'batchId required' }, { status: 400 })
 
-  await prisma.medicineBatch.delete({ where: { id: batchId, medicineId: id } })
-  return NextResponse.json({ success: true })
+  const batch = await prisma.medicineBatch.findUnique({
+    where: { id: batchId, medicineId: id },
+    select: { batchNumber: true, medicine: { select: { name: true } } },
+  })
+  if (!batch) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  return handleDelete(req, 'MedicineBatch', batchId, `${batch.medicine.name} — Batch ${batch.batchNumber}`, async () => {
+    await prisma.medicineBatch.delete({ where: { id: batchId, medicineId: id } })
+  })
 }
