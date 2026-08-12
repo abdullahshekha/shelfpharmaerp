@@ -92,10 +92,6 @@ export default function AddCustomerPage() {
       toast.error('STRN Number is required when STRN is Registered')
       return
     }
-    if (form.drapRegistered && !drugLicenses.some(l => l.licenseNumber.trim())) {
-      toast.error('At least one Drug License is required for a DRAP Registered customer')
-      return
-    }
     setSaving(true)
     const res = await fetch('/api/retailers', {
       method: 'POST',
@@ -262,15 +258,21 @@ export default function AddCustomerPage() {
                 </div>
               )}
 
-              <DrugLicensesEditor licenses={drugLicenses} onChange={setDrugLicenses} required={form.drapRegistered} />
+              <DrugLicensesEditor licenses={drugLicenses} onChange={setDrugLicenses} />
 
-              <div className="space-y-1.5 col-span-2 flex items-center gap-2">
-                <input
-                  type="checkbox" id="drapRegistered" className="h-4 w-4 rounded border-slate-300"
-                  checked={form.drapRegistered}
-                  onChange={e => setForm(f => ({ ...f, drapRegistered: e.target.checked }))}
-                />
-                <Label htmlFor="drapRegistered" className="cursor-pointer">DRAP Registered</Label>
+              <div className="space-y-1.5">
+                <Label>DRAP Registered</Label>
+                <Select
+                  items={[{ value: 'false', label: 'No' }, { value: 'true', label: 'Yes' }]}
+                  value={form.drapRegistered ? 'true' : 'false'}
+                  onValueChange={v => setForm(f => ({ ...f, drapRegistered: v === 'true' }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="false">No</SelectItem>
+                    <SelectItem value="true">Yes</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Filer status */}
