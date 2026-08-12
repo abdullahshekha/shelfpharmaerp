@@ -92,6 +92,10 @@ export default function AddCustomerPage() {
       toast.error('STRN Number is required when STRN is Registered')
       return
     }
+    if (form.drapRegistered && !drugLicenses.some(l => l.licenseNumber.trim())) {
+      toast.error('At least one Drug License is required for a DRAP Registered customer')
+      return
+    }
     setSaving(true)
     const res = await fetch('/api/retailers', {
       method: 'POST',
@@ -258,7 +262,7 @@ export default function AddCustomerPage() {
                 </div>
               )}
 
-              <DrugLicensesEditor licenses={drugLicenses} onChange={setDrugLicenses} />
+              <DrugLicensesEditor licenses={drugLicenses} onChange={setDrugLicenses} required={form.drapRegistered} />
 
               <div className="space-y-1.5 col-span-2 flex items-center gap-2">
                 <input
@@ -326,12 +330,6 @@ export default function AddCustomerPage() {
                   </div>
                 </>
               )}
-              {!isCheque && (
-                <div className="col-span-2 p-2 bg-slate-50 rounded text-xs text-slate-500">
-                  Credit limit is only applicable for Cheque payment mode.
-                </div>
-              )}
-
               <div className="space-y-1.5 col-span-2">
                 <Label>Notes</Label>
                 <Input placeholder="Any special notes..." value={form.notes} onChange={set('notes')} />

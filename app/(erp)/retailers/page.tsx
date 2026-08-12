@@ -13,7 +13,7 @@ interface Retailer {
   name: string
   ownerName: string | null
   phone: string | null
-  area: string | null
+  area: { name: string } | null
   creditLimit: number
   isActive: boolean
   salesRep: { name: string } | null
@@ -107,7 +107,7 @@ export default function RetailersPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        {r.area ? <Badge variant="outline" className="text-xs">{r.area}</Badge> : '—'}
+                        {r.area ? <Badge variant="outline" className="text-xs">{r.area.name}</Badge> : '—'}
                       </td>
                       <td className="px-4 py-3 text-slate-600 hidden md:table-cell text-xs">
                         {r.salesRep?.name ?? '—'}

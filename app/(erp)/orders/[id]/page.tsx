@@ -39,7 +39,7 @@ interface Order {
   totalAmount: number
   discountAmount: number
   notes: string | null
-  retailer: { id: string; name: string; area: string | null; phone: string | null }
+  retailer: { id: string; name: string; area: { name: string } | null; phone: string | null }
   salesRep: { name: string } | null
   items: OrderItem[]
   invoice: { id: string; invoiceNumber: string; status: string } | null
@@ -183,7 +183,7 @@ export default function OrderDetailPage() {
             <Link href={`/retailers/${order.retailer.id}`} className="font-medium text-blue-600 hover:underline">
               {order.retailer.name}
             </Link>
-            {order.retailer.area && <p className="text-slate-500">{order.retailer.area}</p>}
+            {order.retailer.area && <p className="text-slate-500">{order.retailer.area.name}</p>}
             {order.retailer.phone && <p className="text-slate-500">{order.retailer.phone}</p>}
             {order.salesRep && <p className="text-slate-500">Rep: {order.salesRep.name}</p>}
           </CardContent>

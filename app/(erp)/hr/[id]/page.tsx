@@ -25,7 +25,7 @@ interface Employee {
   email: string | null; cnic: string | null; salary: number | null
   joiningDate: string | null; isActive: boolean
   username: string | null; loginBlocked: boolean
-  retailers: { id: string; name: string; area: string | null }[]
+  retailers: { id: string; name: string; area: { name: string } | null }[]
   attendance: { id: string; date: string; status: string; notes: string | null }[]
 }
 
@@ -283,7 +283,7 @@ export default function EmployeeDetailPage() {
                 {employee.retailers.map(r => (
                   <tr key={r.id} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => router.push(`/retailers/${r.id}`)}>
                     <td className="px-4 py-2 font-medium">{r.name}</td>
-                    <td className="px-4 py-2 text-slate-500">{r.area ?? '—'}</td>
+                    <td className="px-4 py-2 text-slate-500">{r.area?.name ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

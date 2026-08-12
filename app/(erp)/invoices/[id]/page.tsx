@@ -34,7 +34,7 @@ interface Invoice {
   totalAmount: number
   status: string
   notes: string | null
-  retailer: { name: string; ownerName: string | null; phone: string | null; area: string | null; address: string | null }
+  retailer: { name: string; ownerName: string | null; phone: string | null; area: { name: string } | null; address: string | null }
   order: { orderNumber: string; items: { id: string; quantity: number; mrp: number | null; unitPrice: number; offerPercent: number; salesTax: number; lineTotal: number; medicine: { name: string; code: string } }[] }
   payments: Payment[]
 }
@@ -209,7 +209,7 @@ export default function InvoiceDetailPage() {
             <p className="text-sm font-medium text-slate-600 mb-1">Bill To:</p>
             <p className="font-semibold">{invoice.retailer.name}</p>
             {invoice.retailer.ownerName && <p className="text-sm text-slate-600">{invoice.retailer.ownerName}</p>}
-            {invoice.retailer.area && <p className="text-sm text-slate-500">{invoice.retailer.area}</p>}
+            {invoice.retailer.area && <p className="text-sm text-slate-500">{invoice.retailer.area.name}</p>}
             {invoice.retailer.address && <p className="text-sm text-slate-500">{invoice.retailer.address}</p>}
             {invoice.retailer.phone && <p className="text-sm text-slate-500">Tel: {invoice.retailer.phone}</p>}
           </div>

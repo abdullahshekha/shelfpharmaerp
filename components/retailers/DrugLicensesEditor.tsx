@@ -15,9 +15,10 @@ interface Props {
   licenses: DrugLicenseForm[]
   onChange: (licenses: DrugLicenseForm[]) => void
   inputClassName?: string
+  required?: boolean
 }
 
-export function DrugLicensesEditor({ licenses, onChange, inputClassName = '' }: Props) {
+export function DrugLicensesEditor({ licenses, onChange, inputClassName = '', required = false }: Props) {
   const update = (i: number, patch: Partial<DrugLicenseForm>) =>
     onChange(licenses.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
 
@@ -27,7 +28,7 @@ export function DrugLicensesEditor({ licenses, onChange, inputClassName = '' }: 
 
   return (
     <div className="col-span-2 space-y-2">
-      <Label className="text-xs">Drug Licenses</Label>
+      <Label className="text-xs">Drug Licenses{required && ' *'}</Label>
       {licenses.map((l, i) => (
         <div key={i} className="flex gap-2 items-end">
           <div className="flex-1 space-y-1">

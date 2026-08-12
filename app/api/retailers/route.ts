@@ -62,6 +62,11 @@ export async function POST(req: NextRequest) {
   if (isFiler && body.strnStatus === 'REGISTERED' && !body.strnNumber?.trim()) {
     return NextResponse.json({ error: 'STRN Number is required when STRN is Registered' }, { status: 400 })
   }
+  const drapRegistered = !!body.drapRegistered
+  const hasDrugLicense = ((body.drugLicenses ?? []) as { licenseNumber?: string }[]).some((l) => l.licenseNumber?.trim())
+  if (drapRegistered && !hasDrugLicense) {
+    return NextResponse.json({ error: 'At least one Drug License is required for a DRAP Registered customer' }, { status: 400 })
+  }
 
   const retailer = await prisma.retailer.create({
     data: {
@@ -95,7 +100,7 @@ export async function POST(req: NextRequest) {
       latitude: body.latitude ?? null,
       longitude: body.longitude ?? null,
       storePhotoUrl: body.storePhotoUrl ?? null,
-      drapRegistered: !!body.drapRegistered,
+      drapRegistered,
     },
   })
 
