@@ -27,6 +27,7 @@ interface Retailer {
   whatsappNumber: string | null; area: Area | null; areaId: string | null
   address: string | null; customerType: string | null
   drugLicenses: DrugLicense[]
+  drapRegistered: boolean; latitude: number | null; longitude: number | null; storePhotoUrl: string | null
   isFiler: boolean; ntnNumber: string | null; strnStatus: string | null; strnNumber: string | null
   creditLimit: number; creditDays: number; paymentMode: string; notes: string | null
   salesRepId: string | null; salesRep: { id: string; name: string } | null
@@ -55,6 +56,7 @@ export default function RetailerDetailPage() {
     areaId: '', address: '', customerType: '',
     creditLimit: '', creditDays: '', paymentMode: 'CASH', notes: '',
     isFiler: 'false', ntnNumber: '', strnStatus: '', strnNumber: '',
+    drapRegistered: 'false',
   })
   const [editDrugLicenses, setEditDrugLicenses] = useState<DrugLicenseForm[]>([])
 
@@ -85,6 +87,7 @@ export default function RetailerDetailPage() {
           ntnNumber: r.ntnNumber ?? '',
           strnStatus: r.strnStatus ?? '',
           strnNumber: r.strnNumber ?? '',
+          drapRegistered: r.drapRegistered ? 'true' : 'false',
         })
         const licenses: DrugLicense[] = r.drugLicenses ?? []
         setEditDrugLicenses(
@@ -138,6 +141,10 @@ export default function RetailerDetailPage() {
         drugLicenses: editDrugLicenses,
         salesRepId: retailer?.salesRepId ?? null,
         isFiler,
+        drapRegistered: editForm.drapRegistered === 'true',
+        latitude: retailer?.latitude ?? null,
+        longitude: retailer?.longitude ?? null,
+        storePhotoUrl: retailer?.storePhotoUrl ?? null,
       }),
     })
     if (res.ok) {
@@ -278,6 +285,20 @@ export default function RetailerDetailPage() {
               </div>
               <DrugLicensesEditor licenses={editDrugLicenses} onChange={setEditDrugLicenses} inputClassName="h-8 text-sm bg-white" />
               <div className="space-y-1">
+                <Label className="text-xs">DRAP Registered</Label>
+                <Select
+                  items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
+                  value={editForm.drapRegistered}
+                  onValueChange={v => setEditForm(f => ({ ...f, drapRegistered: v ?? 'false' }))}
+                >
+                  <SelectTrigger className="h-8 text-sm bg-white"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <Label className="text-xs">Filer *</Label>
                 <Select
                   items={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]}
@@ -367,6 +388,27 @@ export default function RetailerDetailPage() {
             {retailer.whatsappNumber && <Row label="WhatsApp" value={retailer.whatsappNumber} />}
             {retailer.area && <Row label="Area" value={retailer.area.name} />}
             {retailer.address && <Row label="Address" value={retailer.address} />}
+            <Row label="DRAP Registered" value={retailer.drapRegistered ? 'Yes' : 'No'} />
+            {retailer.latitude != null && retailer.longitude != null && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">Pin Location</span>
+                <a
+                  href={`https://maps.google.com/?q=${retailer.latitude},${retailer.longitude}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="font-medium text-blue-600 flex items-center gap-1"
+                >
+                  <MapPin size={12} /> View on map
+                </a>
+              </div>
+            )}
+            {retailer.storePhotoUrl && (
+              <div className="space-y-1">
+                <span className="text-slate-500">Store Front Photo</span>
+                <a href={retailer.storePhotoUrl} target="_blank" rel="noopener noreferrer">
+                  <img src={retailer.storePhotoUrl} alt="Store front" className="w-full max-h-40 object-cover rounded border" />
+                </a>
+              </div>
+            )}
             {retailer.notes && <Row label="Notes" value={retailer.notes} />}
             <div className="flex justify-between items-center pt-1">
               <span className="text-slate-500 flex items-center gap-1"><UserCheck size={13} /> ORDER BOOKER</span>
