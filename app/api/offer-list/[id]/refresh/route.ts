@@ -36,25 +36,24 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const removed = existingItems.filter((i) => !inStockIds.has(i.medicineId))
   const added = inStock.filter((x) => !existingByMedicine.has(x.medicine.id))
 
-  await prisma.$transaction(async (tx) => {
-    if (removed.length > 0) {
-      await tx.offerListItem.deleteMany({ where: { id: { in: removed.map((i) => i.id) } } })
-    }
+  if (removed.length > 0) {
+    await prisma.offerListItem.deleteMany({ where: { id: { in: removed.map((i) => i.id) } } })
+  }
 
-    for (const { medicine, offer } of added) {
-      await tx.offerListItem.create({
-        data: {
-          offerListId: id,
-          medicineId: medicine.id,
-          purchasePercent: offer.purchasePercent,
-          offerPercent: offer.purchasePercent,
-          specialPrice: offer.tradePrice,
-          salesTax: 0,
-          commentType: 'NONE',
-        },
-      })
-    }
-  })
+  if (added.length > 0) {
+    await prisma.offerListItem.createMany({
+      data: added.map(({ medicine, offer }) => ({
+        offerListId: id,
+        medicineId: medicine.id,
+        purchasePercent: offer.purchasePercent,
+        offerPercent: offer.purchasePercent,
+        specialPrice: offer.tradePrice,
+        salesTax: 0,
+        commentType: 'NONE',
+      })),
+      skipDuplicates: true,
+    })
+  }
 
   return NextResponse.json({
     data: { total: inStock.length, added: added.length, removed: removed.length, updated: 0 },

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, MapPin, Camera, Loader2 } from 'lucide-react'
+import { ArrowLeft, MapPin, Camera, Loader2, Contact } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
@@ -26,6 +26,7 @@ export default function AddCustomerPage() {
   const [areas, setAreas] = useState<Area[]>([])
   const [locating, setLocating] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [contactPickerSupported, setContactPickerSupported] = useState(false)
   const [form, setForm] = useState({
     name: '', ownerName: '', phone: '', whatsappNumber: '',
     areaId: '', address: '', customerType: '',
@@ -43,7 +44,26 @@ export default function AddCustomerPage() {
       fetch('/api/employees?role=SALES_REP').then(r => r.json()).then(j => setSalesReps(j.data ?? []))
     }
     fetch('/api/areas').then(r => r.json()).then(j => setAreas(j.data ?? []))
+    // Contact Picker API — Android Chrome/Edge only, no desktop support
+    setContactPickerSupported(typeof navigator !== 'undefined' && 'contacts' in navigator && 'ContactsManager' in window)
   }, [isOrderBooker])
+
+  const pickContact = async () => {
+    try {
+      const contacts = await (navigator as unknown as {
+        contacts: { select: (props: string[], opts: { multiple: boolean }) => Promise<{ name?: string[]; tel?: string[] }[]> }
+      }).contacts.select(['name', 'tel'], { multiple: false })
+      const picked = contacts?.[0]
+      if (!picked?.tel?.[0]) { toast.error('Selected contact has no phone number'); return }
+      setForm(f => ({
+        ...f,
+        phone: picked.tel![0],
+        name: f.name || picked.name?.[0] || f.name,
+      }))
+    } catch {
+      // user cancelled the picker or denied permission — no-op
+    }
+  }
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [field]: e.target.value }))
@@ -190,7 +210,14 @@ export default function AddCustomerPage() {
 
               <div className="space-y-1.5">
                 <Label>Phone</Label>
-                <Input placeholder="0300-1234567" value={form.phone} onChange={set('phone')} />
+                <div className="flex gap-1.5">
+                  <Input placeholder="0300-1234567" value={form.phone} onChange={set('phone')} />
+                  {contactPickerSupported && (
+                    <Button type="button" variant="outline" size="icon" title="Pick from contacts" onClick={pickContact}>
+                      <Contact size={16} />
+                    </Button>
+                  )}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>WhatsApp Number</Label>

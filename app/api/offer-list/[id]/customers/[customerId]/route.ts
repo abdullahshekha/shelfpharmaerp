@@ -75,3 +75,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   return NextResponse.json({ success: true })
 }
+
+// Removes this individual customer's quantity sheet from the offer list (their override, or a
+// sheet created via a Customer Type assignment). Items cascade-delete with the sheet.
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; customerId: string }> }) {
+  const { id, customerId } = await params
+  const sheet = await prisma.offerListCustomer.findUnique({ where: { id: customerId } })
+  if (!sheet || sheet.offerListId !== id) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  await prisma.offerListCustomer.delete({ where: { id: customerId } })
+  return NextResponse.json({ success: true })
+}

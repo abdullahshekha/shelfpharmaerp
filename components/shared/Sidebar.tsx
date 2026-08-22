@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Package, Users, ShoppingCart, MessageSquare,
+  LayoutDashboard, Package, Users, ShoppingCart,
   FileText, Truck, UserCog, BarChart3, ListOrdered, X, LogOut,
   Building2, Bell, CheckSquare, Settings,
 } from 'lucide-react'
@@ -19,7 +19,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/inventory',   label: 'Inventory',        icon: Package,         roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'WAREHOUSE'] },
   { href: '/retailers',   label: 'Customers',        icon: Users,           roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP'] },
   { href: '/orders',      label: 'Orders',           icon: ShoppingCart,    roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD'] },
-  { href: '/whatsapp',    label: 'WhatsApp Orders',  icon: MessageSquare,   roles: ['ADMIN', 'MANAGER'] },
+  // WhatsApp Orders tab hidden for now (2026-08-22) — module/page/API untouched, just removed from nav.
+  // { href: '/whatsapp', label: 'WhatsApp Orders',  icon: MessageSquare,   roles: ['ADMIN', 'MANAGER'] },
   { href: '/offer-list',  label: 'Offer List',       icon: ListOrdered,     roles: ['ADMIN', 'MANAGER'] },
   { href: '/invoices',    label: 'Invoices',         icon: FileText,        roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'ACCOUNTANT'] },
   { href: '/deliveries',  label: 'Deliveries',       icon: Truck,           roles: ['ADMIN', 'MANAGER', 'SALESMAN'] },

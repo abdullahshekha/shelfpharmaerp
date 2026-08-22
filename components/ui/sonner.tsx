@@ -30,9 +30,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          // These CSS vars in globals.css are raw "H S% L%" triples (old shadcn convention), not
+          // full color values — they must be wrapped in hsl() here, otherwise the browser can't
+          // parse them as a background color and the toast renders with a transparent background.
+          "--normal-bg": "hsl(var(--popover))",
+          "--normal-text": "hsl(var(--popover-foreground))",
+          "--normal-border": "hsl(var(--border))",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }

@@ -22,44 +22,42 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     where: { customerType: { in: customerTypes } },
     select: { id: true },
   })
+  const retailerIds = retailers.map((r) => r.id)
 
-  const result = await prisma.$transaction(async (tx) => {
-    for (const customerType of customerTypes) {
-      await tx.offerListAssignment.upsert({
-        where: { offerListId_customerType: { offerListId: id, customerType } },
-        update: {},
-        create: { offerListId: id, customerType },
-      })
-    }
-
-    for (const { id: retailerId } of retailers) {
-      const sheet = await tx.offerListCustomer.upsert({
-        where: { offerListId_retailerId: { offerListId: id, retailerId } },
-        update: {},
-        create: { offerListId: id, retailerId },
-      })
-
-      const existingItems = await tx.offerListCustomerItem.findMany({
-        where: { offerListCustomerId: sheet.id },
-        select: { medicineId: true },
-      })
-      const existingMedicineIds = new Set(existingItems.map((i) => i.medicineId))
-      const missing = list.items.filter((i) => !existingMedicineIds.has(i.medicineId))
-      if (missing.length > 0) {
-        await tx.offerListCustomerItem.createMany({
-          data: missing.map((i) => ({
-            offerListCustomerId: sheet.id,
-            medicineId: i.medicineId,
-            quantity: 0,
-          })),
-        })
-      }
-    }
-
-    return { customers: retailers.length }
+  // Bulk operations instead of a per-retailer upsert loop — the old loop did 2-3 sequential
+  // round trips per retailer inside one interactive transaction, which timed out (and reported
+  // "failed to assign") once a customer type expanded to more than ~100-200 retailers.
+  await prisma.offerListAssignment.createMany({
+    data: customerTypes.map((customerType) => ({ offerListId: id, customerType })),
+    skipDuplicates: true,
   })
 
-  return NextResponse.json({ data: result })
+  if (retailerIds.length > 0) {
+    await prisma.offerListCustomer.createMany({
+      data: retailerIds.map((retailerId) => ({ offerListId: id, retailerId })),
+      skipDuplicates: true,
+    })
+
+    if (list.items.length > 0) {
+      const sheets = await prisma.offerListCustomer.findMany({
+        where: { offerListId: id, retailerId: { in: retailerIds } },
+        select: { id: true },
+      })
+
+      await prisma.offerListCustomerItem.createMany({
+        data: sheets.flatMap((sheet) =>
+          list.items.map((item) => ({
+            offerListCustomerId: sheet.id,
+            medicineId: item.medicineId,
+            quantity: 0,
+          }))
+        ),
+        skipDuplicates: true,
+      })
+    }
+  }
+
+  return NextResponse.json({ data: { customers: retailerIds.length } })
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

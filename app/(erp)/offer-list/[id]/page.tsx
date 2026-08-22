@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatDate, formatPKR } from '@/lib/utils/format'
-import { ArrowLeft, Eye, Download, FileText, Zap, RefreshCw, Users, Plus, X, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Eye, Download, FileText, Zap, RefreshCw, Users, Plus, X, AlertTriangle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
 import { COMMENT_TYPES, formatOfferComment, isOfferAtLoss, type CommentType } from '@/lib/utils/offer-comment'
@@ -62,6 +62,11 @@ export default function OfferListDetailPage() {
   const [showAssign, setShowAssign] = useState(false)
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set())
   const [assigning, setAssigning] = useState(false)
+  const [showAddCustomer, setShowAddCustomer] = useState(false)
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerResults, setCustomerResults] = useState<{ id: string; name: string; phone: string | null }[]>([])
+  const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const [addingCustomerId, setAddingCustomerId] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -78,6 +83,18 @@ export default function OfferListDetailPage() {
   }, [id])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  useEffect(() => {
+    if (!showAddCustomer || !customerSearch.trim()) { setCustomerResults([]); return }
+    setSearchingCustomers(true)
+    const t = setTimeout(async () => {
+      const res = await fetch(`/api/retailers?search=${encodeURIComponent(customerSearch)}&pageSize=8`)
+      const j = await res.json()
+      setCustomerResults(j.data ?? [])
+      setSearchingCustomers(false)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [customerSearch, showAddCustomer])
 
   const updateItem = (medicineId: string, patch: Partial<OfferListItem>) => {
     setItems(prev => prev.map(it => (it.medicineId === medicineId ? { ...it, ...patch } : it)))
@@ -158,6 +175,31 @@ export default function OfferListDetailPage() {
       toast.error('Failed to assign customer types')
     }
     setAssigning(false)
+  }
+
+  const addCustomer = async (retailerId: string) => {
+    setAddingCustomerId(retailerId)
+    const res = await fetch(`/api/offer-list/${id}/customers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ retailerId }),
+    })
+    if (res.ok) {
+      toast.success('Customer added to this offer list')
+      setCustomerSearch('')
+      setCustomerResults([])
+      fetchAll()
+    } else {
+      toast.error('Failed to add customer')
+    }
+    setAddingCustomerId(null)
+  }
+
+  const removeCustomer = async (customerId: string, name: string) => {
+    if (!confirm(`Remove ${name} from this offer list's customer sheets?`)) return
+    const res = await fetch(`/api/offer-list/${id}/customers/${customerId}`, { method: 'DELETE' })
+    if (res.ok) { toast.success('Customer removed'); fetchAll() }
+    else toast.error('Failed to remove customer')
   }
 
   const unassignType = async (type: string) => {
@@ -397,8 +439,56 @@ export default function OfferListDetailPage() {
 
       {/* Assigned Customers */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Customer Quantity Sheets ({customers.length})</CardTitle></CardHeader>
-        <CardContent className="p-0">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Customer Quantity Sheets ({customers.length})</CardTitle>
+          <Button size="sm" variant="outline" className="gap-1" onClick={() => setShowAddCustomer(!showAddCustomer)}>
+            <Plus size={14} /> Add Individual Customer
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {showAddCustomer && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+              <p className="text-xs text-blue-700">
+                Assigns this offer list to one specific customer, overriding/on top of whatever Customer Type rules apply to them.
+              </p>
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="pl-8 bg-white"
+                  placeholder="Search customer by name or phone..."
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                />
+              </div>
+              {searchingCustomers && <p className="text-xs text-slate-400">Searching...</p>}
+              {!searchingCustomers && customerSearch.trim() && customerResults.length === 0 && (
+                <p className="text-xs text-slate-400">No matching customers.</p>
+              )}
+              {customerResults.length > 0 && (
+                <div className="divide-y divide-slate-100 bg-white rounded-md border border-slate-200">
+                  {customerResults.map(r => {
+                    const already = customers.some(c => c.retailer.id === r.id)
+                    return (
+                      <div key={r.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <div>
+                          <p className="font-medium">{r.name}</p>
+                          <p className="text-xs text-slate-500">{r.phone ?? '—'}</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={already ? 'outline' : 'default'}
+                          disabled={already || addingCustomerId === r.id}
+                          onClick={() => addCustomer(r.id)}
+                        >
+                          {already ? 'Already added' : addingCustomerId === r.id ? 'Adding...' : 'Add'}
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {customers.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <p className="font-medium">No customers yet</p>
@@ -428,9 +518,18 @@ export default function OfferListDetailPage() {
                           : <Badge variant="outline" className="text-slate-500">Not filled</Badge>}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link href={`/offer-list/${list.id}/customers/${c.id}`}>
-                          <Button size="sm" variant="outline" className="gap-1 text-xs"><Users size={12} /> Open Sheet</Button>
-                        </Link>
+                        <div className="flex justify-end gap-1.5">
+                          <Link href={`/offer-list/${list.id}/customers/${c.id}`}>
+                            <Button size="sm" variant="outline" className="gap-1 text-xs"><Users size={12} /> Open Sheet</Button>
+                          </Link>
+                          <Button
+                            size="sm" variant="outline" className="text-xs text-slate-400 hover:text-red-500"
+                            onClick={() => removeCustomer(c.id, c.retailer.name)}
+                            title="Remove from this offer list"
+                          >
+                            <X size={12} />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
