@@ -6,9 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatPKR, formatDate, formatDateTime } from '@/lib/utils/format'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { ArrowLeft, Trash2, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 const STATUS_FLOW = ['PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED', 'DELIVERED']
 const STATUS_COLORS: Record<string, string> = {
@@ -23,11 +25,13 @@ const STATUS_COLORS: Record<string, string> = {
 interface OrderItem {
   id: string
   quantity: number
+  mrp: number | null
   unitPrice: number
   offerPercent: number
+  salesTax: number
   bonusQty: number
   lineTotal: number
-  medicine: { name: string; code: string; category: string | null }
+  medicine: { name: string; code: string; category: string | null; salesTaxApplicable?: boolean }
 }
 
 interface Order {
@@ -50,9 +54,14 @@ interface Order {
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const { user } = useCurrentUser()
+  const isAdmin = user?.role === 'ADMIN'
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editItems, setEditItems] = useState<OrderItem[]>([])
+  const [saving, setSaving] = useState(false)
 
   const fetchOrder = async () => {
     const res = await fetch(`/api/orders/${id}`)
@@ -63,6 +72,47 @@ export default function OrderDetailPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchOrder() }, [id])
+
+  const startEdit = () => {
+    if (!order) return
+    setEditItems(order.items.map(i => ({ ...i })))
+    setEditing(true)
+  }
+
+  const cancelEdit = () => { setEditing(false); setEditItems([]) }
+
+  const updateEditItem = (itemId: string, patch: Partial<OrderItem>) => {
+    setEditItems(prev => prev.map(i => (i.id === itemId ? { ...i, ...patch } : i)))
+  }
+
+  const saveEdit = async () => {
+    setSaving(true)
+    const res = await fetch(`/api/orders/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: editItems.map(i => ({
+          id: i.id,
+          quantity: i.quantity,
+          mrp: i.mrp,
+          unitPrice: i.unitPrice,
+          offerPercent: i.offerPercent,
+          salesTax: i.salesTax,
+          bonusQty: i.bonusQty,
+        })),
+      }),
+    })
+    const j = await res.json().catch(() => ({}))
+    if (res.ok) {
+      toast.success('Sales invoice updated')
+      if (j.warnings?.length) j.warnings.forEach((w: string) => toast.warning(w))
+      setEditing(false)
+      fetchOrder()
+    } else {
+      toast.error(j.error ?? 'Failed to save changes')
+    }
+    setSaving(false)
+  }
 
   const advanceStatus = async () => {
     if (!order) return
@@ -136,6 +186,11 @@ export default function OrderDetailPage() {
           <p className="text-slate-500 text-sm">{formatDateTime(order.orderDate)}</p>
         </div>
         <div className="flex gap-2">
+          {isAdmin && !editing && (
+            <Button variant="outline" className="gap-1" onClick={startEdit} disabled={updating}>
+              <Pencil size={14} /> Edit
+            </Button>
+          )}
           {canAdvance && order.status !== 'CANCELLED' && (
             <Button onClick={advanceStatus} disabled={updating}>
               → {STATUS_FLOW[currentIdx + 1]}
@@ -218,8 +273,22 @@ export default function OrderDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center justify-between">
-            Items ({order.items.length})
-            <span className="font-bold text-lg">{formatPKR(order.totalAmount)}</span>
+            <span className="flex items-center gap-2">
+              Items ({order.items.length})
+              {editing && (
+                <span className="flex gap-2 ml-2">
+                  <Button size="sm" variant="outline" className="gap-1 h-7 text-xs" onClick={cancelEdit} disabled={saving}>
+                    <X size={12} /> Cancel
+                  </Button>
+                  <Button size="sm" className="h-7 text-xs" onClick={saveEdit} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save Changes'}
+                  </Button>
+                </span>
+              )}
+            </span>
+            <span className="font-bold text-lg">
+              {formatPKR(editing ? editItems.reduce((s, i) => s + i.quantity * i.unitPrice * (1 - i.offerPercent / 100), 0) : order.totalAmount)}
+            </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -230,11 +299,41 @@ export default function OrderDetailPage() {
                 <th className="text-center px-4 py-2 font-medium text-slate-600">Qty</th>
                 <th className="text-right px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">Unit Price</th>
                 <th className="text-center px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">Offer %</th>
+                {editing && <th className="text-right px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">S. Tax</th>}
                 <th className="text-right px-4 py-2 font-medium text-slate-600">Total</th>
               </tr>
             </thead>
             <tbody>
-              {order.items.map(item => (
+              {editing ? editItems.map(item => {
+                const lineTotal = item.quantity * item.unitPrice * (1 - item.offerPercent / 100)
+                return (
+                  <tr key={item.id} className="border-b">
+                    <td className="px-4 py-2">
+                      <div className="font-medium">{item.medicine.name}</div>
+                      <div className="text-xs text-slate-400 font-mono">{item.medicine.code}</div>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <Input type="number" min="1" className="w-16 h-8 text-xs text-center mx-auto" value={item.quantity}
+                        onChange={e => updateEditItem(item.id, { quantity: parseInt(e.target.value) || 1 })} />
+                    </td>
+                    <td className="px-2 py-2 text-right hidden sm:table-cell">
+                      <Input type="number" step="0.01" className="w-24 h-8 text-xs text-right ml-auto" value={item.unitPrice}
+                        onChange={e => updateEditItem(item.id, { unitPrice: parseFloat(e.target.value) || 0 })} />
+                    </td>
+                    <td className="px-2 py-2 text-center hidden sm:table-cell">
+                      <Input type="number" min="0" max="100" step="0.5" className="w-16 h-8 text-xs text-center mx-auto" value={item.offerPercent}
+                        onChange={e => updateEditItem(item.id, { offerPercent: parseFloat(e.target.value) || 0 })} />
+                    </td>
+                    <td className="px-2 py-2 text-right hidden sm:table-cell">
+                      {item.medicine.salesTaxApplicable ? (
+                        <Input type="number" min="0" step="0.01" className="w-20 h-8 text-xs text-right ml-auto" value={item.salesTax}
+                          onChange={e => updateEditItem(item.id, { salesTax: parseFloat(e.target.value) || 0 })} />
+                      ) : <span className="text-slate-300 text-xs">N/A</span>}
+                    </td>
+                    <td className="px-4 py-2 text-right font-medium">{formatPKR(lineTotal)}</td>
+                  </tr>
+                )
+              }) : order.items.map(item => (
                 <tr key={item.id} className="border-b">
                   <td className="px-4 py-2">
                     <div className="font-medium">{item.medicine.name}</div>

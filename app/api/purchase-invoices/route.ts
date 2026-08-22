@@ -176,23 +176,34 @@ export async function POST(req: NextRequest) {
       include: { items: true },
     })
 
-    // Receiving a purchase invoice is how new stock (a batch) enters inventory — actual + bonus quantity together.
-    await tx.medicineBatch.createMany({
-      data: computedItems.map((item) => ({
-        medicineId: item.medicineId,
-        batchNumber: item.batchNumber,
-        expiryDate: item.expiryDate,
-        quantityIn: item.totalQuantity,
-        currentQty: item.totalQuantity,
-        purchasePrice: item.purchasePrice,
-        tradePrice: item.tradePrice,
-        mrp: item.mrp,
-        discountPercent: item.discountPercent,
-        bonusQuantity: item.bonusQuantity,
-      })),
-    })
+    // Receiving a purchase invoice is how new stock (a batch) enters inventory — actual + bonus
+    // quantity together. Created one at a time (rather than createMany) so each batch's id can be
+    // linked back onto its PurchaseInvoiceItem — needed so a later edit can find the exact batch
+    // to adjust rather than guessing by (medicine, batch number, expiry date).
+    for (let i = 0; i < computedItems.length; i++) {
+      const item = computedItems[i]
+      const batch = await tx.medicineBatch.create({
+        data: {
+          medicineId: item.medicineId,
+          batchNumber: item.batchNumber,
+          expiryDate: item.expiryDate,
+          quantityIn: item.totalQuantity,
+          currentQty: item.totalQuantity,
+          purchasePrice: item.purchasePrice,
+          tradePrice: item.tradePrice,
+          mrp: item.mrp,
+          discountPercent: item.discountPercent,
+          bonusQuantity: item.bonusQuantity,
+        },
+      })
+      await tx.purchaseInvoiceItem.update({
+        where: { id: created.items[i].id },
+        data: { batchId: batch.id },
+      })
+    }
 
-    return created
+    // Re-fetch so the response reflects the batchId links just written, not the pre-link snapshot.
+    return tx.purchaseInvoice.findUniqueOrThrow({ where: { id: created.id }, include: { items: true } })
   })
 
   return NextResponse.json({ data: invoice }, { status: 201 })

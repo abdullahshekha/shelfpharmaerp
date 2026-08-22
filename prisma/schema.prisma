@@ -115,6 +115,11 @@ model PurchaseInvoiceItem {
   aitPayableAmount      Decimal         @default(0) @db.Decimal(10, 2)
   purchasePrice         Decimal         @db.Decimal(10, 2)
   lineTotal             Decimal         @db.Decimal(10, 2)
+  // Direct link to the MedicineBatch this line created (1:1 — see PurchaseInvoice submission logic).
+  // Nullable because invoice items created before this field existed don't have it; editing those
+  // falls back to matching by (medicineId, batchNumber, expiryDate) — see the PUT route.
+  batchId               String?
+  batch                 MedicineBatch?  @relation(fields: [batchId], references: [id])
 
   @@index([purchaseInvoiceId])
 }
@@ -215,6 +220,7 @@ model MedicineBatch {
   discountPercent Decimal              @default(0) @db.Decimal(5, 2)  // snapshot of PurchaseInvoiceItem.discountPercent at creation — drives Offer List "Offer %"
   bonusQuantity   Int                  @default(0)                    // snapshot of PurchaseInvoiceItem.bonusQuantity at creation — drives Offer List "Bonus"
   returnItems     SupplierReturnItem[]
+  purchaseInvoiceItems PurchaseInvoiceItem[]
   createdAt       DateTime             @default(now())
 
   @@index([medicineId])

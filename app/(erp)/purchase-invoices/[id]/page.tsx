@@ -10,9 +10,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR, formatDate } from '@/lib/utils/format'
 import { calcPurchasePercent } from '@/lib/utils/pricing'
-import { ArrowLeft, Plus, ExternalLink, Download } from 'lucide-react'
+import { ArrowLeft, Plus, ExternalLink, Download, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 interface PurchaseInvoice {
   id: string
@@ -27,7 +28,7 @@ interface PurchaseInvoice {
   grandTotal: number
   status: string
   notes: string | null
-  supplier: { id: string; name: string; type: string; phone: string | null }
+  supplier: { id: string; name: string; type: string; phone: string | null; isFiler: boolean }
   items: {
     id: string
     quantity: number
@@ -46,7 +47,7 @@ interface PurchaseInvoice {
     aitPayableAmount: number
     purchasePrice: number
     lineTotal: number
-    medicine: { name: string; code: string; category: string | null }
+    medicine: { name: string; code: string; category: string | null; salesTaxApplicable?: boolean }
   }[]
   payments: { id: string; amount: number; paymentDate: string; method: string; reference: string | null }[]
 }
@@ -59,13 +60,20 @@ const STATUS_COLORS: Record<string, string> = {
 
 const emptyPayment = { amount: '', method: 'CASH', reference: '', paymentDate: new Date().toISOString().slice(0, 10) }
 
+type EditableItem = PurchaseInvoice['items'][number] & { mrpInput: string }
+
 export default function PurchaseInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const { user } = useCurrentUser()
+  const isAdmin = user?.role === 'ADMIN'
   const [invoice, setInvoice] = useState<PurchaseInvoice | null>(null)
   const [loading, setLoading] = useState(true)
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [paymentForm, setPaymentForm] = useState(emptyPayment)
   const [savingPayment, setSavingPayment] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editItems, setEditItems] = useState<EditableItem[]>([])
+  const [saving, setSaving] = useState(false)
 
   const fetchInvoice = useCallback(async () => {
     setLoading(true)
@@ -76,6 +84,51 @@ export default function PurchaseInvoiceDetailPage() {
   }, [id])
 
   useEffect(() => { fetchInvoice() }, [fetchInvoice])
+
+  const startEdit = () => {
+    if (!invoice) return
+    setEditItems(invoice.items.map(i => ({ ...i, mrpInput: i.mrp != null ? String(i.mrp) : '' })))
+    setEditing(true)
+  }
+
+  const cancelEdit = () => { setEditing(false); setEditItems([]) }
+
+  const updateEditItem = (itemId: string, patch: Partial<EditableItem>) => {
+    setEditItems(prev => prev.map(i => (i.id === itemId ? { ...i, ...patch } : i)))
+  }
+
+  const saveEdit = async () => {
+    setSaving(true)
+    const res = await fetch(`/api/purchase-invoices/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: editItems.map(i => ({
+          id: i.id,
+          batchNumber: i.batchNumber,
+          expiryDate: i.expiryDate,
+          quantity: i.quantity,
+          bonusQuantity: i.bonusQuantity,
+          tradePrice: i.tradePrice,
+          mrp: i.mrpInput === '' ? null : parseFloat(i.mrpInput),
+          discountPercent: i.discountPercent,
+          salesTax: i.salesTax,
+          aitCollectiblePercent: i.aitCollectiblePercent,
+          aitPayablePercent: i.aitPayablePercent,
+        })),
+      }),
+    })
+    const j = await res.json().catch(() => ({}))
+    if (res.ok) {
+      toast.success('Purchase invoice updated')
+      if (j.warnings?.length) j.warnings.forEach((w: string) => toast.warning(w))
+      setEditing(false)
+      fetchInvoice()
+    } else {
+      toast.error(j.error ?? 'Failed to save changes')
+    }
+    setSaving(false)
+  }
 
   const recordPayment = async () => {
     if (!paymentForm.amount || Number(paymentForm.amount) <= 0) {
@@ -123,6 +176,11 @@ export default function PurchaseInvoiceDetailPage() {
         >
           <Download size={14} /> Download PDF
         </a>
+        {isAdmin && !editing && (
+          <Button size="sm" variant="outline" className="gap-1" onClick={startEdit}>
+            <Pencil size={14} /> Edit
+          </Button>
+        )}
         {invoice.status !== 'PAID' && (
           <Button size="sm" className="gap-1" onClick={() => setShowPaymentForm(true)}>
             <Plus size={14} /> Record Payment
@@ -262,7 +320,19 @@ export default function PurchaseInvoiceDetailPage() {
 
       {/* Line items */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Items ({invoice.items.length})</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Items ({invoice.items.length})</CardTitle>
+          {editing && (
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="gap-1" onClick={cancelEdit} disabled={saving}>
+                <X size={14} /> Cancel
+              </Button>
+              <Button size="sm" onClick={saveEdit} disabled={saving}>
+                {saving ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </div>
+          )}
+        </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[1050px]">
@@ -285,7 +355,55 @@ export default function PurchaseInvoiceDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {invoice.items.map((item, i) => (
+                {editing ? editItems.map((item, i) => {
+                  const totalQty = item.quantity + item.bonusQuantity
+                  const tradeOfferPercent = totalQty > 0 && item.bonusQuantity > 0 ? (item.bonusQuantity / totalQty) * 100 : 0
+                  const purchasePercent = calcPurchasePercent(Number(item.discountPercent), tradeOfferPercent)
+                  const purchasePrice = item.tradePrice * (1 - purchasePercent / 100)
+                  return (
+                    <tr key={item.id} className={`border-b ${i % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
+                      <td className="px-4 py-2">
+                        <p className="font-medium whitespace-nowrap">{item.medicine.name}</p>
+                        <p className="text-xs text-slate-400 font-mono">{item.medicine.code}</p>
+                      </td>
+                      <td className="px-2 py-2"><Input className="w-24 h-8 text-xs" value={item.batchNumber}
+                        onChange={e => updateEditItem(item.id, { batchNumber: e.target.value })} /></td>
+                      <td className="px-2 py-2"><Input type="date" className="w-32 h-8 text-xs" value={item.expiryDate.slice(0, 10)}
+                        onChange={e => updateEditItem(item.id, { expiryDate: e.target.value })} /></td>
+                      <td className="px-2 py-2"><Input type="number" min="1" className="w-16 h-8 text-xs text-center" value={item.quantity}
+                        onChange={e => updateEditItem(item.id, { quantity: parseInt(e.target.value) || 1 })} /></td>
+                      <td className="px-2 py-2"><Input type="number" min="0" className="w-16 h-8 text-xs text-center" value={item.bonusQuantity}
+                        onChange={e => updateEditItem(item.id, { bonusQuantity: parseInt(e.target.value) || 0 })} /></td>
+                      <td className="px-2 py-2"><Input type="number" step="0.01" className="w-20 h-8 text-xs text-right" value={item.mrpInput}
+                        onChange={e => updateEditItem(item.id, { mrpInput: e.target.value })} /></td>
+                      <td className="px-2 py-2"><Input type="number" step="0.01" className="w-24 h-8 text-xs text-right" value={item.tradePrice}
+                        onChange={e => updateEditItem(item.id, { tradePrice: parseFloat(e.target.value) || 0 })} /></td>
+                      <td className="px-2 py-2"><Input type="number" min="0" max="100" step="0.01" className="w-16 h-8 text-xs text-right" value={item.discountPercent}
+                        onChange={e => updateEditItem(item.id, { discountPercent: parseFloat(e.target.value) || 0 })} /></td>
+                      <td className="px-4 py-2 text-right">{purchasePercent.toFixed(2)}%</td>
+                      <td className="px-2 py-2">
+                        {item.medicine.salesTaxApplicable ? (
+                          <Input type="number" min="0" step="0.01" className="w-20 h-8 text-xs text-right" value={item.salesTax}
+                            onChange={e => updateEditItem(item.id, { salesTax: parseFloat(e.target.value) || 0 })} />
+                        ) : <span className="text-slate-300 text-xs block text-right pr-1">N/A</span>}
+                      </td>
+                      <td className="px-2 py-2">
+                        {invoice.supplier.isFiler ? (
+                          <Input type="number" min="0" max="100" step="0.01" className="w-16 h-8 text-xs text-right" value={item.aitCollectiblePercent}
+                            onChange={e => updateEditItem(item.id, { aitCollectiblePercent: parseFloat(e.target.value) || 0 })} />
+                        ) : <span className="text-slate-300 text-xs block text-right pr-1">—</span>}
+                      </td>
+                      <td className="px-2 py-2">
+                        {invoice.supplier.isFiler ? (
+                          <Input type="number" min="0" max="100" step="0.01" className="w-16 h-8 text-xs text-right" value={item.aitPayablePercent}
+                            onChange={e => updateEditItem(item.id, { aitPayablePercent: parseFloat(e.target.value) || 0 })} />
+                        ) : <span className="text-slate-300 text-xs block text-right pr-1">—</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right">{formatPKR(purchasePrice)}</td>
+                      <td className="px-4 py-2 text-right font-medium">{formatPKR(purchasePrice * totalQty)}</td>
+                    </tr>
+                  )
+                }) : invoice.items.map((item, i) => (
                   <tr key={item.id} className={`border-b ${i % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
                     <td className="px-4 py-2.5">
                       <p className="font-medium whitespace-nowrap">{item.medicine.name}</p>

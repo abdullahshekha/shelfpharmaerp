@@ -203,7 +203,15 @@ export default function SupplierDetailPage() {
     return () => clearTimeout(t)
   }, [medSearch])
 
+  // Items not subject to Sales Tax have their Trade Price auto-calculated as 85% of MRP (a fixed
+  // trade margin convention for these items) — still a plain editable field, this is just the
+  // starting value whenever MRP is known.
+  const nonTaxTradePrice = (mrp: number) => Math.round(mrp * 0.85 * 100) / 100
+
   const addItem = async (med: Medicine) => {
+    const initialTradePrice = !med.salesTaxApplicable && med.mrp != null
+      ? nonTaxTradePrice(med.mrp)
+      : (med.tradePrice ?? 0)
     setItems(prev => [...prev, {
       medicineId: med.id,
       medicineName: med.name,
@@ -212,7 +220,7 @@ export default function SupplierDetailPage() {
       expiryDate: '',
       quantity: 1,
       bonusQuantity: 0,
-      tradePrice: med.tradePrice ?? 0,
+      tradePrice: initialTradePrice,
       mrp: med.mrp != null ? String(med.mrp) : '',
       discountPercent: 0,
       salesTax: 0,
@@ -505,7 +513,13 @@ export default function SupplierDetailPage() {
                           <td className="py-1.5 px-1">
                             <Input type="number" step="0.01" className="w-20 h-7 text-xs text-right"
                               value={item.mrp}
-                              onChange={e => updateItem(item.medicineId, { mrp: e.target.value })} />
+                              onChange={e => {
+                                const mrp = e.target.value
+                                const parsed = parseFloat(mrp)
+                                const patch: Partial<InvoiceItem> = { mrp }
+                                if (!item.salesTaxApplicable && !isNaN(parsed)) patch.tradePrice = nonTaxTradePrice(parsed)
+                                updateItem(item.medicineId, patch)
+                              }} />
                           </td>
                           <td className="py-1.5 px-1">
                             <Input type="number" step="0.01" className="w-24 h-7 text-xs text-right"

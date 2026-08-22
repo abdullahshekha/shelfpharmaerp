@@ -18,9 +18,9 @@ export async function GET(req: NextRequest) {
     isActive: true,
     ...(search && {
       OR: [
-        { name: { contains: search } },
+        { name: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search } },
-        { ownerName: { contains: search } },
+        { ownerName: { contains: search, mode: 'insensitive' } },
       ],
     }),
     ...(areaId && { areaId }),
