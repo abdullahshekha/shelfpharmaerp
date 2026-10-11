@@ -36,10 +36,15 @@ test('invoice zero tax omits tax line', () => {
   assertBalanced(r[0].lines)
 })
 
-test('invoice stored-data mismatch goes to SALES', () => {
-  const r = buildInvoice({ invoiceNumber: 'X', invoiceDate: D, retailerId: 'r1', subtotal: 500, discountAmount: 0, taxAmount: 10, totalAmount: 511 })
+test('invoice sub-rupee drift goes to SALES, large drift throws', () => {
+  const r = buildInvoice({ invoiceNumber: 'X', invoiceDate: D, retailerId: 'r1', subtotal: 500, discountAmount: 0, taxAmount: 10, totalAmount: 510.01 })
   assertBalanced(r[0].lines)
-  assert.equal(sum(r[0].lines, 'SALES', 'credit'), 501)
+  assert.equal(sum(r[0].lines, 'SALES', 'credit'), 500.01)
+  assert.throws(() => buildInvoice({ invoiceNumber: 'SP-INV-BAD', invoiceDate: D, retailerId: 'r1', subtotal: 500, discountAmount: 0, taxAmount: 10, totalAmount: 515 }), /SP-INV-BAD/)
+})
+
+test('negative amounts throw instead of being dropped', () => {
+  assert.throws(() => buildSupplierReturn({ returnNumber: 'N', returnDate: D, supplierId: 's1', totalAmount: -5 }))
 })
 
 test('zero invoice returns nothing', () => {
@@ -114,6 +119,10 @@ test('purchase invoice rounding drift absorbed by inventory', () => {
   const r = buildPurchaseInvoice({ invoiceNumber: 'P', invoiceDate: D, supplierId: 's1', totalAmount: 100.01, items: [{ lineTotal: 100, salesTaxAmount: 0, aitCollectibleAmount: 0, aitPayableAmount: 0 }] })
   assertBalanced(r[0].lines)
   assert.equal(sum(r[0].lines, 'INVENTORY', 'debit'), 100.01)
+})
+
+test('purchase invoice large drift throws', () => {
+  assert.throws(() => buildPurchaseInvoice({ invoiceNumber: 'SP-PUR-BAD', invoiceDate: D, supplierId: 's1', totalAmount: 105, items: [{ lineTotal: 100, salesTaxAmount: 0, aitCollectibleAmount: 0, aitPayableAmount: 0 }] }), /SP-PUR-BAD/)
 })
 
 test('supplier payment and return', () => {

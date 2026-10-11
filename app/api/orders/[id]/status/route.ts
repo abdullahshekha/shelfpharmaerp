@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { deductFefo } from '@/lib/accounting/cost'
+import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
@@ -62,9 +62,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (status === 'DELIVERED') {
       for (const item of updated.items) {
-        const { unitCost } = await deductFefo(tx, item.medicineId, item.quantity)
-        if (unitCost !== null) {
-          await tx.orderItem.update({ where: { id: item.id }, data: { unitCost } })
+        const { costSum, deducted } = await deductFefo(tx, item.medicineId, item.quantity)
+        if (deducted > 0) {
+          await tx.orderItem.update({ where: { id: item.id }, data: { unitCost: unitCostFrom(costSum, item.quantity) } })
         }
       }
 

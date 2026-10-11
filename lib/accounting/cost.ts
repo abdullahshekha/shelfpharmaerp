@@ -4,14 +4,14 @@ type Db = Pick<Prisma.TransactionClient, 'medicineBatch'>
 
 /**
  * Deducts `qty` of a medicine from in-stock batches, earliest expiry first (FEFO), allowing partial
- * deductions across batches. Returns the weighted purchase cost per unit of what was actually
- * deducted (null if nothing was deducted, e.g. no batches), the amount deducted and the shortfall.
+ * deductions across batches. Returns the total purchase cost of what was actually deducted
+ * (callers divide by the ORDER quantity to get a per-unit COGS cost), the amount deducted and the shortfall.
  */
 export async function deductFefo(
   tx: Db,
   medicineId: string,
   qty: number,
-): Promise<{ unitCost: number | null; deducted: number; remaining: number }> {
+): Promise<{ costSum: number; deducted: number; remaining: number }> {
   let remaining = qty
   let costSum = 0
   const batches = await tx.medicineBatch.findMany({
@@ -29,5 +29,10 @@ export async function deductFefo(
     remaining -= deduct
   }
   const deducted = qty - remaining
-  return { unitCost: deducted > 0 ? Math.round((costSum / deducted) * 100) / 100 : null, deducted, remaining }
+  return { costSum, deducted, remaining }
+}
+
+/** Per-unit cost stored on OrderItem.unitCost (4 dp): total deducted cost over the ordered quantity. */
+export function unitCostFrom(costSum: number, qty: number): number {
+  return Math.round((costSum / qty) * 10000) / 10000
 }

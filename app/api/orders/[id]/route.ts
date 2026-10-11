@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
-import { deductFefo } from '@/lib/accounting/cost'
+import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
 
 export const dynamic = 'force-dynamic'
 
@@ -99,13 +99,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         if (delta === 0) continue
 
         if (delta > 0) {
-          const { unitCost: extraCost, deducted, remaining } = await deductFefo(tx, item.medicineId, delta)
+          const { costSum: extraCostSum, deducted, remaining } = await deductFefo(tx, item.medicineId, delta)
           // Keep the weighted COGS unit cost in step: blend the old cost with the newly deducted units.
           const oldCost = item.existing.unitCost
-          if (extraCost !== null && oldCost !== null && oldCost !== undefined) {
+          if (deducted > 0 && oldCost !== null && oldCost !== undefined) {
             const oldQty = item.existing.quantity
-            const blended = (oldQty * Number(oldCost) + deducted * extraCost) / (oldQty + deducted)
-            newCosts.set(item.existing.id, Math.round(blended * 100) / 100)
+            newCosts.set(item.existing.id, unitCostFrom(oldQty * Number(oldCost) + extraCostSum, oldQty + delta))
           }
           if (remaining > 0) {
             warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: only partially deducted — not enough stock for the extra ${delta} unit(s)`)

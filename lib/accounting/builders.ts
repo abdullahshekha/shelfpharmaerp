@@ -1,16 +1,19 @@
 // Pure posting builders: plain inputs (Numbers, no Prisma) -> journal entries. No DB access.
 // Task 3 (sync) loads records, maps them to these shapes and posts the result.
-import type { LineInput, } from './core'
+import { assertBalanced, type LineInput } from './core'
 import { fromPaisa, toPaisa } from './money'
 
 export type BuiltEntry = { date: Date; memo: string; lines: LineInput[] }
 
 const p = (n: number | null | undefined) => toPaisa(n ?? 0)
 
-/** Drops zero-amount lines; returns [] if nothing is left or the entry would be empty. */
+const MAX_DRIFT_PAISA = 100
+
+/** Drops zero-amount lines (negatives are kept so they throw); returns [] if nothing is left; throws if unbalanced. */
 function finish(date: Date, memo: string, lines: LineInput[]): BuiltEntry[] {
-  const kept = lines.filter((l) => (l.debit ?? 0) > 0 || (l.credit ?? 0) > 0)
-  if (kept.length < 2) return []
+  const kept = lines.filter((l) => (l.debit ?? 0) !== 0 || (l.credit ?? 0) !== 0)
+  if (kept.length === 0) return []
+  assertBalanced(kept)
   return [{ date, memo, lines: kept }]
 }
 
@@ -32,6 +35,10 @@ export function buildInvoice(inv: InvoiceInput): BuiltEntry[] {
   const tax = p(inv.taxAmount)
   // Normally equals subtotal - discount; any stored-data difference is absorbed into Sales so the entry ties.
   const sales = total - tax
+  const drift = sales - (p(inv.subtotal) - p(inv.discountAmount))
+  if (Math.abs(drift) > MAX_DRIFT_PAISA) {
+    throw new Error(`Sales invoice ${inv.invoiceNumber}: total does not tie to subtotal - discount + tax (off by ${fromPaisa(drift)})`)
+  }
   return finish(inv.invoiceDate, `Sales invoice ${inv.invoiceNumber}`, [
     { accountKey: 'AR', debit: fromPaisa(total), retailerId: inv.retailerId },
     { accountKey: 'SALES', credit: fromPaisa(sales) },
@@ -129,7 +136,11 @@ export function buildPurchaseInvoice(pi: PurchaseInvoiceInput): BuiltEntry[] {
   }
   const total = p(pi.totalAmount)
   // total = inv + st - aitC + aitP by the invoice formula; stored-rounding drift is absorbed into Inventory.
-  inv += total - (inv + st - aitC + aitP)
+  const drift = total - (inv + st - aitC + aitP)
+  if (Math.abs(drift) > MAX_DRIFT_PAISA) {
+    throw new Error(`Purchase invoice ${pi.invoiceNumber}: total does not tie to its lines (off by ${fromPaisa(drift)})`)
+  }
+  inv += drift
   return finish(pi.invoiceDate, `Purchase invoice ${pi.invoiceNumber}`, [
     { accountKey: 'INVENTORY', debit: fromPaisa(inv) },
     { accountKey: 'SALES_TAX_INPUT', debit: fromPaisa(st) },

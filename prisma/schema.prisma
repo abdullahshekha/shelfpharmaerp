@@ -360,7 +360,7 @@ model OrderItem {
   salesTaxAmount Decimal  @default(0) @db.Decimal(10, 2)
   bonusQty       Int      @default(0)
   lineTotal      Decimal  @db.Decimal(10, 2)
-  unitCost       Decimal? @db.Decimal(10, 2) // weighted FEFO cost per unit, set when the order is DELIVERED (accounting COGS)
+  unitCost       Decimal? @db.Decimal(12, 4) // weighted FEFO cost per unit, set when the order is DELIVERED (accounting COGS)
 
   @@index([orderId])
 }
