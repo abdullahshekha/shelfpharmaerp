@@ -46,3 +46,4 @@ prisma/dev.db-journal
 # WhatsApp test images (large binary files)
 /whatsapp-test-images/
 /public/whatsapp-test-images/
+.superpowers/
