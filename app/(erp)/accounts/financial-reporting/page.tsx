@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { FinancialReporting } from '@/components/accounts/FinancialReporting'
 
 export default function Page() {
-  return <ComingSoon title="Financial Reporting" />
+  return <FinancialReporting />
 }

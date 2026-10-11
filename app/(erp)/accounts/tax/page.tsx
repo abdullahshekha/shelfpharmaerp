@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { TaxManagement } from '@/components/accounts/TaxManagement'
 
 export default function Page() {
-  return <ComingSoon title="Tax Management" />
+  return <TaxManagement />
 }

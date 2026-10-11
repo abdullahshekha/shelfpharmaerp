@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { ProfitLossView } from '@/components/accounts/ProfitLossView'
 
 export default function Page() {
-  return <ComingSoon title="Profit & Loss" />
+  return <ProfitLossView endpoint="/api/reports/profit-loss" title="Profit & Loss" />
 }
