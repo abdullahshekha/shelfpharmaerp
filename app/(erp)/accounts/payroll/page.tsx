@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { Payroll } from '@/components/accounts/Payroll'
 
 export default function Page() {
-  return <ComingSoon title="Payroll Module" />
+  return <Payroll />
 }
