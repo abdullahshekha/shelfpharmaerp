@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
-import { syncSafe, syncAllSafe } from '@/lib/accounting/sync'
+import { syncAllSafe } from '@/lib/accounting/sync'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'

@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { ChartOfAccounts } from '@/components/accounts/ChartOfAccounts'
 
 export default function Page() {
-  return <ComingSoon title="Chart of Accounts" />
+  return <ChartOfAccounts />
 }

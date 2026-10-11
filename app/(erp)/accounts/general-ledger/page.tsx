@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { GeneralLedger } from '@/components/accounts/GeneralLedger'
 
 export default function Page() {
-  return <ComingSoon title="General Ledgers" />
+  return <GeneralLedger />
 }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Idempotent sync engine: (sourceType, sourceId) -> the auto journal entries that record's current state implies.
 // syncSource deletes all auto entries for the source and recreates them, inside one transaction guarded by a
 // per-source advisory lock. Business routes call syncSafe AFTER their own transaction commits.

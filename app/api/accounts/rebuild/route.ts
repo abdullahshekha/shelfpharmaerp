@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAccountsUser } from '@/lib/accounting/guard'
 import { rebuildChunk, SOURCE_TYPES, type RebuildStep } from '@/lib/accounting/sync'
