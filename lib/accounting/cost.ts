@@ -36,3 +36,13 @@ export async function deductFefo(
 export function unitCostFrom(costSum: number, qty: number): number {
   return Math.round((costSum / qty) * 10000) / 10000
 }
+
+/**
+ * New per-unit cost after an admin quantity increase on a delivered order: the old lines keep their
+ * cost, the extra units carry `extraCostSum` (0 if nothing could be deducted, which dilutes the cost).
+ * A null old cost stays null.
+ */
+export function blendUnitCost(oldQty: number, oldCost: number | null | undefined, extraCostSum: number, delta: number): number | null {
+  if (oldCost === null || oldCost === undefined) return null
+  return unitCostFrom(oldQty * oldCost + extraCostSum, oldQty + delta)
+}

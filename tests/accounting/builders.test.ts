@@ -140,3 +140,12 @@ test('supplier payment and return', () => {
   assert.equal(sum(r[0].lines, 'INVENTORY', 'credit'), 120)
   assert.deepEqual(buildSupplierReturn({ returnNumber: 'x', returnDate: D, supplierId: 's1', totalAmount: 0 }), [])
 })
+
+import { blendUnitCost } from '../../lib/accounting/cost'
+
+test('blendUnitCost', () => {
+  assert.equal(blendUnitCost(10, null, 50, 5), null)
+  assert.equal(blendUnitCost(10, 10, 50, 5), 10)
+  assert.equal(blendUnitCost(10, 10, 0, 10), 5) // nothing deducted: dilutes
+  assert.equal(blendUnitCost(10, 10, 60, 5), 10.6667)
+})
