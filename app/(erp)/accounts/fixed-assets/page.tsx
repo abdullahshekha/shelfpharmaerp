@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { FixedAssets } from '@/components/accounts/FixedAssets'
 
 export default function Page() {
-  return <ComingSoon title="Fixed Assets Management" />
+  return <FixedAssets />
 }

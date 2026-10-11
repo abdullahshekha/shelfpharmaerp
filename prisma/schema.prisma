@@ -643,6 +643,8 @@ model FixedAsset {
   usefulLifeMonths  Int
   status            String   @default("ACTIVE") // ACTIVE | DISPOSED
   paidFromAccountId String?
+  notes             String?
+  disposedAt        DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

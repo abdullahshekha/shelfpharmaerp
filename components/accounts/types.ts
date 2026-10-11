@@ -36,6 +36,9 @@ export const SOURCE_LABELS: Record<string, string> = {
   PURCHASE_INVOICE: 'Purchase invoice',
   SUPPLIER_PAYMENT: 'Supplier payment',
   SUPPLIER_RETURN: 'Supplier return',
+  ASSET_PURCHASE: 'Fixed asset purchase',
+  DEPRECIATION: 'Depreciation',
+  ASSET_DISPOSAL: 'Fixed asset disposal',
 }
 
 /** Page for the source record, only where its id is directly the page id. */
