@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { deductFefo } from '@/lib/accounting/cost'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
@@ -61,20 +62,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (status === 'DELIVERED') {
       for (const item of updated.items) {
-        let remaining = item.quantity
-        const batches = await tx.medicineBatch.findMany({
-          where: { medicineId: item.medicineId, currentQty: { gt: 0 } },
-          orderBy: { expiryDate: 'asc' },
-        })
-
-        for (const batch of batches) {
-          if (remaining <= 0) break
-          const deduct = Math.min(batch.currentQty, remaining)
-          await tx.medicineBatch.update({
-            where: { id: batch.id },
-            data: { currentQty: batch.currentQty - deduct },
-          })
-          remaining -= deduct
+        const { unitCost } = await deductFefo(tx, item.medicineId, item.quantity)
+        if (unitCost !== null) {
+          await tx.orderItem.update({ where: { id: item.id }, data: { unitCost } })
         }
       }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { deductFefo } from '@/lib/accounting/cost'
 
 export const dynamic = 'force-dynamic'
 
@@ -91,22 +92,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
     })
 
+    const newCosts = new Map<string, number>()
     if (order.status === 'DELIVERED') {
       for (const item of computed) {
         const delta = item.quantity - item.existing.quantity
         if (delta === 0) continue
 
         if (delta > 0) {
-          let remaining = delta
-          const batches = await tx.medicineBatch.findMany({
-            where: { medicineId: item.medicineId, currentQty: { gt: 0 } },
-            orderBy: { expiryDate: 'asc' },
-          })
-          for (const batch of batches) {
-            if (remaining <= 0) break
-            const deduct = Math.min(batch.currentQty, remaining)
-            await tx.medicineBatch.update({ where: { id: batch.id }, data: { currentQty: batch.currentQty - deduct } })
-            remaining -= deduct
+          const { unitCost: extraCost, deducted, remaining } = await deductFefo(tx, item.medicineId, delta)
+          // Keep the weighted COGS unit cost in step: blend the old cost with the newly deducted units.
+          const oldCost = item.existing.unitCost
+          if (extraCost !== null && oldCost !== null && oldCost !== undefined) {
+            const oldQty = item.existing.quantity
+            const blended = (oldQty * Number(oldCost) + deducted * extraCost) / (oldQty + deducted)
+            newCosts.set(item.existing.id, Math.round(blended * 100) / 100)
           }
           if (remaining > 0) {
             warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: only partially deducted — not enough stock for the extra ${delta} unit(s)`)
@@ -138,6 +137,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           salesTaxAmount: item.salesTaxAmount,
           bonusQty: item.bonusQty,
           lineTotal: item.lineTotal,
+          ...(newCosts.has(item.existing.id) ? { unitCost: newCosts.get(item.existing.id) } : {}),
         },
       })
     }
