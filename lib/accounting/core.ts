@@ -80,10 +80,10 @@ async function nextEntryNumber(tx: PostEntryDb, date: Date): Promise<string> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prefix}))`
   // Numeric max of the suffix (string ordering breaks past 9999).
   const rows = await tx.$queryRaw<{ max: number | null }[]>`
-    SELECT MAX(CAST(SUBSTRING("entryNumber" FROM ${prefix.length + 1}) AS INTEGER)) AS max
+    SELECT MAX(CAST(SUBSTRING("entryNumber" FROM CAST(${prefix.length + 1} AS INTEGER)) AS INTEGER)) AS max
     FROM "JournalEntry"
     WHERE "entryNumber" LIKE ${prefix + '%'}
-      AND SUBSTRING("entryNumber" FROM ${prefix.length + 1}) ~ '^[0-9]+$'`
+      AND SUBSTRING("entryNumber" FROM CAST(${prefix.length + 1} AS INTEGER)) ~ '^[0-9]+$'`
   const n = Number(rows[0]?.max ?? 0) + 1
   return `${prefix}${String(n).padStart(4, '0')}`
 }
