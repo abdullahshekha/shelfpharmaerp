@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { syncSafe } from '@/lib/accounting/sync'
 import { Prisma } from '@prisma/client'
 import { getUserFromRequest } from '@/lib/utils/auth'
 
@@ -129,6 +130,8 @@ export async function POST(req: NextRequest) {
     }
     return ret
   })
+
+  await syncSafe('SALES_RETURN', created.id)
 
   return NextResponse.json({ data: created }, { status: 201 })
 }

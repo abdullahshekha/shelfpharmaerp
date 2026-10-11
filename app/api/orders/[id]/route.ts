@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { deductFefo, blendUnitCost } from '@/lib/accounting/cost'
+import { syncSafe, syncAllSafe } from '@/lib/accounting/sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -166,6 +167,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return updatedOrder
   })
 
+  await syncAllSafe([['INVOICE', order.invoice?.id], ['DELIVERY_COGS', id]])
+
   return NextResponse.json({ data: result, warnings })
 }
 
@@ -183,8 +186,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   return handleDelete(req, hard ? 'Order-Hard' : 'Order', id, order.orderNumber, async () => {
     if (!hard) {
       await prisma.order.update({ where: { id }, data: { status: 'CANCELLED' } })
+      await syncSafe('DELIVERY_COGS', id)
       return
     }
+
+    // Capture ids before the cascade-delete so their ledger entries can be removed afterwards.
+    const doomedInvoice = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } })
+    const doomedPayments = doomedInvoice
+      ? await prisma.payment.findMany({ where: { invoiceId: doomedInvoice.id }, select: { id: true } })
+      : []
 
     // Hard delete — clean up related records first
     await prisma.$transaction(async (tx) => {
@@ -202,5 +212,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       // Delete order (cascades to order items via Prisma schema)
       await tx.order.delete({ where: { id } })
     })
+
+    await syncAllSafe([
+      ['INVOICE', doomedInvoice?.id],
+      ['DELIVERY_COGS', id],
+      ...doomedPayments.map((p): ['PAYMENT', string] => ['PAYMENT', p.id]),
+    ])
   })
 }

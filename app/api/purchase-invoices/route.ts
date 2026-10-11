@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { syncSafe } from '@/lib/accounting/sync'
 import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount, calcSalesTaxAmount } from '@/lib/utils/pricing'
 
 export const dynamic = 'force-dynamic'
@@ -205,6 +206,8 @@ export async function POST(req: NextRequest) {
     // Re-fetch so the response reflects the batchId links just written, not the pre-link snapshot.
     return tx.purchaseInvoice.findUniqueOrThrow({ where: { id: created.id }, include: { items: true } })
   })
+
+  await syncSafe('PURCHASE_INVOICE', invoice.id)
 
   return NextResponse.json({ data: invoice }, { status: 201 })
 }

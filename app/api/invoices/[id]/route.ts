@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { syncSafe } from '@/lib/accounting/sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +37,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
     },
   })
+
+  await syncSafe('INVOICE', id)
 
   return NextResponse.json({ data: invoice })
 }

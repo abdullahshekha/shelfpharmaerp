@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { syncSafe } from '@/lib/accounting/sync'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { calcPurchasePrice, calcTradeOfferPercent, calcAitAmount, calcSalesTaxAmount } from '@/lib/utils/pricing'
 
@@ -218,6 +219,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
       return updated
     })
+
+    await syncSafe('PURCHASE_INVOICE', id)
 
     return NextResponse.json({ data: result, warnings })
   } catch (err) {

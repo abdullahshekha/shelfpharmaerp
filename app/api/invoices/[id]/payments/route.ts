@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { syncSafe } from '@/lib/accounting/sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +44,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return { payment, newStatus, totalPaid }
   })
+
+  await syncSafe('PAYMENT', result.payment.id)
 
   return NextResponse.json({ data: result }, { status: 201 })
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { syncSafe, syncAllSafe } from '@/lib/accounting/sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,9 +32,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       switch (approval.model) {
         case 'Order':
           await prisma.order.update({ where: { id: approval.recordId }, data: { status: 'CANCELLED' } })
+          await syncSafe('DELIVERY_COGS', approval.recordId)
           break
         case 'Order-Hard': {
           const orderId = approval.recordId
+          const doomedInvoice = await prisma.invoice.findUnique({ where: { orderId }, select: { id: true } })
+          const doomedPayments = doomedInvoice
+            ? await prisma.payment.findMany({ where: { invoiceId: doomedInvoice.id }, select: { id: true } })
+            : []
           await prisma.$transaction(async (tx) => {
             await tx.delivery.deleteMany({ where: { orderId } })
             await tx.deliveryChallan.deleteMany({ where: { orderId } })
@@ -44,10 +50,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             }
             await tx.order.delete({ where: { id: orderId } })
           })
+          await syncAllSafe([
+            ['INVOICE', doomedInvoice?.id],
+            ['DELIVERY_COGS', orderId],
+            ...doomedPayments.map((p): ['PAYMENT', string] => ['PAYMENT', p.id]),
+          ])
           break
         }
         case 'Invoice':
           await prisma.invoice.update({ where: { id: approval.recordId }, data: { status: 'DRAFT' } })
+          await syncSafe('INVOICE', approval.recordId)
           break
         case 'Retailer':
           await prisma.retailer.update({ where: { id: approval.recordId }, data: { isActive: false } })

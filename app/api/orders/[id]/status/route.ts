@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
+import { syncSafe, syncAllSafe } from '@/lib/accounting/sync'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     return updated
   })
+
+  // Ledger sync after the business transaction has committed (never fails the request).
+  const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } }).catch(() => null)
+  await syncAllSafe([['INVOICE', inv?.id], ['DELIVERY_COGS', id]])
 
   return NextResponse.json({ data: order })
 }
