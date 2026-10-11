@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,12 +9,11 @@ import { Plus, Trash2 } from 'lucide-react'
 import { AccountSelect } from './AccountSelect'
 import { PartyPicker, type Party } from './PartyPicker'
 import { formatPKR } from '@/lib/utils/format'
-import type { Account } from './types'
+import { todayKarachi, type Account } from './types'
 
 interface Line { accountId: string; debit: string; credit: string; memo: string; party: Party | null }
 const blank = (): Line => ({ accountId: '', debit: '', credit: '', memo: '', party: null })
 const paisa = (s: string) => Math.round((parseFloat(s) || 0) * 100)
-const today = () => new Date().toISOString().slice(0, 10)
 
 interface Props {
   open: boolean
@@ -24,7 +23,7 @@ interface Props {
 }
 
 export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: Props) {
-  const [date, setDate] = useState(today())
+  const [date, setDate] = useState(todayKarachi())
   const [memo, setMemo] = useState('')
   const [lines, setLines] = useState<Line[]>([blank(), blank()])
   const [saving, setSaving] = useState(false)
@@ -38,12 +37,16 @@ export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: 
   const setLine = (i: number, patch: Partial<Line>) =>
     setLines(prev => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
 
-  const reset = () => { setDate(today()); setMemo(''); setLines([blank(), blank()]) }
+  // Fresh form every time the dialog opens (also covers Cancel / X / overlay close).
+  useEffect(() => { if (open) reset() }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reset = () => { setDate(todayKarachi()); setMemo(''); setLines([blank(), blank()]) }
 
   const submit = async () => {
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i]
       if (!l.accountId) return toast.error(`Line ${i + 1}: choose an account`)
+      if (paisa(l.debit) < 0 || paisa(l.credit) < 0) return toast.error(`Line ${i + 1}: amounts cannot be negative`)
       if (paisa(l.debit) > 0 && paisa(l.credit) > 0) return toast.error(`Line ${i + 1}: use either debit or credit, not both`)
       if (paisa(l.debit) === 0 && paisa(l.credit) === 0) return toast.error(`Line ${i + 1}: enter an amount`)
       if (keyOf(l) === 'AR' && !l.party) return toast.error(`Line ${i + 1}: Accounts Receivable needs a customer`)
@@ -71,7 +74,6 @@ export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: 
       const j = await res.json()
       if (!res.ok) return toast.error(j.error ?? 'Could not post entry')
       toast.success(`Posted ${j.data?.entryNumber ?? 'entry'}`)
-      reset()
       onOpenChange(false)
       onPosted()
     } finally {
@@ -115,6 +117,7 @@ export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: 
                 <Input placeholder="Line memo" className="h-8 flex-1 min-w-[8rem] text-sm"
                   value={l.memo} onChange={e => setLine(i, { memo: e.target.value })} />
                 <Button type="button" variant="ghost" size="icon-sm" disabled={lines.length <= 2}
+                  aria-label={`Remove line ${i + 1}`}
                   onClick={() => setLines(prev => prev.filter((_, idx) => idx !== i))}>
                   <Trash2 size={14} />
                 </Button>

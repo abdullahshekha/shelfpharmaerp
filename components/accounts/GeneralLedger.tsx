@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,7 +12,7 @@ import { downloadCsv } from '@/lib/utils/csv'
 import { Download, Plus, Undo2 } from 'lucide-react'
 import { AccountSelect } from './AccountSelect'
 import { ManualJournalDialog } from './ManualJournalDialog'
-import { SOURCE_LABELS, sourceHref, type Account } from './types'
+import { SOURCE_LABELS, sourceHref, karachiDay, todayKarachi, type Account } from './types'
 
 interface LedgerRow {
   lineId: string; entryId: string; entryNumber: string; date: string; memo: string | null; lineMemo: string | null
@@ -34,28 +34,42 @@ export function GeneralLedger() {
   const [reversing, setReversing] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/accounts/accounts')
-      .then(r => r.json())
+    // includeInactive so accounts deactivated after posting remain viewable.
+    fetch('/api/accounts/accounts?includeInactive=1')
+      .then(async r => {
+        const j = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`)
+        return j
+      })
       .then(j => {
         const list: Account[] = j.data ?? []
         setAccounts(list)
-        if (list.length) setAccountId(prev => prev || list[0].id)
+        const first = list.find(a => a.isActive) ?? list[0]
+        if (first) setAccountId(prev => prev || first.id)
       })
+      .catch(e => toast.error(`Could not load accounts: ${e.message}`))
   }, [])
 
+  const reqId = useRef(0)
   const load = useCallback(async () => {
     if (!accountId) return
+    const id = ++reqId.current
     setLoading(true)
     try {
       const p = new URLSearchParams()
       if (range?.from) p.set('from', range.from)
       if (range?.to) p.set('to', range.to)
       const res = await fetch(`/api/accounts/ledger/${accountId}?${p}`)
-      const j = await res.json()
+      const j = await res.json().catch(() => ({}))
+      if (id !== reqId.current) return // a newer request superseded this one
       if (!res.ok) { toast.error(j.error ?? 'Could not load ledger'); setLedger(null); return }
       setLedger(j.data)
+    } catch {
+      if (id !== reqId.current) return
+      toast.error('Network error loading ledger')
+      setLedger(null)
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
   }, [accountId, range])
   useEffect(() => { load() }, [load])
@@ -75,10 +89,12 @@ export function GeneralLedger() {
     setReversing(r.entryId)
     try {
       const res = await fetch(`/api/accounts/journals/${r.entryId}/reverse`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-      const j = await res.json()
+      const j = await res.json().catch(() => ({}))
       if (!res.ok) return toast.error(j.error ?? 'Could not reverse entry')
       toast.success(`Posted ${j.data?.entryNumber ?? 'reversal'}`)
       load()
+    } catch {
+      toast.error('Network error while reversing')
     } finally {
       setReversing(null)
     }
@@ -87,12 +103,12 @@ export function GeneralLedger() {
   const exportCsv = () => {
     if (!ledger) return
     downloadCsv(
-      `ledger-${ledger.account.code}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `ledger-${ledger.account.code}-${todayKarachi()}.csv`,
       ['Date', 'Entry', 'Source', 'Memo', 'Debit', 'Credit', 'Balance'],
       [
         ['', '', '', 'Opening balance', '', '', ledger.opening],
         ...ledger.rows.map(r => [
-          r.date.slice(0, 10), r.entryNumber, r.isManual ? 'Manual' : (SOURCE_LABELS[r.sourceType ?? ''] ?? r.sourceType ?? ''),
+          karachiDay(r.date), r.entryNumber, r.isManual ? 'Manual' : (SOURCE_LABELS[r.sourceType ?? ''] ?? r.sourceType ?? ''),
           [r.memo, r.lineMemo].filter(Boolean).join(' / '), r.debit, r.credit, r.balance,
         ]),
         ['', '', '', 'Closing balance', ledger.totalDebit, ledger.totalCredit, ledger.closing],
@@ -175,7 +191,7 @@ export function GeneralLedger() {
                           <td className="px-4 py-2 text-right font-medium">{formatPKR(r.balance)}</td>
                           <td className="px-2 py-2">
                             {canReverse && (
-                              <Button variant="ghost" size="icon-sm" title="Reverse entry" disabled={reversing === r.entryId} onClick={() => reverse(r)}>
+                              <Button variant="ghost" size="icon-sm" title="Reverse entry" aria-label={`Reverse ${r.entryNumber}`} disabled={reversing === r.entryId} onClick={() => reverse(r)}>
                                 <Undo2 size={14} />
                               </Button>
                             )}

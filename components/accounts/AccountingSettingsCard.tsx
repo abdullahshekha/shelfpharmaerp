@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,16 +26,32 @@ export function AccountingSettingsCard({ accounts }: { accounts: Account[] }) {
   const [progress, setProgress] = useState('')
   const [result, setResult] = useState<RebuildResult | null>(null)
 
+  const [loadError, setLoadError] = useState('')
+  const rebuildingRef = useRef(false)
+
   useEffect(() => {
-    fetch('/api/accounts/settings').then(r => r.json()).then(j => {
-      const s: AccountingSettings | undefined = j.data
-      if (!s) return
-      setSettings(s)
-      setGoLive(toDateInput(s.goLiveDate))
-      setLocked(toDateInput(s.lockedThrough))
-      setBank(s.defaultBankAccountId ?? '')
-    })
+    fetch('/api/accounts/settings')
+      .then(async r => {
+        const j = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`)
+        return j
+      })
+      .then(j => {
+        const s: AccountingSettings | undefined = j.data
+        if (!s) return
+        setSettings(s)
+        setGoLive(toDateInput(s.goLiveDate))
+        setLocked(toDateInput(s.lockedThrough))
+        setBank(s.defaultBankAccountId ?? '')
+      })
+      .catch(e => { setLoadError(e.message || 'Could not load settings'); toast.error('Could not load accounts settings') })
   }, [])
+
+  const dirty = !!settings && (
+    goLive !== toDateInput(settings.goLiveDate) ||
+    locked !== toDateInput(settings.lockedThrough) ||
+    bank !== (settings.defaultBankAccountId ?? '')
+  )
 
   const bankAccounts = accounts.filter(a => a.isActive && a.type === 'ASSET' && (a.subType === 'BANK' || a.subType === 'CASH'))
 
@@ -47,19 +63,24 @@ export function AccountingSettingsCard({ accounts }: { accounts: Account[] }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ goLiveDate: goLive || null, lockedThrough: locked || null, defaultBankAccountId: bank || null }),
       })
-      const j = await res.json()
+      const j = await res.json().catch(() => ({}))
       if (!res.ok) return toast.error(j.error ?? 'Could not save settings')
       setSettings(j.data)
       toast.success('Accounts settings saved')
       if (j.warning) toast.warning(j.warning, { duration: 10000 })
+    } catch {
+      toast.error('Network error while saving settings')
     } finally {
       setSaving(false)
     }
   }
 
   const rebuild = async () => {
+    if (rebuildingRef.current) return
     if (!settings?.goLiveDate) return toast.error('Save a go-live date first')
+    if (dirty) return toast.error('Save your settings changes before rebuilding')
     if (!confirm('Re-sync the ledger for every record dated since go-live? This is safe to repeat.')) return
+    rebuildingRef.current = true
     setRebuilding(true)
     setResult(null)
     const totals: RebuildTotals = { total: 0, posted: 0, removed: 0, unchanged: 0, orphansRemoved: 0 }
@@ -101,6 +122,7 @@ export function AccountingSettingsCard({ accounts }: { accounts: Account[] }) {
     } catch {
       toast.error('Network error during rebuild. Partial progress is saved; run it again to continue.')
     } finally {
+      rebuildingRef.current = false
       setRebuilding(false)
       setProgress('')
     }
@@ -132,11 +154,13 @@ export function AccountingSettingsCard({ accounts }: { accounts: Account[] }) {
             </div>
           </div>
           <Button size="sm" onClick={save} disabled={saving || !settings}>{saving ? 'Saving…' : 'Save settings'}</Button>
-          <Button size="sm" variant="outline" className="gap-2" onClick={rebuild} disabled={rebuilding || !settings}>
+          <Button size="sm" variant="outline" className="gap-2" onClick={rebuild} disabled={rebuilding || !settings || dirty} title={dirty ? 'Save settings first' : undefined}>
             <RefreshCw size={14} className={rebuilding ? 'animate-spin' : ''} /> {rebuilding ? 'Rebuilding…' : 'Rebuild ledger'}
           </Button>
         </div>
 
+        {loadError && <p className="text-sm text-red-600">Could not load settings: {loadError}</p>}
+        {dirty && <p className="text-xs text-amber-600">Unsaved changes. Save settings before rebuilding the ledger.</p>}
         {rebuilding && progress && <p className="text-sm text-slate-600">{progress}</p>}
 
         {result && (

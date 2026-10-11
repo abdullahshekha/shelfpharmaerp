@@ -1,5 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
@@ -49,7 +50,7 @@ export function PartyPicker({ kind, value, onChange }: Props) {
     return (
       <div className="flex items-center gap-1 h-8 px-2 rounded-md border bg-slate-50 text-sm">
         <span className="truncate max-w-[10rem]">{value.name}</span>
-        <Button type="button" variant="ghost" size="icon-sm" className="h-5 w-5" onClick={() => onChange(null)}>
+        <Button type="button" variant="ghost" size="icon-sm" className="h-5 w-5" onClick={() => onChange(null)} aria-label="Clear selection">
           <X size={12} />
         </Button>
       </div>

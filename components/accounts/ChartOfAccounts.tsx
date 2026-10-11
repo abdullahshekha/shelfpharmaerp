@@ -20,14 +20,19 @@ export function ChartOfAccounts() {
   const [showInactive, setShowInactive] = useState(false)
   const [form, setForm] = useState<Form | null>(null)
   const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/accounts/accounts?includeInactive=1')
-      const j = await res.json()
-      if (!res.ok) toast.error(j.error ?? 'Could not load accounts')
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { toast.error(j.error ?? 'Could not load accounts'); setLoadError(j.error ?? `HTTP ${res.status}`); return }
+      setLoadError('')
       setAccounts(j.data ?? [])
+    } catch {
+      toast.error('Network error loading accounts')
+      setLoadError('Network error')
     } finally {
       setLoading(false)
     }
@@ -50,11 +55,13 @@ export function ChartOfAccounts() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const j = await res.json()
+      const j = await res.json().catch(() => ({}))
       if (!res.ok) return toast.error(j.error ?? 'Could not save account')
       toast.success(form.id ? 'Account updated' : 'Account added')
       setForm(null)
       load()
+    } catch {
+      toast.error('Network error while saving')
     } finally {
       setSaving(false)
     }
@@ -77,6 +84,7 @@ export function ChartOfAccounts() {
         </div>
       </div>
 
+      {loadError && <p className="text-sm text-red-600">Could not load accounts: {loadError}</p>}
       <AccountingSettingsCard accounts={accounts} />
 
       {ACCOUNT_TYPES.map(type => {

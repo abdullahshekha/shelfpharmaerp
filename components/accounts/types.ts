@@ -49,4 +49,9 @@ export function sourceHref(sourceType: string | null, sourceId: string | null): 
   }
 }
 
-export const toDateInput = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '')
+/** YYYY-MM-DD calendar day in Asia/Karachi (the API stores Karachi-midnight dates, i.e. 19:00 UTC the previous day). */
+export function karachiDay(iso: string | Date): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' })
+}
+export const todayKarachi = () => karachiDay(new Date())
+export const toDateInput = (iso: string | null | undefined) => (iso ? karachiDay(iso) : '')
