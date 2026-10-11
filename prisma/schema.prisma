@@ -360,6 +360,7 @@ model OrderItem {
   salesTaxAmount Decimal  @default(0) @db.Decimal(10, 2)
   bonusQty       Int      @default(0)
   lineTotal      Decimal  @db.Decimal(10, 2)
+  unitCost       Decimal? @db.Decimal(10, 2) // weighted FEFO cost per unit, set when the order is DELIVERED (accounting COGS)
 
   @@index([orderId])
 }
@@ -562,4 +563,107 @@ model Attendance {
   notes      String?
 
   @@unique([employeeId, date])
+}
+
+
+// ---------------- Accounts module (double-entry general ledger) ----------------
+
+model Account {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  type      String // ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
+  subType   String? // e.g. CONTRA
+  parentId  String?
+  parent    Account?      @relation("AccountTree", fields: [parentId], references: [id])
+  children  Account[]     @relation("AccountTree")
+  systemKey String?       @unique
+  isActive  Boolean       @default(true)
+  isSystem  Boolean       @default(false)
+  lines     JournalLine[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model JournalEntry {
+  id          String        @id @default(cuid())
+  entryNumber String        @unique // SP-JV-YYYYMMDD-XXXX
+  date        DateTime
+  memo        String?
+  sourceType  String?
+  sourceId    String?
+  isManual    Boolean       @default(false)
+  createdById String?
+  reversesId  String?
+  lines       JournalLine[]
+  createdAt   DateTime      @default(now())
+
+  @@index([sourceType, sourceId])
+  @@index([date])
+}
+
+model JournalLine {
+  id         String       @id @default(cuid())
+  entryId    String
+  entry      JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    Account      @relation(fields: [accountId], references: [id])
+  debit      Decimal      @default(0) @db.Decimal(12, 2)
+  credit     Decimal      @default(0) @db.Decimal(12, 2)
+  memo       String?
+  retailerId String?
+  supplierId String?
+  employeeId String?
+
+  @@index([entryId])
+  @@index([accountId])
+  @@index([retailerId])
+  @@index([supplierId])
+}
+
+model AccountingSettings {
+  id                   String    @id @default(cuid())
+  goLiveDate           DateTime?
+  lockedThrough        DateTime?
+  defaultBankAccountId String?
+  updatedAt            DateTime  @updatedAt
+}
+
+model FixedAsset {
+  id                String   @id @default(cuid())
+  name              String
+  category          String?
+  purchaseDate      DateTime
+  cost              Decimal  @db.Decimal(12, 2)
+  salvageValue      Decimal  @default(0) @db.Decimal(12, 2)
+  usefulLifeMonths  Int
+  status            String   @default("ACTIVE") // ACTIVE | DISPOSED
+  paidFromAccountId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model PayrollRun {
+  id        String        @id @default(cuid())
+  month     String        @unique // YYYY-MM
+  status    String        @default("DRAFT") // DRAFT | POSTED | PAID
+  lines     PayrollLine[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model PayrollLine {
+  id         String     @id @default(cuid())
+  runId      String
+  run        PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employeeId String
+  baseSalary Decimal    @db.Decimal(12, 2)
+  absentDays Decimal    @default(0) @db.Decimal(5, 1)
+  halfDays   Decimal    @default(0) @db.Decimal(5, 1)
+  deduction  Decimal    @default(0) @db.Decimal(12, 2)
+  bonus      Decimal    @default(0) @db.Decimal(12, 2)
+  netPay     Decimal    @db.Decimal(12, 2)
+
+  @@index([runId])
+  @@index([employeeId])
 }
