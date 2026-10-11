@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { CashBank } from '@/components/accounts/CashBank'
 
 export default function Page() {
-  return <ComingSoon title="Cash & Bank Management" />
+  return <CashBank />
 }
