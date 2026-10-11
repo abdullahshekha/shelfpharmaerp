@@ -72,6 +72,12 @@ export async function ensureChart(db: AccountDb): Promise<Chart> {
   }
   const chart = {} as Chart
   for (const def of SYSTEM_ACCOUNTS) {
+    const clash = await db.account.findUnique({ where: { code: def.code }, select: { systemKey: true } })
+    if (clash && clash.systemKey !== def.key) {
+      throw new Error(
+        `Cannot seed system account "${def.name}": account code ${def.code} is already used by another account. Change that account's code first.`,
+      )
+    }
     const row = await db.account.upsert({
       where: { systemKey: def.key },
       update: {}, // never overwrite staff renames

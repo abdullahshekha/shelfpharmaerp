@@ -34,9 +34,10 @@ export type SettingsDb = Pick<Prisma.TransactionClient, 'accountingSettings'>
 
 /** Returns the single settings row, creating it if absent. */
 export async function getSettings(db: SettingsDb) {
-  const existing = await db.accountingSettings.findFirst({ orderBy: { updatedAt: 'asc' } })
+  const existing = await db.accountingSettings.findFirst({ orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }] })
   if (existing) return existing
-  return db.accountingSettings.create({ data: {} })
+  // Fixed id so concurrent first calls can only ever produce one row.
+  return db.accountingSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } })
 }
 
 const KARACHI_OFFSET_MS = 5 * 60 * 60 * 1000
@@ -57,7 +58,7 @@ export function assertNotLocked(settings: { lockedThrough: Date | null }, date: 
 
 export type PostEntryDb = Pick<
   Prisma.TransactionClient,
-  'account' | 'accountingSettings' | 'journalEntry' | 'journalLine'
+  'account' | 'accountingSettings' | 'journalEntry' | 'journalLine' | '$executeRaw' | '$queryRaw'
 >
 
 export type PostEntryInput = {
@@ -73,20 +74,18 @@ export type PostEntryInput = {
 
 async function nextEntryNumber(tx: PostEntryDb, date: Date): Promise<string> {
   const prefix = `SP-JV-${karachiDayKey(date)}-`
-  const last = await tx.journalEntry.findFirst({
-    where: { entryNumber: { startsWith: prefix } },
-    orderBy: { entryNumber: 'desc' },
-    select: { entryNumber: true },
-  })
-  let n = last ? parseInt(last.entryNumber.slice(prefix.length), 10) || 0 : 0
-  // Existence check (not catch-and-retry): a unique violation would abort a Postgres transaction.
-  for (let i = 0; i < 20; i++) {
-    n += 1
-    const candidate = `${prefix}${String(n).padStart(4, '0')}`
-    const taken = await tx.journalEntry.findUnique({ where: { entryNumber: candidate }, select: { id: true } })
-    if (!taken) return candidate
-  }
-  throw new Error('Could not allocate a journal entry number')
+  // Serialise number allocation per day for the rest of this transaction: concurrent posters
+  // wait here, then see each other's committed entries, so two can never pick the same number
+  // (a unique violation would abort the caller's whole Postgres transaction).
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prefix}))`
+  // Numeric max of the suffix (string ordering breaks past 9999).
+  const rows = await tx.$queryRaw<{ max: number | null }[]>`
+    SELECT MAX(CAST(SUBSTRING("entryNumber" FROM ${prefix.length + 1}) AS INTEGER)) AS max
+    FROM "JournalEntry"
+    WHERE "entryNumber" LIKE ${prefix + '%'}
+      AND SUBSTRING("entryNumber" FROM ${prefix.length + 1}) ~ '^[0-9]+$'`
+  const n = Number(rows[0]?.max ?? 0) + 1
+  return `${prefix}${String(n).padStart(4, '0')}`
 }
 
 /**

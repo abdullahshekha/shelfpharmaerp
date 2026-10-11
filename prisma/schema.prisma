@@ -583,6 +583,8 @@ model Account {
   lines     JournalLine[]
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+
+  @@index([parentId])
 }
 
 model JournalEntry {
@@ -600,6 +602,7 @@ model JournalEntry {
 
   @@index([sourceType, sourceId])
   @@index([date])
+  @@index([reversesId])
 }
 
 model JournalLine {
@@ -619,6 +622,7 @@ model JournalLine {
   @@index([accountId])
   @@index([retailerId])
   @@index([supplierId])
+  @@index([employeeId])
 }
 
 model AccountingSettings {
