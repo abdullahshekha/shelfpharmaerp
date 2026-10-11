@@ -14,6 +14,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
+import { PortalAccessCard } from '@/components/retailers/PortalAccessCard'
 import { DrugLicensesEditor, type DrugLicenseForm } from '@/components/retailers/DrugLicensesEditor'
 
 interface Order { id: string; orderNumber: string; orderDate: string; status: string; totalAmount: number }
@@ -31,7 +32,7 @@ interface Retailer {
   isFiler: boolean; ntnNumber: string | null; strnStatus: string | null; strnNumber: string | null
   creditLimit: number; creditDays: number; paymentMode: string; notes: string | null
   salesRepId: string | null; salesRep: { id: string; name: string } | null
-  orders: Order[]; invoices: Invoice[]; outstandingBalance: number
+  orders: Order[]; invoices: Invoice[]; outstandingBalance: number; returnCredits: number
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -426,6 +427,8 @@ export default function RetailerDetailPage() {
           </CardContent>
         </Card>
 
+        <PortalAccessCard retailerId={retailer.id} />
+
         <Card>
           <CardHeader><CardTitle className="text-base">Credit & Compliance</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -435,6 +438,7 @@ export default function RetailerDetailPage() {
                 <Row label="Credit Limit" value={formatPKR(retailer.creditLimit)} />
                 <Row label="Credit Days" value={`${retailer.creditDays} days`} />
                 <Row label="Outstanding" value={formatPKR(retailer.outstandingBalance)} />
+                {retailer.returnCredits > 0 && <Row label="Incl. return credits" value={`− ${formatPKR(retailer.returnCredits)}`} />}
                 {retailer.creditLimit > 0 && (
                   <div>
                     <div className="flex justify-between text-xs text-slate-500 mb-1">

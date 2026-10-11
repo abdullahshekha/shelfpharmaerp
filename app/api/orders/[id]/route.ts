@@ -193,6 +193,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     await prisma.$transaction(async (tx) => {
       // Remove delivery
       await tx.delivery.deleteMany({ where: { orderId: id } })
+      await tx.deliveryChallan.deleteMany({ where: { orderId: id } })
 
       // Void invoice (delete payments first, then invoice)
       const invoice = await tx.invoice.findUnique({ where: { orderId: id } })

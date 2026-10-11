@@ -262,6 +262,11 @@ export default function OrderDetailPage() {
                 <Badge className="text-xs ml-2">{order.invoice.status}</Badge>
               </div>
             )}
+            {order.status !== 'PENDING' && order.status !== 'CANCELLED' && (
+              <a href={`/api/orders/${order.id}/challan`} download className="text-blue-600 hover:underline block">
+                Download Delivery Challan
+              </a>
+            )}
             {!order.delivery && !order.invoice && (
               <p className="text-slate-400">Will be created on CONFIRMED</p>
             )}

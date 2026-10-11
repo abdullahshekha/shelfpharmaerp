@@ -55,3 +55,19 @@ export function getNextDeliveryDate(): Date {
 
   return delivery
 }
+
+export function generateChallanNumber(): string {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' }))
+  const date = now.toISOString().slice(0, 10).replace(/-/g, '')
+  const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')
+  return `SP-DC-${date}-${seq}`
+}
+
+// Default next-day rule, then pushed forward to the area's next delivery weekday (0=Sun..6=Sat).
+// An area with no delivery days keeps the default rule.
+export function getNextDeliveryDateForArea(deliveryDays?: number[] | null): Date {
+  const date = getNextDeliveryDate()
+  if (!deliveryDays || deliveryDays.length === 0) return date
+  for (let i = 0; i < 7 && !deliveryDays.includes(date.getDay()); i++) date.setDate(date.getDate() + 1)
+  return date
+}

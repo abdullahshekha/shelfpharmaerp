@@ -3,6 +3,7 @@
 import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
+import Link from 'next/link'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -104,6 +105,9 @@ function LoginForm() {
               {loading ? 'Signing in…' : 'Sign In'}
             </Button>
           </form>
+          <p className="text-center text-xs text-slate-500">
+            Customer? <Link href="/portal/login" className="text-blue-600 hover:underline">Sign in to the customer portal</Link>
+          </p>
         </div>
 
         <p className="text-center text-xs text-slate-500 mt-6">

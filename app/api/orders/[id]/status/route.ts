@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { generateInvoiceNumber, getNextDeliveryDate } from '@/lib/utils/format'
+import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +14,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       data: { status },
       include: {
         items: { include: { medicine: true } },
-        retailer: true,
+        retailer: { include: { area: { select: { deliveryDays: true } } } },
       },
     })
 
@@ -48,9 +48,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         await tx.delivery.create({
           data: {
             orderId: id,
-            scheduledDate: getNextDeliveryDate(),
+            scheduledDate: getNextDeliveryDateForArea(updated.retailer.area?.deliveryDays),
           },
         })
+      }
+
+      const existingChallan = await tx.deliveryChallan.findUnique({ where: { orderId: id } })
+      if (!existingChallan) {
+        await tx.deliveryChallan.create({ data: { orderId: id, challanNumber: generateChallanNumber() } })
       }
     }
 

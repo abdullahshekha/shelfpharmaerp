@@ -39,7 +39,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     _sum: { totalAmount: true },
   })
 
-  return NextResponse.json({ data: { ...retailer, outstandingBalance: outstanding._sum.totalAmount ?? 0 } })
+  // Sales returns are credited against what the customer owes (same idea as supplier returns)
+  const returnCredits = await prisma.salesReturn.aggregate({ where: { retailerId: id }, _sum: { totalAmount: true } })
+  const outstandingBalance = Number(outstanding._sum.totalAmount ?? 0) - Number(returnCredits._sum.totalAmount ?? 0)
+
+  return NextResponse.json({ data: { ...retailer, outstandingBalance, returnCredits: Number(returnCredits._sum.totalAmount ?? 0) } })
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

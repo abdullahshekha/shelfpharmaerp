@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { parseSchedule } from '@/lib/utils/area-schedule'
 
 export const dynamic = 'force-dynamic'
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const { name } = await req.json()
+  const body = await req.json()
+  const { name } = body
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
+  const schedule = parseSchedule(body)
+  if (!schedule) return NextResponse.json({ error: 'Invalid delivery/booking days' }, { status: 400 })
   try {
-    const area = await prisma.area.update({ where: { id }, data: { name: name.trim() } })
+    const area = await prisma.area.update({ where: { id }, data: { name: name.trim(), ...schedule } })
     return NextResponse.json({ data: area })
   } catch {
     return NextResponse.json({ error: 'Name already exists or area not found' }, { status: 409 })

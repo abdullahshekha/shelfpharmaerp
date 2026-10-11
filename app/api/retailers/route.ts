@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get('search') ?? ''
   const areaId = searchParams.get('areaId') ?? ''
   const salesRepId = searchParams.get('salesRepId') ?? ''
+  const sort = searchParams.get('sort') ?? '' // orders_asc | orders_desc
   const user = getUserFromRequest(req)
 
   const where: Prisma.RetailerWhereInput = {
@@ -36,7 +37,9 @@ export async function GET(req: NextRequest) {
         area: { select: { name: true } },
         _count: { select: { orders: true } },
       },
-      orderBy: { name: 'asc' },
+      orderBy: sort === 'orders_asc' || sort === 'orders_desc'
+        ? [{ orders: { _count: sort === 'orders_asc' ? 'asc' : 'desc' } }, { name: 'asc' }]
+        : { name: 'asc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

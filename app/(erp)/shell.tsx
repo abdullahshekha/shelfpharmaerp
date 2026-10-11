@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Sidebar } from '@/components/shared/Sidebar'
+import { HubTabs } from '@/components/shared/HubTabs'
 import { Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import Image from 'next/image'
@@ -14,6 +15,19 @@ interface Props {
 export function ErpShell({ children, role }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [collapsed, setCollapsed] = useState(false)
+
+  // Restore the saved choice after mount (not in the initial state, to avoid a hydration mismatch)
+  useEffect(() => {
+    setCollapsed(localStorage.getItem('sp_sidebar_collapsed') === '1')
+  }, [])
+
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      localStorage.setItem('sp_sidebar_collapsed', c ? '0' : '1')
+      return !c
+    })
+  }
 
   useEffect(() => {
     const fetchNotifs = () => {
@@ -31,7 +45,7 @@ export function ErpShell({ children, role }: Props) {
     <div className="flex min-h-screen bg-slate-50">
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-shrink-0 sticky top-0 h-screen">
-        <Sidebar role={role} unreadCount={unreadCount} />
+        <Sidebar role={role} unreadCount={unreadCount} collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
       </aside>
 
       {/* Mobile sidebar overlay */}
@@ -44,7 +58,7 @@ export function ErpShell({ children, role }: Props) {
         </div>
       )}
 
-      <div className="flex flex-col flex-1">
+      <div className="flex flex-col flex-1 min-w-0">
         <header className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200">
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
             <Menu size={20} />
@@ -53,6 +67,7 @@ export function ErpShell({ children, role }: Props) {
         </header>
 
         <main className="flex-1 p-4 lg:p-6">
+          <HubTabs role={role} badges={{ '/settings/approvals': unreadCount }} />
           {children}
         </main>
       </div>

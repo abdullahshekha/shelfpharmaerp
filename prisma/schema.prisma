@@ -7,10 +7,12 @@ datasource db {
 }
 
 model Area {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  retailers Retailer[]
-  createdAt DateTime   @default(now())
+  id           String     @id @default(cuid())
+  name         String     @unique
+  retailers    Retailer[]
+  deliveryDays Int[] // weekdays 0=Sun..6=Sat on which this area is delivered
+  bookingDays  Json? // [{ day: 0-6, cutoffHour: 0-23 }] — order-booking days with cut-off hour
+  createdAt    DateTime   @default(now())
 }
 
 model Category {
@@ -180,48 +182,50 @@ model Manufacturer {
 }
 
 model Medicine {
-  id                  String                @id @default(cuid())
-  code                String                @unique
-  name                String
-  genericName         String?
-  manufacturerId      String
-  manufacturer        Manufacturer          @relation(fields: [manufacturerId], references: [id])
-  category            String?
-  packSize            String?
-  bonusQty            String?
-  bonusNote           String?
-  salesTaxApplicable  Boolean               @default(false)
-  minStockLevel       Int                   @default(10)
-  isActive            Boolean               @default(true)
-  batches             MedicineBatch[]
-  orderItems          OrderItem[]
-  offerListItems      OfferListItem[]
+  id                     String                  @id @default(cuid())
+  code                   String                  @unique
+  name                   String
+  genericName            String?
+  manufacturerId         String
+  manufacturer           Manufacturer            @relation(fields: [manufacturerId], references: [id])
+  category               String?
+  packSize               String?
+  bonusQty               String?
+  bonusNote              String?
+  salesTaxApplicable     Boolean                 @default(false)
+  minStockLevel          Int                     @default(10)
+  isActive               Boolean                 @default(true)
+  batches                MedicineBatch[]
+  orderItems             OrderItem[]
+  offerListItems         OfferListItem[]
   offerListCustomerItems OfferListCustomerItem[]
-  purchaseItems       PurchaseInvoiceItem[]
-  supplierReturnItems SupplierReturnItem[]
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
+  purchaseItems          PurchaseInvoiceItem[]
+  supplierReturnItems    SupplierReturnItem[]
+  salesReturnItems       SalesReturnItem[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   @@index([name])
   @@index([code])
 }
 
 model MedicineBatch {
-  id              String               @id @default(cuid())
-  medicineId      String
-  medicine        Medicine             @relation(fields: [medicineId], references: [id])
-  batchNumber     String
-  expiryDate      DateTime
-  quantityIn      Int
-  currentQty      Int
-  purchasePrice   Decimal              @db.Decimal(10, 2)
-  tradePrice      Decimal              @db.Decimal(10, 2)
-  mrp             Decimal?             @db.Decimal(10, 2)
-  discountPercent Decimal              @default(0) @db.Decimal(5, 2)  // snapshot of PurchaseInvoiceItem.discountPercent at creation — drives Offer List "Offer %"
-  bonusQuantity   Int                  @default(0)                    // snapshot of PurchaseInvoiceItem.bonusQuantity at creation — drives Offer List "Bonus"
-  returnItems     SupplierReturnItem[]
+  id                   String                @id @default(cuid())
+  medicineId           String
+  medicine             Medicine              @relation(fields: [medicineId], references: [id])
+  batchNumber          String
+  expiryDate           DateTime
+  quantityIn           Int
+  currentQty           Int
+  purchasePrice        Decimal               @db.Decimal(10, 2)
+  tradePrice           Decimal               @db.Decimal(10, 2)
+  mrp                  Decimal?              @db.Decimal(10, 2)
+  discountPercent      Decimal               @default(0) @db.Decimal(5, 2) // snapshot of PurchaseInvoiceItem.discountPercent at creation — drives Offer List "Offer %"
+  bonusQuantity        Int                   @default(0) // snapshot of PurchaseInvoiceItem.bonusQuantity at creation — drives Offer List "Bonus"
+  returnItems          SupplierReturnItem[]
   purchaseInvoiceItems PurchaseInvoiceItem[]
-  createdAt       DateTime             @default(now())
+  createdAt            DateTime              @default(now())
+  salesReturnItems     SalesReturnItem[]
 
   @@index([medicineId])
   @@index([expiryDate])
@@ -251,39 +255,49 @@ model Employee {
 }
 
 model Retailer {
-  id                String          @id @default(cuid())
-  code              String?         @unique
-  name              String
-  ownerName         String?
-  phone             String?
-  whatsappNumber    String?
-  areaId            String?
-  area              Area?           @relation(fields: [areaId], references: [id])
-  address           String?
-  customerType      String? // Medical Stores | Chain Pharmacy | Hospitals | Institutions | Marts | Pharmacy | WholeSalers
-  drugLicenses      DrugLicense[]
-  drapRegistered    Boolean         @default(false)
-  latitude          Decimal?        @db.Decimal(9, 6)
-  longitude         Decimal?        @db.Decimal(9, 6)
-  storePhotoUrl     String?
-  isFiler           Boolean         @default(false)
-  ntnNumber         String?
-  strnStatus        String? // REGISTERED | UNREGISTERED — only meaningful when isFiler
-  strnNumber        String?
-  creditLimit       Decimal         @default(0) @db.Decimal(10, 2)
-  creditDays        Int             @default(0)
-  paymentMode       String          @default("CASH")
-  salesRepId        String?
-  salesRep          Employee?       @relation(fields: [salesRepId], references: [id])
-  isActive          Boolean         @default(true)
-  notes             String?
-  orders            Order[]
-  invoices          Invoice[]
-  payments          Payment[]
-  whatsappOrders    WhatsappOrder[]
-  offerListEntries  OfferListCustomer[]
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  id               String              @id @default(cuid())
+  code             String?             @unique
+  name             String
+  ownerName        String?
+  phone            String?
+  whatsappNumber   String?
+  areaId           String?
+  area             Area?               @relation(fields: [areaId], references: [id])
+  address          String?
+  customerType     String? // Medical Stores | Chain Pharmacy | Hospitals | Institutions | Marts | Pharmacy | WholeSalers
+  drugLicenses     DrugLicense[]
+  drapRegistered   Boolean             @default(false)
+  latitude         Decimal?            @db.Decimal(9, 6)
+  longitude        Decimal?            @db.Decimal(9, 6)
+  storePhotoUrl    String?
+  isFiler          Boolean             @default(false)
+  ntnNumber        String?
+  strnStatus       String? // REGISTERED | UNREGISTERED — only meaningful when isFiler
+  strnNumber       String?
+  creditLimit      Decimal             @default(0) @db.Decimal(10, 2)
+  creditDays       Int                 @default(0)
+  paymentMode      String              @default("CASH")
+  salesRepId       String?
+  salesRep         Employee?           @relation(fields: [salesRepId], references: [id])
+  isActive         Boolean             @default(true)
+  notes            String?
+  orders           Order[]
+  invoices         Invoice[]
+  payments         Payment[]
+  whatsappOrders   WhatsappOrder[]
+  // Customer portal login (set by staff; customers cannot change it). portalPasswordHash is omitted
+  // from all queries by default — see lib/prisma.ts.
+  portalUsername       String?   @unique
+  portalPasswordHash   String?
+  portalEnabled        Boolean   @default(false)
+  portalSessionVersion Int       @default(0)
+  portalFailedAttempts Int       @default(0)
+  portalLockedUntil    DateTime?
+  portalLastLoginAt    DateTime?
+  salesReturns     SalesReturn[]
+  offerListEntries OfferListCustomer[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   @@index([whatsappNumber])
   @@index([name])
@@ -305,26 +319,27 @@ model DrugLicense {
 }
 
 model Order {
-  id              String         @id @default(cuid())
-  orderNumber     String         @unique @default(cuid())
+  id              String           @id @default(cuid())
+  orderNumber     String           @unique @default(cuid())
   retailerId      String
-  retailer        Retailer       @relation(fields: [retailerId], references: [id])
+  retailer        Retailer         @relation(fields: [retailerId], references: [id])
   salesRepId      String?
-  salesRep        Employee?      @relation(fields: [salesRepId], references: [id])
-  orderDate       DateTime       @default(now())
+  salesRep        Employee?        @relation(fields: [salesRepId], references: [id])
+  orderDate       DateTime         @default(now())
   deliveryDate    DateTime?
-  status          String         @default("PENDING")
-  source          String         @default("MANUAL")
+  status          String           @default("PENDING")
+  source          String           @default("MANUAL")
   whatsappOrderId String?
-  whatsappOrder   WhatsappOrder? @relation(fields: [whatsappOrderId], references: [id])
+  whatsappOrder   WhatsappOrder?   @relation(fields: [whatsappOrderId], references: [id])
   items           OrderItem[]
   invoice         Invoice?
   delivery        Delivery?
-  totalAmount     Decimal        @default(0) @db.Decimal(10, 2)
-  discountAmount  Decimal        @default(0) @db.Decimal(10, 2)
+  challan         DeliveryChallan?
+  totalAmount     Decimal          @default(0) @db.Decimal(10, 2)
+  discountAmount  Decimal          @default(0) @db.Decimal(10, 2)
   notes           String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@index([retailerId])
   @@index([status])
@@ -370,7 +385,7 @@ model OfferListItem {
   medicine            Medicine  @relation(fields: [medicineId], references: [id])
   purchasePercent     Decimal   @default(0) @db.Decimal(10, 2) // computed at creation time, frozen after (see refresh route)
   offerPercent        Decimal   @default(0) @db.Decimal(10, 2) // editable — what's actually quoted to the customer
-  specialPrice        Decimal?  @db.Decimal(10, 2)             // Trade Price, set at creation, frozen after
+  specialPrice        Decimal?  @db.Decimal(10, 2) // Trade Price, set at creation, frozen after
   salesTax            Decimal   @default(0) @db.Decimal(10, 2)
   commentType         String    @default("NONE") // NONE | EXPIRY | NET_PRICE | BONUS | EXTRA_PERCENT
   commentNetPrice     Decimal?  @db.Decimal(10, 2)
@@ -491,6 +506,49 @@ model Delivery {
   status        String    @default("SCHEDULED")
   notes         String?
   createdAt     DateTime  @default(now())
+}
+
+// Price-less delivery document, auto-created when an order is CONFIRMED. Items are read through order.items.
+model DeliveryChallan {
+  id            String   @id @default(cuid())
+  challanNumber String   @unique // SP-DC-YYYYMMDD-XXXX
+  orderId       String   @unique
+  order         Order    @relation(fields: [orderId], references: [id])
+  createdAt     DateTime @default(now())
+}
+
+// Customer return — mirrors SupplierReturn but credits the customer. Not tied to a specific invoice.
+// totalAmount is subtracted from the customer's outstanding balance.
+model SalesReturn {
+  id           String            @id @default(cuid())
+  returnNumber String            @unique // SP-SRET-YYYYMMDD-XXXX
+  retailerId   String
+  retailer     Retailer          @relation(fields: [retailerId], references: [id])
+  returnDate   DateTime          @default(now())
+  totalAmount  Decimal           @default(0) @db.Decimal(10, 2)
+  notes        String?
+  items        SalesReturnItem[]
+  createdAt    DateTime          @default(now())
+
+  @@index([retailerId])
+  @@index([returnDate])
+}
+
+model SalesReturnItem {
+  id            String         @id @default(cuid())
+  salesReturnId String
+  salesReturn   SalesReturn    @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  medicineId    String
+  medicine      Medicine       @relation(fields: [medicineId], references: [id])
+  batchId       String? // batch the stock went back onto; null when not restocked
+  batch         MedicineBatch? @relation(fields: [batchId], references: [id])
+  quantity      Int
+  unitPrice     Decimal        @db.Decimal(10, 2) // credit per unit (defaults to batch trade price, editable)
+  lineTotal     Decimal        @db.Decimal(10, 2)
+  restocked     Boolean        @default(true)
+  reason        String?
+
+  @@index([salesReturnId])
 }
 
 model Attendance {

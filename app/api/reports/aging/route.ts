@@ -52,8 +52,14 @@ export async function GET() {
     r.total += balance
   }
 
-  const retailers = Array.from(byRetailer.values())
-    .sort((a, b) => b.total - a.total)
+  // Return credits aren't tied to invoices, so buckets stay gross; per customer we show the credit and a net total.
+  const credits = await prisma.salesReturn.groupBy({ by: ['retailerId'], _sum: { totalAmount: true } })
+  const creditMap = new Map(credits.map(c => [c.retailerId, Number(c._sum.totalAmount ?? 0)]))
 
-  return NextResponse.json({ data: { totals: buckets, retailers } })
+  const retailers = Array.from(byRetailer.values())
+    .map(r => ({ ...r, credit: creditMap.get(r.retailerId) ?? 0, net: r.total - (creditMap.get(r.retailerId) ?? 0) }))
+    .sort((a, b) => b.total - a.total)
+  const totalCredit = retailers.reduce((s, r) => s + r.credit, 0)
+
+  return NextResponse.json({ data: { totals: buckets, retailers, totalCredit } })
 }

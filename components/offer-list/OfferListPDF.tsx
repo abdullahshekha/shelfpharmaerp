@@ -1,13 +1,14 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 
-const COLUMNS = 3
-const ROWS_PER_COLUMN = 70 // tuned for A4 portrait at this font size to keep the list to as few pages as possible
+const COLUMNS = 2
+const ROWS_PER_COLUMN = 62 // tuned for A4 portrait at this font size to keep the list to as few pages as possible
 const ROWS_PER_PAGE = COLUMNS * ROWS_PER_COLUMN
 
+// Ink-saving: no filled backgrounds anywhere, only text and hairline rules.
 const styles = StyleSheet.create({
   page: {
     fontFamily: 'Helvetica',
-    fontSize: 7,
+    fontSize: 7.5,
     paddingTop: 28,
     paddingBottom: 24,
     paddingHorizontal: 24,
@@ -26,26 +27,27 @@ const styles = StyleSheet.create({
   companyMeta: { fontSize: 6.5, color: '#64748b', marginTop: 1 },
   listMeta: { fontSize: 7, color: '#334155', textAlign: 'right' },
   columns: { flexDirection: 'row', flex: 1 },
-  column: { flex: 1, marginRight: 8 },
+  column: { flex: 1, marginHorizontal: 5 },
   mfgRow: {
-    backgroundColor: '#0f172a',
-    color: '#fff',
+    color: '#0f172a',
     fontFamily: 'Helvetica-Bold',
-    fontSize: 6.5,
-    paddingVertical: 2,
+    fontSize: 7.5,
+    paddingTop: 3,
+    paddingBottom: 1,
     paddingHorizontal: 3,
-    marginTop: 2,
+    borderBottomWidth: 0.75,
+    borderBottomColor: '#0f172a',
   },
   itemRow: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#e2e8f0',
+    borderBottomWidth: 0.25,
+    borderBottomColor: '#cbd5e1',
     paddingVertical: 1.5,
     paddingHorizontal: 3,
   },
-  itemName: { flex: 3, fontFamily: 'Helvetica-Bold' },
-  itemOffer: { flex: 1, textAlign: 'right' },
-  itemComments: { flex: 1.4, textAlign: 'right', color: '#475569' },
+  itemName: { flex: 3.2 },
+  itemOffer: { flex: 0.9, textAlign: 'right' },
+  itemComments: { flex: 1.3, textAlign: 'right', color: '#475569' },
   footer: {
     position: 'absolute',
     bottom: 10,

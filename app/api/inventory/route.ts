@@ -15,12 +15,14 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get('category') ?? ''
   const lowStock = searchParams.get('lowStock') === 'true'
   const nearExpiry = searchParams.get('nearExpiry') === 'true'
+  const sort = searchParams.get('sort') ?? '' // tp_asc | tp_desc | stock_asc | stock_desc
 
   const where: Prisma.MedicineWhereInput = {
     isActive: true,
     ...(search && {
       OR: [
         { name: { contains: search, mode: 'insensitive' } },
+        { genericName: { contains: search, mode: 'insensitive' } },
         { code: { contains: search, mode: 'insensitive' } },
         { manufacturer: { name: { contains: search, mode: 'insensitive' } } },
       ],
@@ -29,22 +31,24 @@ export async function GET(req: NextRequest) {
     ...(category && { category }),
   }
 
-  const [medicines, total] = await Promise.all([
-    prisma.medicine.findMany({
-      where,
-      include: {
-        manufacturer: { select: { name: true } },
-        batches: {
-          select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true },
-          orderBy: { expiryDate: 'asc' },
-        },
+  // T.P. and stock are derived from batches, and Low Stock / Near Expiry depend on them too, so
+  // none of these can be applied in the DB query. When any is active, load every match, filter/sort
+  // in memory, then paginate — otherwise they'd only apply within the current page.
+  const inMemory = !!sort || lowStock || nearExpiry
+
+  const medicines = await prisma.medicine.findMany({
+    where,
+    include: {
+      manufacturer: { select: { name: true } },
+      batches: {
+        select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true },
+        orderBy: { expiryDate: 'asc' },
       },
-      orderBy: { name: 'asc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.medicine.count({ where }),
-  ])
+    },
+    orderBy: { name: 'asc' },
+    ...(inMemory ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
+  })
+  const dbTotal = inMemory ? medicines.length : await prisma.medicine.count({ where })
 
   const now = new Date()
   const ninetyDays = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000)
@@ -58,6 +62,22 @@ export async function GET(req: NextRequest) {
 
   if (lowStock) results = results.filter((m) => m.totalStock <= m.minStockLevel)
   if (nearExpiry) results = results.filter((m) => m.hasNearExpiry)
+
+  const dir = sort.endsWith('_desc') ? -1 : 1
+  if (sort.startsWith('stock_')) {
+    results.sort((a, b) => (a.totalStock - b.totalStock) * dir)
+  } else if (sort.startsWith('tp_')) {
+    // Medicines with no priced batch always sink to the bottom, in either direction
+    results.sort((a, b) => {
+      if (a.tradePrice == null && b.tradePrice == null) return 0
+      if (a.tradePrice == null) return 1
+      if (b.tradePrice == null) return -1
+      return (Number(a.tradePrice) - Number(b.tradePrice)) * dir
+    })
+  }
+
+  const total = inMemory ? results.length : dbTotal
+  if (inMemory) results = results.slice((page - 1) * pageSize, page * pageSize)
 
   return NextResponse.json({
     data: results,

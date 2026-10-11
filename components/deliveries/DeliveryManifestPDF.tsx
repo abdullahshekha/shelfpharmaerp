@@ -50,7 +50,7 @@ interface DeliveryItem {
 }
 
 interface AreaGroup {
-  areaName: string
+  groupName: string   // area name (area-wise) or driver name (driver-wise)
   deliveries: DeliveryItem[]
 }
 
@@ -58,13 +58,15 @@ export interface DeliveryManifestPDFProps {
   date: string
   areaGroups: AreaGroup[]
   totalDeliveries: number
+  groupBy?: 'area' | 'driver'
 }
 
 function fmtPKR(v: number) {
   return `Rs. ${Number(v).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-export function DeliveryManifestPDF({ date, areaGroups, totalDeliveries }: DeliveryManifestPDFProps) {
+export function DeliveryManifestPDF({ date, areaGroups, totalDeliveries, groupBy = 'area' }: DeliveryManifestPDFProps) {
+  const byDriver = groupBy === 'driver'
   return (
     <Document title={`Delivery Manifest — ${date}`} author="Shelf Pharma">
       {areaGroups.map((group, gi) => (
@@ -76,7 +78,7 @@ export function DeliveryManifestPDF({ date, areaGroups, totalDeliveries }: Deliv
               <Text style={s.sub}>PECHS Ext. Block 6, Karachi · 0330-7774353</Text>
             </View>
             <View>
-              <Text style={s.manifestTitle}>DELIVERY MANIFEST</Text>
+              <Text style={s.manifestTitle}>{byDriver ? 'DRIVER-WISE MANIFEST' : 'AREA-WISE MANIFEST'}</Text>
               <Text style={s.date}>{date}</Text>
               <Text style={s.date}>Page {gi + 1} of {areaGroups.length}</Text>
             </View>
@@ -84,7 +86,7 @@ export function DeliveryManifestPDF({ date, areaGroups, totalDeliveries }: Deliv
 
           {/* Area header */}
           <View style={s.areaHeader}>
-            <Text style={s.areaName}>{group.areaName}</Text>
+            <Text style={s.areaName}>{group.groupName}</Text>
             <Text style={s.areaCount}>{group.deliveries.length} delivery / deliveries</Text>
           </View>
 
@@ -109,7 +111,7 @@ export function DeliveryManifestPDF({ date, areaGroups, totalDeliveries }: Deliv
                 <Text style={s.cellSub}>{d.status}</Text>
               </View>
               <View style={s.col4}>
-                <Text style={s.cellSub}>{d.order.retailer.address ?? '—'}</Text>
+                <Text style={s.cellSub}>{byDriver && d.order.retailer.area ? `${d.order.retailer.area.name} — ` : ''}{d.order.retailer.address ?? '—'}</Text>
               </View>
               <View style={s.col5}>
                 <Text style={s.cellMain}>{fmtPKR(d.order.totalAmount)}</Text>
@@ -130,7 +132,7 @@ export function DeliveryManifestPDF({ date, areaGroups, totalDeliveries }: Deliv
           {/* Driver signature line */}
           <View style={{ marginTop: 24, borderTopWidth: 1, borderTopColor: '#cbd5e1', paddingTop: 8 }}>
             <Text style={{ fontSize: 8, color: '#64748b' }}>
-              Driver: {group.deliveries[0]?.driver?.name ?? '___________________________'}
+              Driver: {byDriver && group.groupName !== 'Unassigned' ? group.groupName : (group.deliveries[0]?.driver?.name ?? '___________________________')}
               {'          '}
               Signature: ___________________________
               {'          '}

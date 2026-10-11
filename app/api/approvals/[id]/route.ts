@@ -36,6 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const orderId = approval.recordId
           await prisma.$transaction(async (tx) => {
             await tx.delivery.deleteMany({ where: { orderId } })
+            await tx.deliveryChallan.deleteMany({ where: { orderId } })
             const invoice = await tx.invoice.findUnique({ where: { orderId } })
             if (invoice) {
               await tx.payment.deleteMany({ where: { invoiceId: invoice.id } })

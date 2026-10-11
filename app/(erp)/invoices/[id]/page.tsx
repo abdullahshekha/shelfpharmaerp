@@ -35,6 +35,7 @@ interface Invoice {
   status: string
   notes: string | null
   retailer: { name: string; ownerName: string | null; phone: string | null; area: { name: string } | null; address: string | null }
+  orderId: string
   order: { orderNumber: string; items: { id: string; quantity: number; mrp: number | null; unitPrice: number; offerPercent: number; salesTax: number; lineTotal: number; medicine: { name: string; code: string } }[] }
   payments: Payment[]
 }
@@ -115,6 +116,13 @@ export default function InvoiceDetailPage() {
           className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
         >
           <Download size={14} /> Download PDF
+        </a>
+        <a
+          href={`/api/orders/${invoice.orderId}/challan`}
+          download
+          className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
+        >
+          <Download size={14} /> Delivery Challan
         </a>
         {invoice.status !== 'PAID' && (
           <>

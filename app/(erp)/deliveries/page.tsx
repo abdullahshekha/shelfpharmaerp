@@ -45,6 +45,7 @@ export default function DeliveriesPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [drivers, setDrivers]       = useState<Driver[]>([])
   const [loading, setLoading]       = useState(true)
+  const [pdfBusy, setPdfBusy]       = useState<string | null>(null)
   const [updating, setUpdating]     = useState<string | null>(null)
   const [driverMap, setDriverMap]   = useState<Record<string, string>>({})
 
@@ -92,6 +93,30 @@ export default function DeliveriesPage() {
 
   const pdfUrl = `/api/deliveries/print?from=${dateRange.from}&to=${dateRange.to}`
 
+  // Fetch first so an empty range shows a message instead of saving the JSON error body as a file.
+  const downloadPdf = async (url: string, key: string) => {
+    setPdfBusy(key)
+    try {
+      const res = await fetch(url)
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        toast.error(j.error ?? 'Could not generate the PDF')
+        return
+      }
+      const blob = await res.blob()
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'deliveries.pdf'
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = name
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch {
+      toast.error('Could not generate the PDF')
+    } finally {
+      setPdfBusy(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -103,10 +128,18 @@ export default function DeliveriesPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <a href={pdfUrl} download
-            className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent">
+          <Button variant="outline" size="sm" className="gap-2" disabled={!!pdfBusy}
+            onClick={() => downloadPdf(`${pdfUrl}&groupBy=area`, 'area')}>
             <FileDown size={14} /> Area-wise PDF
-          </a>
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2" disabled={!!pdfBusy}
+            onClick={() => downloadPdf(`${pdfUrl}&groupBy=driver`, 'driver')}>
+            <FileDown size={14} /> Driver-wise PDF
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2" disabled={!!pdfBusy}
+            onClick={() => downloadPdf(`/api/deliveries/challans?from=${dateRange.from}&to=${dateRange.to}`, 'challans')}>
+            <FileDown size={14} /> Challans PDF
+          </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             Print Manifest
           </Button>

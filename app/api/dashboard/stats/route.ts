@@ -22,6 +22,7 @@ export async function GET() {
     lowStockMeds,
     nearExpiryBatches,
     outstandingSum,
+    returnCredits,
   ] = await Promise.all([
     prisma.order.findMany({
       where: { orderDate: { gte: startOfDay, lt: tomorrow } },
@@ -44,6 +45,7 @@ export async function GET() {
       where: { status: { in: ['UNPAID', 'PARTIAL', 'OVERDUE'] } },
       _sum: { totalAmount: true },
     }),
+    prisma.salesReturn.aggregate({ _sum: { totalAmount: true } }),
   ])
 
   const todayTotal = todayOrders.reduce((sum, o) => sum + Number(o.totalAmount), 0)
@@ -63,7 +65,7 @@ export async function GET() {
       tomorrowDeliveries,
       lowStock,
       nearExpiryBatches,
-      outstandingReceivables: Number(outstandingSum._sum.totalAmount ?? 0),
+      outstandingReceivables: Number(outstandingSum._sum.totalAmount ?? 0) - Number(returnCredits._sum.totalAmount ?? 0),
     },
   })
 }

@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   const { username, password } = await req.json()
-  const secret = process.env.AUTH_SECRET ?? 'shelfpharma-erp-secret'
+  const secret = process.env.AUTH_SECRET ?? 'shelfpharma-erp-secret-2026'
 
   // Env-based admin fallback (always works)
   const envUser = process.env.AUTH_USERNAME ?? 'admin'

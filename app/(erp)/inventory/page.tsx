@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR } from '@/lib/utils/format'
-import { Search, Plus, AlertTriangle, Clock } from 'lucide-react'
+import { Search, Plus, AlertTriangle, Clock, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react'
 import Link from 'next/link'
 
 interface Medicine {
@@ -37,7 +37,25 @@ export default function InventoryPage() {
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const [lowStock, setLowStock] = useState(false)
   const [nearExpiry, setNearExpiry] = useState(false)
+  const [sort, setSort] = useState<{ key: 'tp' | 'stock'; dir: 'asc' | 'desc' } | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const hasFilters = !!(search || category || lowStock || nearExpiry || sort)
+
+  const clearFilters = () => {
+    setSearch(''); setCategory(''); setLowStock(false); setNearExpiry(false); setSort(null); setPage(1)
+  }
+
+  // Click cycles: ascending -> descending -> off
+  const toggleSort = (key: 'tp' | 'stock') => {
+    setSort((s) => (s?.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null))
+    setPage(1)
+  }
+
+  const SortIcon = ({ k }: { k: 'tp' | 'stock' }) =>
+    sort?.key !== k ? <ArrowUpDown size={12} className="text-slate-400" />
+      : sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+
 
   useEffect(() => {
     fetch('/api/categories').then(r => r.json()).then(j => setCategories(j.data ?? []))
@@ -53,12 +71,13 @@ export default function InventoryPage() {
       lowStock: String(lowStock),
       nearExpiry: String(nearExpiry),
     })
+    if (sort) params.set('sort', `${sort.key}_${sort.dir}`)
     const res = await fetch(`/api/inventory?${params}`)
     const json = await res.json()
     setMedicines(json.data ?? [])
     setTotal(json.meta?.total ?? 0)
     setLoading(false)
-  }, [page, search, category, lowStock, nearExpiry])
+  }, [page, search, category, lowStock, nearExpiry, sort])
 
   useEffect(() => { fetchMedicines() }, [fetchMedicines])
 
@@ -83,7 +102,7 @@ export default function InventoryPage() {
         <div className="relative flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <Input
-            placeholder="Search by name, code, manufacturer..."
+            placeholder="Search by name, generic name, code, manufacturer..."
             className="pl-9"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1) }}
@@ -121,6 +140,12 @@ export default function InventoryPage() {
         >
           <Clock size={14} /> Near Expiry
         </Button>
+
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="gap-1 text-slate-500" onClick={clearFilters}>
+            <X size={14} /> Clear all filters
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -134,8 +159,16 @@ export default function InventoryPage() {
                   <th className="text-left px-4 py-3 font-medium">Medicine</th>
                   <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Manufacturer</th>
                   <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Category</th>
-                  <th className="text-right px-4 py-3 font-medium">T.P.</th>
-                  <th className="text-center px-4 py-3 font-medium">Stock</th>
+                  <th className="text-right px-4 py-3 font-medium">
+                    <button className="inline-flex items-center gap-1 hover:text-slate-900" onClick={() => toggleSort('tp')}>
+                      T.P. <SortIcon k="tp" />
+                    </button>
+                  </th>
+                  <th className="text-center px-4 py-3 font-medium">
+                    <button className="inline-flex items-center gap-1 hover:text-slate-900" onClick={() => toggleSort('stock')}>
+                      Stock <SortIcon k="stock" />
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
