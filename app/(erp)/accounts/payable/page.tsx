@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/shared/ComingSoon'
+import { PartyBalances } from '@/components/accounts/PartyBalances'
 
 export default function Page() {
-  return <ComingSoon title="Accounts Payable" />
+  return <PartyBalances mode="payable" />
 }
