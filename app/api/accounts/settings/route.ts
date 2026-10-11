@@ -50,5 +50,9 @@ export async function PUT(req: NextRequest) {
 
   const current = await getSettings(prisma)
   const updated = await prisma.accountingSettings.update({ where: { id: current.id }, data })
-  return NextResponse.json({ data: updated })
+  const goLiveChanged = 'goLiveDate' in data && (data.goLiveDate?.getTime() ?? null) !== (current.goLiveDate?.getTime() ?? null)
+  return NextResponse.json({
+    data: updated,
+    ...(goLiveChanged ? { warning: 'The go-live date changed. Run "Rebuild ledger" so existing records are posted or cleared accordingly.' } : {}),
+  })
 }

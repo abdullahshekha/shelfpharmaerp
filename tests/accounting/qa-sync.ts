@@ -78,7 +78,7 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
   check('cleanup: no QA residue', left === 0)
   {
     const s = await prisma.accountingSettings.findFirst()
-    check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null))
+    check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null) && (s?.defaultBankAccountId ?? null) === (orig?.defaultBankAccountId ?? null))
   }
 }
 
@@ -134,11 +134,13 @@ async function main() {
       (await prisma.purchaseInvoice.count({ where: { invoiceDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
       (await prisma.supplierPayment.count({ where: { paymentDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
       (await prisma.supplierReturn.count({ where: { returnDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
-      (await prisma.order.count({ where: { status: 'DELIVERED', retailerId: { not: retailer.id } } }))
+      (await prisma.order.count({ where: { status: 'DELIVERED', retailerId: { not: retailer.id }, OR: [{ delivery: { is: { deliveredAt: { gte: goLive } } } }, { updatedAt: { gte: goLive } }] } }))
 
     // ---- settings API ----
     let r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ goLiveDate: 'garbage' }) })
     check('settings: invalid date -> 400', r.status === 400)
+    r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ goLiveDate: '2026-02-31' }) })
+    check('settings: impossible calendar date -> 400', r.status === 400)
     r = await api('/api/accounts/accounts?balances=1', ADMIN)
     const accList = (await json(r)).data as any[]
     check('accounts: list with balances', r.status === 200 && accList.length >= 19 && accList.every((a) => typeof a.balance === 'number'))
@@ -164,6 +166,23 @@ async function main() {
     r = await api('/api/accounts/accounts/' + qaAcc.id, ACCT, { method: 'PUT', body: JSON.stringify({ name: 'QA Renamed', isActive: false }) })
     check('accounts: rename + deactivate non-system', r.status === 200)
     await prisma.account.delete({ where: { id: qaAcc.id } })
+    // default bank account cannot be deactivated while selected
+    r = await api('/api/accounts/accounts', ACCT, { method: 'POST', body: JSON.stringify({ code: `QB${Date.now() % 100000}`, name: 'QA Temp Bank', type: 'ASSET', subType: 'BANK' }) })
+    const qaBank = (await json(r))?.data
+    r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ defaultBankAccountId: qaBank.id }) })
+    check('settings: default bank accepts an active bank account', r.status === 200)
+    r = await api('/api/accounts/accounts/' + qaBank.id, ACCT, { method: 'PUT', body: JSON.stringify({ isActive: false }) })
+    check('accounts: cannot deactivate the default bank account', r.status === 400 && /default bank/i.test((await json(r))?.error ?? ''))
+    await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ defaultBankAccountId: null }) })
+    await prisma.account.delete({ where: { id: qaBank.id } })
+
+    // manual journals are blocked until go-live is set
+    r = await api('/api/accounts/journals', ACCT, { method: 'POST', body: JSON.stringify({ memo: 'QA nogolive', lines: [{ accountId: cashAcc.id, debit: 5 }, { accountId: salesAcc.id, credit: 5 }] }) })
+    check('manual journal without go-live -> 409', r.status === 409)
+    r = await api('/api/accounts/ledger/' + cashAcc.id + '?from=2026-02-31', ACCT)
+    check('ledger: invalid from -> 400', r.status === 400)
+    r = await api('/api/accounts/journals?to=2026-02-31', ACCT)
+    check('journals: invalid to -> 400', r.status === 400)
 
     // ---- before go-live: nothing posts ----
     const mkOrder = async (qty: number) => {
@@ -181,7 +200,9 @@ async function main() {
 
     // ---- enable go-live (today, Karachi) ----
     r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ goLiveDate: goLive.toISOString() }) })
-    check('settings: set go-live', r.status === 200)
+    check('settings: set go-live (returns rebuild warning)', r.status === 200 && /Rebuild/.test((await json(r))?.warning ?? ''))
+    r = await api('/api/accounts/journals', ACCT, { method: 'POST', body: JSON.stringify({ memo: 'QA early', date: '2020-01-01', lines: [{ accountId: cashAcc.id, debit: 5 }, { accountId: salesAcc.id, credit: 5 }] }) })
+    check('manual journal before go-live date -> 400', r.status === 400)
 
     // ---- invoice via rebuild-less sync + AR matches source ----
     const s1 = await syncSource('INVOICE', inv0!.id)
@@ -189,8 +210,11 @@ async function main() {
     const invTotal = Number(inv0!.totalAmount)
     check('invoice: AR[party] == invoice total', (await partyBalance('AR', { retailerId: retailer.id })) === invTotal, String(invTotal))
     const sig1 = await signature('INVOICE', inv0!.id)
+    const numsBefore = (await prisma.journalEntry.findMany({ where: { sourceId: inv0!.id }, select: { entryNumber: true } })).map((e) => e.entryNumber).join()
+    const again = await syncSource('INVOICE', inv0!.id)
     await syncSource('INVOICE', inv0!.id)
-    await syncSource('INVOICE', inv0!.id)
+    const numsAfter = (await prisma.journalEntry.findMany({ where: { sourceId: inv0!.id }, select: { entryNumber: true } })).map((e) => e.entryNumber).join()
+    check('invoice: resync is unchanged and keeps SP-JV numbers', again.status === 'unchanged' && numsBefore === numsAfter, JSON.stringify(again))
     check('invoice: sync x3 identical', (await signature('INVOICE', inv0!.id)) === sig1 && (await entryCount('INVOICE', inv0!.id)) === 1)
     const sales = await acctSum('SALES', [inv0!.id])
     check('invoice: Sales credit == subtotal - discount', sales.credit === Number(inv0!.subtotal) - Number(inv0!.discountAmount))
@@ -225,6 +249,20 @@ async function main() {
     st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
     check('double DELIVERED: still one COGS entry, amount unchanged', (await entryCount('DELIVERY_COGS', order.id)) === 1 && (await acctSum('COGS', [order.id])).debit === 600)
     check('invoice entry untouched by status changes', (await entryCount('INVOICE', inv0!.id)) === 1)
+    // DRAFT invoice is void: entries removed; back to UNPAID reposts
+    await prisma.invoice.update({ where: { id: inv0!.id }, data: { status: 'DRAFT' } })
+    const dr = await syncSource('INVOICE', inv0!.id)
+    check('DRAFT invoice: entries removed', dr.status === 'removed' && (await entryCount('INVOICE', inv0!.id)) === 0 && (await partyBalance('AR', { retailerId: retailer.id })) === 0, JSON.stringify(dr))
+    await prisma.invoice.update({ where: { id: inv0!.id }, data: { status: 'UNPAID' } })
+    const ur = await syncSource('INVOICE', inv0!.id)
+    check('UNPAID again: entries reposted', ur.status === 'posted' && (await partyBalance('AR', { retailerId: retailer.id })) === invTotal)
+    // source dated before go-live is skipped
+    const oldPay = await api(`/api/invoices/${inv0!.id}/payments`, ADMIN, { method: 'POST', body: JSON.stringify({ amount: 1, method: 'CASH', paymentDate: '2020-01-01' }) })
+    const op = (await json(oldPay)).data.payment
+    ids.payments.push(op.id)
+    check('pre-go-live payment: business ok, no ledger entry', oldPay.status === 201 && (await entryCount('PAYMENT', op.id)) === 0 && (await syncSource('PAYMENT', op.id)).reason === 'dated before go-live')
+    await prisma.payment.delete({ where: { id: op.id } })
+    ids.payments.pop()
 
     // ---- payments ----
     r = await api(`/api/invoices/${inv0!.id}/payments`, ADMIN, { method: 'POST', body: JSON.stringify({ amount: 300, method: 'CASH' }) })
@@ -286,10 +324,18 @@ async function main() {
     const posts = await Promise.all(Array.from({ length: 6 }, (_, i) => api('/api/accounts/journals', ACCT, { method: 'POST', body: JSON.stringify(lineBody(10 + i)) })))
     const posted = await Promise.all(posts.map(json))
     check('manual journals: 6 concurrent posts all 201 with distinct numbers', posts.every((x) => x.status === 201) && new Set(posted.map((x) => x.data.entryNumber)).size === 6)
+    const bad = async (lines: any[]) => (await api('/api/accounts/journals', ACCT, { method: 'POST', body: JSON.stringify({ memo: 'QA badline', date: today, lines }) })).status
+    check('journal: AR line without customer -> 400', (await bad([{ accountId: arAcc.id, debit: 5 }, { accountId: cashAcc.id, credit: 5 }])) === 400)
+    check('journal: customer on non-AR line -> 400', (await bad([{ accountId: cashAcc.id, debit: 5, retailerId: retailer.id }, { accountId: salesAcc.id, credit: 5 }])) === 400)
+    check('journal: supplier on non-AP line -> 400', (await bad([{ accountId: cashAcc.id, debit: 5, supplierId: supplier.id }, { accountId: salesAcc.id, credit: 5 }])) === 400)
+    check('journal: non-string party id -> 400', (await bad([{ accountId: arAcc.id, debit: 5, retailerId: 123 }, { accountId: cashAcc.id, credit: 5 }])) === 400)
+    check('journal: unknown customer / employee -> 400', (await bad([{ accountId: arAcc.id, debit: 5, retailerId: 'nope' }, { accountId: cashAcc.id, credit: 5 }])) === 400 && (await bad([{ accountId: cashAcc.id, debit: 5, employeeId: 'nope' }, { accountId: salesAcc.id, credit: 5 }])) === 400)
     r = await api('/api/accounts/journals', ACCT, { method: 'POST', body: JSON.stringify({ memo: 'QA bad', lines: [{ accountId: cashAcc.id, debit: 5 }, { accountId: arAcc.id, credit: 4 }] }) })
     check('manual journal: unbalanced -> 400', r.status === 400)
     const m0 = posted[0].data
     check('manual journal: isManual + createdById', m0.isManual === true && m0.createdById === 'qa')
+    r = await api(`/api/accounts/journals/${m0.id}/reverse`, ACCT, { method: 'POST', body: JSON.stringify({ date: '2020-01-01' }) })
+    check('reverse: date before go-live -> 400', r.status === 400)
     r = await api(`/api/accounts/journals/${m0.id}/reverse`, ACCT, { method: 'POST', body: JSON.stringify({}) })
     const rev = (await json(r)).data
     check('reverse: mirrored entry with reversesId', r.status === 201 && rev.reversesId === m0.id && rev.lines.length === 2)
@@ -312,7 +358,7 @@ async function main() {
     r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: today }) })
     check('settings: set lockedThrough', r.status === 200)
     const sigLocked = await signature('INVOICE', inv0!.id)
-    await prisma.invoice.update({ where: { id: inv0!.id }, data: { notes: 'QA lock edit' } })
+    await prisma.invoice.update({ where: { id: inv0!.id }, data: { subtotal: Number(inv0!.subtotal) + 10, totalAmount: invTotal + 10 } })
     const lk = await syncSource('INVOICE', inv0!.id)
     check('locked period: sync skipped, entries untouched', lk.status === 'skipped' && (await signature('INVOICE', inv0!.id)) === sigLocked, JSON.stringify(lk))
     r = await api('/api/accounts/journals', ACCT, { method: 'POST', body: JSON.stringify(lineBody(5)) })
@@ -324,6 +370,8 @@ async function main() {
     await prisma.payment.delete({ where: { id: lp.id } })
     ids.payments.pop()
     await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: null }) })
+    await prisma.invoice.update({ where: { id: inv0!.id }, data: { subtotal: Number(inv0!.subtotal), totalAmount: invTotal } })
+    check('after unlock + revert: nothing to change (unchanged), AR intact', (await syncSource('INVOICE', inv0!.id)).status === 'unchanged' && (await partyBalance('AR', { retailerId: retailer.id })) === invTotal - 500 - 180 + (await prisma.journalLine.aggregate({ where: { entry: { isManual: true, createdById: 'qa' }, accountId: arAcc.id }, _sum: { debit: true, credit: true } }).then((x) => Number(x._sum.debit ?? 0) - Number(x._sum.credit ?? 0))))
 
     // ---- builder error -> skipped, never throws ----
     const badOrder = await mkOrder(1)
@@ -333,20 +381,39 @@ async function main() {
     check('bad data: sync returns skipped with reason, no entries', be.status === 'skipped' && /error/.test(be.reason ?? '') && (await entryCount('INVOICE', badInv.id)) === 0, JSON.stringify(be))
     await prisma.invoice.delete({ where: { id: badInv.id } })
 
-    // ---- rebuild ----
+    // ---- rebuild (chunked) ----
+    const rebuildLoop = async (limit: number) => {
+      let next: any = {}
+      let chunks = 0
+      const tot = { total: 0, errors: 0, posted: 0, unchanged: 0, removed: 0 }
+      for (;;) {
+        const res = await api('/api/accounts/rebuild', ACCT, { method: 'POST', body: JSON.stringify({ ...next, limit }) })
+        const rb = (await json(res)).data
+        if (res.status !== 200) throw new Error('rebuild failed ' + res.status)
+        chunks++
+        tot.total += rb.total; tot.errors += rb.errors.length; tot.posted += rb.posted; tot.unchanged += rb.unchanged; tot.removed += rb.removed
+        if (rb.done || !rb.next) break
+        next = rb.next
+        if (chunks > 200) throw new Error('rebuild did not finish')
+      }
+      return { ...tot, chunks }
+    }
+    r = await api('/api/accounts/rebuild', ACCT, { method: 'POST', body: JSON.stringify({ type: 'NOPE' }) })
+    check('rebuild: unknown type -> 400', r.status === 400)
     if (realToday === 0) {
       const before = await signature('INVOICE', inv0!.id)
-      r = await api('/api/accounts/rebuild', ACCT, { method: 'POST' })
-      const rb = (await json(r)).data
-      check('rebuild: runs, no errors, QA ledger identical', r.status === 200 && rb.errors.length === 0 && (await signature('INVOICE', inv0!.id)) === before, JSON.stringify({ t: rb?.total, e: rb?.errors }))
+      const nums = (await prisma.journalEntry.findMany({ select: { entryNumber: true } })).map((e) => e.entryNumber).sort().join()
+      const rb = await rebuildLoop(2)
+      check('rebuild: chunked (limit 2) finishes, several chunks, no errors', rb.chunks > 2 && rb.errors === 0, JSON.stringify(rb))
+      check('rebuild: nothing changed, SP-JV numbers stable', rb.posted === 0 && rb.removed === 0 && rb.unchanged >= 6 && (await signature('INVOICE', inv0!.id)) === before && (await prisma.journalEntry.findMany({ select: { entryNumber: true } })).map((e) => e.entryNumber).sort().join() === nums, JSON.stringify(rb))
       // orphan removal: delete a payment row behind the engine's back, rebuild removes its entries
       const orphanPay = ids.payments[1]
       await prisma.payment.delete({ where: { id: orphanPay } })
-      r = await api('/api/accounts/rebuild', ACCT, { method: 'POST' })
-      check('rebuild: orphaned entries removed', (await entryCount('PAYMENT', orphanPay)) === 0)
+      const rb2 = await rebuildLoop(3)
+      check('rebuild: orphaned entries removed', (await entryCount('PAYMENT', orphanPay)) === 0 && rb2.errors === 0)
       ids.payments.pop()
     } else {
-      console.log(`SKIP rebuild: ${realToday} real records dated today would be posted`)
+      console.log(`SKIP rebuild: ${realToday} real records on/after go-live would be posted`)
     }
 
     // ---- deletion follows ----
@@ -361,6 +428,24 @@ async function main() {
     // trial balance
     const tb = await prisma.journalLine.aggregate({ _sum: { debit: true, credit: true } })
     check('trial balance: total debits == total credits', Math.round(Number(tb._sum.debit) * 100) === Math.round(Number(tb._sum.credit) * 100))
+
+    // ---- delivered order: deliveries PUT hook, soft cancel removes COGS ----
+    const o3 = await mkOrder(1)
+    await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) })
+    await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
+    const inv3 = await prisma.invoice.findUnique({ where: { orderId: o3.id } })
+    ids.invoices.push(inv3!.id)
+    check('order 3 delivered: COGS 60 posted', (await acctSum('COGS', [o3.id])).debit === 60)
+    const del3 = await prisma.delivery.findUnique({ where: { orderId: o3.id } })
+    await prisma.delivery.update({ where: { id: del3!.id }, data: { deliveredAt: new Date(Date.now() - 60000) } })
+    await api(`/api/deliveries/${del3!.id}`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
+    const afterPut = await prisma.delivery.findUnique({ where: { id: del3!.id } })
+    const cogsEntry = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: o3.id } })
+    check('deliveries PUT hook: COGS entry follows deliveredAt', !!cogsEntry && cogsEntry.date.getTime() === afterPut!.deliveredAt!.getTime())
+    r = await api(`/api/orders/${o3.id}`, ADMIN, { method: 'DELETE' })
+    check('soft cancel delivered order: COGS entry removed, invoice entry kept', r.status === 200 && (await entryCount('DELIVERY_COGS', o3.id)) === 0 && (await entryCount('INVOICE', inv3!.id)) === 1)
+    r = await api(`/api/orders/${o3.id}?hard=true`, ADMIN, { method: 'DELETE' })
+    check('hard delete after soft cancel: invoice entry removed', r.status === 200 && (await entryCount('INVOICE', inv3!.id)) === 0)
   } finally {
     await cleanup(origForCleanup, n0)
   }

@@ -146,3 +146,21 @@ export async function postEntry(tx: PostEntryDb, input: PostEntryInput) {
     include: { lines: true },
   })
 }
+
+/** A domain error the API layer may safely turn into a 4xx. Anything else is a 500. */
+export class AccountingError extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+  }
+}
+
+/** Manual postings (and reversals) need a go-live date, must be on/after it, and must not be in a locked period. */
+export function assertManualPostable(settings: { goLiveDate: Date | null; lockedThrough: Date | null }, date: Date): void {
+  if (!settings.goLiveDate) throw new AccountingError(409, 'Set a go-live date in Accounts Settings before posting journal entries')
+  if (date.getTime() < settings.goLiveDate.getTime()) throw new AccountingError(400, 'Entry date is before the go-live date')
+  try {
+    assertNotLocked(settings, date)
+  } catch (e) {
+    throw new AccountingError(409, (e as Error).message)
+  }
+}

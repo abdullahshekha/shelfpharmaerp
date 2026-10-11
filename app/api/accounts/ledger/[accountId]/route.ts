@@ -20,6 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ acco
   const sp = new URL(req.url).searchParams
   const from = parseDateInput(sp.get('from'))
   const to = endExclusive(sp.get('to'))
+  if ((sp.get('from') && !from) || (sp.get('to') && !to)) return NextResponse.json({ error: 'Invalid from/to date' }, { status: 400 })
   const retailerId = sp.get('retailerId')
   const supplierId = sp.get('supplierId')
   const sign = account.type === 'ASSET' || account.type === 'EXPENSE' ? 1 : -1

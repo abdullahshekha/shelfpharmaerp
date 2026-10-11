@@ -33,6 +33,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (account.isSystem && body.isActive === false) {
       return NextResponse.json({ error: 'System accounts cannot be deactivated' }, { status: 400 })
     }
+    if (body.isActive === false) {
+      const st = await prisma.accountingSettings.findFirst({ where: { defaultBankAccountId: id }, select: { id: true } })
+      if (st) return NextResponse.json({ error: 'This account is the default bank account in Accounts Settings. Choose another default bank first.' }, { status: 400 })
+    }
     data.isActive = body.isActive
   }
   if (body.code !== undefined && body.code !== account.code) {

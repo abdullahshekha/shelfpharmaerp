@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAccountsUser } from '@/lib/accounting/guard'
-import { assertNotLocked, getSettings, postEntry } from '@/lib/accounting/core'
+import { AccountingError, assertManualPostable, getSettings, postEntry } from '@/lib/accounting/core'
 import { parseDateInput } from '@/lib/accounting/dates'
 
 export const dynamic = 'force-dynamic'
 
-class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message)
-  }
-}
+const HttpError = AccountingError
 
 // Reverses a MANUAL entry with a mirrored entry. Auto entries follow their source and cannot be reversed.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (orig.reversesId) throw new HttpError(400, 'A reversal entry cannot itself be reversed')
         const already = await tx.journalEntry.findFirst({ where: { reversesId: id }, select: { entryNumber: true } })
         if (already) throw new HttpError(409, `Entry was already reversed by ${already.entryNumber}`)
-        assertNotLocked(await getSettings(tx), date)
+        assertManualPostable(await getSettings(tx), date)
         return postEntry(tx, {
           date,
           memo: `Reversal of ${orig.entryNumber}${orig.memo ? ` — ${orig.memo}` : ''}`,
@@ -60,8 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     )
     return NextResponse.json({ data: entry }, { status: 201 })
   } catch (err) {
-    if (err instanceof HttpError) return NextResponse.json({ error: err.message }, { status: err.status })
-    const msg = err instanceof Error ? err.message : 'Failed to reverse entry'
-    return NextResponse.json({ error: msg }, { status: msg.includes('locked') ? 409 : 400 })
+    if (err instanceof AccountingError) return NextResponse.json({ error: err.message }, { status: err.status })
+    throw err
   }
 }
