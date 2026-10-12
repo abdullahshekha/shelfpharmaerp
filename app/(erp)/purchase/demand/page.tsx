@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatPKR } from '@/lib/utils/format'
+import { csvCell } from '@/lib/utils/csv'
 import { Download, RefreshCw } from 'lucide-react'
 
 interface DemandRow {
@@ -21,8 +22,6 @@ interface DemandRow {
   lastSupplierName: string | null
   lastPurchasePrice: number | null
 }
-
-const csvCell = (v: string | number | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
 
 export default function PurchaseDemandPage() {
   const [rows, setRows] = useState<DemandRow[]>([])

@@ -61,6 +61,14 @@ export function OutOfBalance({ difference }: { difference: number }) {
   )
 }
 
+export function ReportError({ message }: { message: string }) {
+  return (
+    <p role="alert" className="text-sm font-medium text-red-700 bg-red-50 border border-red-300 rounded-md px-3 py-2">
+      Could not load this report: {message}
+    </p>
+  )
+}
+
 export function NoGoLiveBanner() {
   return (
     <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
@@ -74,28 +82,30 @@ export function useReport<T, M = { goLiveDate: string | null }>(url: string | nu
   const [data, setData] = useState<T | null>(null)
   const [meta, setMeta] = useState<M | null>(null)
   const [loading, setLoading] = useState(!!url)
+  const [error, setError] = useState<string | null>(null)
   const reqId = useRef(0)
   const load = useCallback(async () => {
-    if (!url) return
     const id = ++reqId.current
+    // Always drop the previous result first so a new URL (or an idle/null one) never shows stale figures.
+    setData(null); setMeta(null); setError(null)
+    if (!url) { setLoading(false); return }
     setLoading(true)
     try {
       const res = await fetch(url)
       const j = await res.json().catch(() => ({}))
       if (id !== reqId.current) return
-      if (!res.ok) { toast.error(j.error ?? 'Could not load report'); setData(null); setMeta(null); return }
+      if (!res.ok) { const m = j.error ?? `HTTP ${res.status}`; setError(m); toast.error(m); return }
       setData(j.data ?? null)
       setMeta(j.meta ?? null)
     } catch {
       if (id !== reqId.current) return
-      toast.error('Network error loading report')
-      setData(null); setMeta(null)
+      setError('Network error'); toast.error('Network error loading report')
     } finally {
       if (id === reqId.current) setLoading(false)
     }
   }, [url])
   useEffect(() => { load() }, [load])
-  return { data, meta, loading, reload: load }
+  return { data, meta, loading, error, reload: load }
 }
 
 /** "This Month" range in Karachi time, matching the DateRangePicker preset label. */

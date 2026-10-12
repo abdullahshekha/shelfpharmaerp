@@ -6,7 +6,7 @@ import { DateRangePicker, type DateRange } from '@/components/shared/DateRangePi
 import { formatPKR } from '@/lib/utils/format'
 import { downloadCsv } from '@/lib/utils/csv'
 import { todayKarachi } from './types'
-import { ExportButton, useReport, thisMonthRange, NoGoLiveBanner } from './ReportTable'
+import { ExportButton, useReport, ReportError, thisMonthRange, NoGoLiveBanner } from './ReportTable'
 
 interface TaxRow {
   salesTaxCollected: number; salesTaxInput: number; netSalesTax: number
@@ -15,8 +15,8 @@ interface TaxRow {
 interface Tax { months: (TaxRow & { month: string })[]; totals: TaxRow }
 
 const COLS: [keyof TaxRow, string][] = [
-  ['salesTaxCollected', 'Sales tax collected'], ['salesTaxInput', 'Sales tax input'], ['netSalesTax', 'Net sales tax payable'],
-  ['advTaxCollected', 'Adv. tax collected'], ['advTaxRecoverable', 'Adv. tax recoverable'], ['netAdvTax', 'Net adv. tax'],
+  ['salesTaxCollected', 'Sales tax collected'], ['salesTaxInput', 'Sales tax input'], ['netSalesTax', 'Sales tax: collected less input'],
+  ['advTaxCollected', 'Adv. tax collected'], ['advTaxRecoverable', 'Adv. tax recoverable'], ['netAdvTax', 'Adv. tax: collected less recoverable'],
 ]
 
 export function TaxManagement() {
@@ -25,7 +25,7 @@ export function TaxManagement() {
     return { from: `${t.to.slice(0, 4)}-01-01`, to: t.to, label: 'Custom' }
   })
   const url = range ? `/api/accounts/tax?from=${range.from}&to=${range.to}` : null
-  const { data, meta, loading } = useReport<Tax, { goLiveDate: string | null }>(url)
+  const { data, meta, loading, error } = useReport<Tax, { goLiveDate: string | null }>(url)
 
   return (
     <div className="space-y-4">
@@ -39,6 +39,7 @@ export function TaxManagement() {
       </div>
       <DateRangePicker value={range} onChange={setRange} />
       {meta && !meta.goLiveDate && <NoGoLiveBanner />}
+      {error && <ReportError message={error} />}
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -67,7 +68,7 @@ export function TaxManagement() {
           </div>
         </CardContent>
       </Card>
-      <p className="text-xs text-slate-500">Collected = credits to the tax payable accounts; input/recoverable = debits to the tax asset accounts. Net payable is collected minus input.</p>
+      <p className="text-xs text-slate-500">Collected = credits to the tax payable accounts; input/recoverable = debits to the tax asset accounts. The &ldquo;collected less ...&rdquo; columns are simply collected minus input/recoverable for the period. They are NOT a payable balance: remittances to FBR, reversals and manual debits to the tax accounts are not netted here. Use the General Ledger for the true account balances.</p>
     </div>
   )
 }

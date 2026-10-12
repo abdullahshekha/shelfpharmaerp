@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { DateRangePicker, type DateRange } from '@/components/shared/DateRangePicker'
 import { todayKarachi } from './types'
-import { ReportTable, ExportButton, linesToCsv, useReport, thisMonthRange, NoGoLiveBanner, type ReportLine } from './ReportTable'
+import { ReportTable, ExportButton, linesToCsv, useReport, ReportError, thisMonthRange, NoGoLiveBanner, type ReportLine } from './ReportTable'
 
 interface Row { accountId: string; code: string; name: string; amount: number }
 export interface PL {
@@ -30,7 +30,7 @@ export function ProfitLossView({ endpoint, title }: { endpoint: string; title?: 
   const p = new URLSearchParams()
   if (range) { p.set('from', range.from); p.set('to', range.to) }
   if (includeZero) p.set('includeZero', '1')
-  const { data, meta, loading } = useReport<PL, { goLiveDate: string | null; from: string; to: string }>(range ? `${endpoint}?${p}` : null)
+  const { data, meta, loading, error } = useReport<PL, { goLiveDate: string | null; from: string; to: string }>(range ? `${endpoint}?${p}` : null)
   const lines = data ? plLines(data) : []
 
   return (
@@ -42,6 +42,7 @@ export function ProfitLossView({ endpoint, title }: { endpoint: string; title?: 
         <ExportButton disabled={!data} onClick={() => linesToCsv(`profit-loss-${range?.from}-${range?.to}-${todayKarachi()}.csv`, lines)} />
       </div>
       {meta && !meta.goLiveDate && <NoGoLiveBanner />}
+      {error && <ReportError message={error} />}
       <ReportTable lines={lines} loading={loading || !range} />
     </div>
   )

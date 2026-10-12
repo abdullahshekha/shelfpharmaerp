@@ -140,11 +140,11 @@ export function AccountingSettingsCard({ accounts }: { accounts: Account[] }) {
         <div className="flex flex-wrap gap-4 items-end">
           <div>
             <p className="text-xs text-slate-500 mb-1">Go-live date</p>
-            <Input type="date" className="h-8 w-40 text-sm" value={goLive} onChange={e => setGoLive(e.target.value)} />
+            <Input type="date" aria-label="Go-live date" className="h-8 w-40 text-sm" value={goLive} onChange={e => setGoLive(e.target.value)} />
           </div>
           <div>
             <p className="text-xs text-slate-500 mb-1">Locked through</p>
-            <Input type="date" className="h-8 w-40 text-sm" value={locked} onChange={e => setLocked(e.target.value)} />
+            <Input type="date" aria-label="Locked through date" className="h-8 w-40 text-sm" value={locked} onChange={e => setLocked(e.target.value)} />
           </div>
           <div>
             <p className="text-xs text-slate-500 mb-1">Default bank / cash account</p>

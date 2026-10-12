@@ -7,7 +7,7 @@ import { formatPKR } from '@/lib/utils/format'
 import { downloadCsv } from '@/lib/utils/csv'
 import { todayKarachi } from './types'
 import { ProfitLossView } from './ProfitLossView'
-import { ReportTable, ExportButton, linesToCsv, useReport, NoGoLiveBanner, OutOfBalance, type ReportLine } from './ReportTable'
+import { ReportTable, ExportButton, linesToCsv, useReport, ReportError, NoGoLiveBanner, OutOfBalance, type ReportLine } from './ReportTable'
 
 type Tab = 'tb' | 'pl' | 'bs'
 type Row = { accountId: string; code: string; name: string; amount: number }
@@ -28,7 +28,7 @@ function AsOfBar({ asOf, setAsOf, includeZero, setIncludeZero, children }: {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <label className="flex items-center gap-2 text-sm text-slate-600">As of
-        <Input type="date" className="h-8 w-40 text-sm" value={asOf} onChange={e => e.target.value && setAsOf(e.target.value)} />
+        <Input type="date" aria-label="As of date" className="h-8 w-40 text-sm" value={asOf} onChange={e => setAsOf(e.target.value || todayKarachi())} />
       </label>
       <label className="flex items-center gap-1.5 text-sm text-slate-600"><input type="checkbox" checked={includeZero} onChange={e => setIncludeZero(e.target.checked)} /> Show zero accounts</label>
       {children}
@@ -39,7 +39,7 @@ function AsOfBar({ asOf, setAsOf, includeZero, setIncludeZero, children }: {
 function TrialBalanceTab() {
   const [asOf, setAsOf] = useState(todayKarachi())
   const [includeZero, setIncludeZero] = useState(false)
-  const { data, meta, loading } = useReport<TB, AsOfMeta>(`/api/accounts/reports/trial-balance?asOf=${asOf}${includeZero ? '&includeZero=1' : ''}`)
+  const { data, meta, loading, error } = useReport<TB, AsOfMeta>(`/api/accounts/reports/trial-balance?asOf=${asOf}${includeZero ? '&includeZero=1' : ''}`)
   return (
     <div className="space-y-4">
       <AsOfBar asOf={asOf} setAsOf={setAsOf} includeZero={includeZero} setIncludeZero={setIncludeZero}>
@@ -47,6 +47,7 @@ function TrialBalanceTab() {
           [...data.rows.map(r => [r.code, r.name, r.type, r.debit || '', r.credit || '']), ['', 'Total', '', data.totalDebit, data.totalCredit]])} />
       </AsOfBar>
       {meta && !meta.goLiveDate && <NoGoLiveBanner />}
+      {error && <ReportError message={error} />}
       {data && !data.balanced && <OutOfBalance difference={data.difference} />}
       <Card>
         <CardContent className="p-0">
@@ -94,7 +95,7 @@ function bsLines(d: BS): ReportLine[] {
 function BalanceSheetTab() {
   const [asOf, setAsOf] = useState(todayKarachi())
   const [includeZero, setIncludeZero] = useState(false)
-  const { data, meta, loading } = useReport<BS, AsOfMeta>(`/api/accounts/reports/balance-sheet?asOf=${asOf}${includeZero ? '&includeZero=1' : ''}`)
+  const { data, meta, loading, error } = useReport<BS, AsOfMeta>(`/api/accounts/reports/balance-sheet?asOf=${asOf}${includeZero ? '&includeZero=1' : ''}`)
   const lines = data ? bsLines(data) : []
   return (
     <div className="space-y-4">
@@ -102,6 +103,7 @@ function BalanceSheetTab() {
         <ExportButton disabled={!data} onClick={() => linesToCsv(`balance-sheet-${asOf}.csv`, lines)} />
       </AsOfBar>
       {meta && !meta.goLiveDate && <NoGoLiveBanner />}
+      {error && <ReportError message={error} />}
       {data && !data.balanced && <OutOfBalance difference={data.difference} />}
       <ReportTable lines={lines} loading={loading} />
       {data && data.balanced && <p className="text-xs text-slate-500">Balanced: assets equal liabilities plus equity (including cumulative net profit of {formatPKR(data.retainedEarnings)}).</p>}

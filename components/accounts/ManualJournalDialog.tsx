@@ -71,11 +71,13 @@ export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: 
           })),
         }),
       })
-      const j = await res.json()
-      if (!res.ok) return toast.error(j.error ?? 'Could not post entry')
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) return toast.error(j.error ?? `Could not post entry (HTTP ${res.status})`)
       toast.success(`Posted ${j.data?.entryNumber ?? 'entry'}`)
       onOpenChange(false)
       onPosted()
+    } catch {
+      toast.error('Network error while posting the entry')
     } finally {
       setSaving(false)
     }
@@ -92,11 +94,11 @@ export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: 
         <div className="flex flex-wrap gap-3">
           <div>
             <p className="text-xs text-slate-500 mb-1">Date</p>
-            <Input type="date" className="h-8 w-40 text-sm" value={date} onChange={e => setDate(e.target.value)} />
+            <Input type="date" aria-label="Entry date" className="h-8 w-40 text-sm" value={date} onChange={e => setDate(e.target.value)} />
           </div>
           <div className="flex-1 min-w-[12rem]">
             <p className="text-xs text-slate-500 mb-1">Memo</p>
-            <Input className="h-8 text-sm" value={memo} onChange={e => setMemo(e.target.value)} placeholder="Description" />
+            <Input aria-label="Entry memo" className="h-8 text-sm" value={memo} onChange={e => setMemo(e.target.value)} placeholder="Description" />
           </div>
         </div>
 
@@ -110,11 +112,11 @@ export function ManualJournalDialog({ open, onOpenChange, accounts, onPosted }: 
                 {needsParty && (
                   <PartyPicker kind={keyOf(l) === 'AR' ? 'customer' : 'supplier'} value={l.party} onChange={p => setLine(i, { party: p })} />
                 )}
-                <Input type="number" min={0} step="0.01" placeholder="Debit" className="h-8 w-28 text-sm text-right"
+                <Input type="number" min={0} step="0.01" placeholder="Debit" aria-label={`Line ${i + 1} debit`} className="h-8 w-28 text-sm text-right"
                   value={l.debit} onChange={e => setLine(i, { debit: e.target.value, credit: e.target.value ? '' : l.credit })} />
-                <Input type="number" min={0} step="0.01" placeholder="Credit" className="h-8 w-28 text-sm text-right"
+                <Input type="number" min={0} step="0.01" placeholder="Credit" aria-label={`Line ${i + 1} credit`} className="h-8 w-28 text-sm text-right"
                   value={l.credit} onChange={e => setLine(i, { credit: e.target.value, debit: e.target.value ? '' : l.debit })} />
-                <Input placeholder="Line memo" className="h-8 flex-1 min-w-[8rem] text-sm"
+                <Input placeholder="Line memo" aria-label={`Line ${i + 1} memo`} className="h-8 flex-1 min-w-[8rem] text-sm"
                   value={l.memo} onChange={e => setLine(i, { memo: e.target.value })} />
                 <Button type="button" variant="ghost" size="icon-sm" disabled={lines.length <= 2}
                   aria-label={`Remove line ${i + 1}`}
