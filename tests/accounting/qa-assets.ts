@@ -29,7 +29,7 @@ const created: string[] = []
 async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | null; defaultBankAccountId: string | null } | null, n0: number) {
   await prisma.accountingSettings.updateMany({ data: { goLiveDate: orig?.goLiveDate ?? null, lockedThrough: orig?.lockedThrough ?? null, defaultBankAccountId: orig?.defaultBankAccountId ?? null } })
   const assets = await prisma.fixedAsset.findMany({ where: { name: { startsWith: 'QA ' } }, select: { id: true } })
-  const ids = Array.from(new Set([...assets.map((a) => a.id), ...created]))
+  const ids = Array.from(new Set([...assets.map((a) => a.id), ...created])).filter((x): x is string => typeof x === 'string' && !!x)
   await prisma.journalEntry.deleteMany({ where: { sourceType: { in: ASSET_TYPES }, OR: [{ sourceId: { in: [...ids, ...ids.map((i) => `opening:${i}`)] } }, ...ids.map((i) => ({ sourceId: { startsWith: `${i}:` } }))] } })
   await prisma.fixedAsset.deleteMany({ where: { id: { in: ids } } })
   const n1 = await prisma.journalEntry.count()
@@ -62,6 +62,8 @@ async function main() {
   const settings0 = await prisma.accountingSettings.findFirst()
   const orig = settings0 ? { goLiveDate: settings0.goLiveDate, lockedThrough: settings0.lockedThrough, defaultBankAccountId: settings0.defaultBankAccountId } : null
   try {
+    // Start from a clean slate (production may already have go-live/lock set; restored in cleanup).
+    await prisma.accountingSettings.updateMany({ data: { goLiveDate: null, lockedThrough: null } })
     // ---- roles ----
     {
       const routes: [string, string][] = [
