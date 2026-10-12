@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { assertBalanced } from '../../lib/accounting/core'
 import { toPaisa } from '../../lib/accounting/money'
 import { buildBatchWriteoff } from '../../lib/accounting/builders'
-import { adjustDeductedQty, restockFefo, restockQtyFor } from '../../lib/accounting/cost'
+import { adjustDeductedQty, restockFefo, restockOnDecrease, restockQtyFor } from '../../lib/accounting/cost'
 
 // ---- Item 1: restock quantities ----
 test('restockQtyFor: deductedQty wins, null/undefined falls back to quantity', () => {
@@ -22,8 +22,17 @@ test('adjustDeductedQty: increase adds what was actually deducted (delta minus s
 
 test('adjustDeductedQty: decrease subtracts what was restocked, floored at 0', () => {
   assert.equal(adjustDeductedQty(10, 10, { restocked: 3 }), 7)
-  assert.equal(adjustDeductedQty(2, 10, { restocked: 5 }), 0) // shortfall order: restocked more than deducted
+  assert.equal(adjustDeductedQty(2, 10, { restocked: restockOnDecrease(2, 10, -5) }), 0) // shortfall line: only 2 go back
   assert.equal(adjustDeductedQty(null, 6, { restocked: 0 }), 6) // no batch found: nothing restocked
+})
+
+test('restockOnDecrease: never restocks more than the line actually deducted', () => {
+  assert.equal(restockOnDecrease(10, 10, -5), 5)
+  assert.equal(restockOnDecrease(2, 10, -5), 2) // qty 10, only 2 deducted (shortfall), edit down to 5
+  assert.equal(restockOnDecrease(0, 10, -3), 0) // full shortfall: nothing to put back
+  assert.equal(restockOnDecrease(null, 8, -3), 3) // legacy row: deductedQty = old quantity
+  assert.equal(restockOnDecrease(null, 2, -5), 2)
+  assert.equal(restockOnDecrease(10, 10, 4), 0) // increase: not a restock
 })
 
 function fakeTx(batches: { id: string; medicineId: string; currentQty: number; expiryDate: Date }[]) {

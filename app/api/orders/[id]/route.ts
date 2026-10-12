@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
-import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty } from '@/lib/accounting/cost'
+import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty, restockOnDecrease } from '@/lib/accounting/cost'
+import { AccountingError } from '@/lib/accounting/core'
 import { syncAllSafe } from '@/lib/accounting/sync'
 import { cancelOrder, hardDeleteOrder } from '@/lib/orders/lifecycle'
 
@@ -72,9 +73,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const medicineMap = new Map(medicines.map((m) => [m.id, m]))
   const warnings: string[] = []
 
-  const result = await prisma.$transaction(async (tx) => {
+  let result
+  try {
+  result = await prisma.$transaction(async (tx) => {
+    // Lock the order row for the rest of the transaction: a concurrent cancel / un-deliver / edit waits here (or we
+    // wait for it), so the status and item values below are the committed, current ones.
+    const locked = await tx.$queryRaw<{ status: string }[]>`SELECT "status" FROM "Order" WHERE "id" = ${id} FOR UPDATE`
+    if (!locked.length) throw new AccountingError(404, 'Not found')
+    const liveStatus = locked[0].status
+    if ((liveStatus === 'DELIVERED') !== (order.status === 'DELIVERED')) {
+      throw new AccountingError(409, 'The order status changed while you were editing — reload and try again')
+    }
+    // Re-read the items inside the transaction (quantity / deductedQty / unitCost must be current for the stock delta).
+    const freshItems = await tx.orderItem.findMany({ where: { orderId: id } })
+    const freshById = new Map(freshItems.map((i) => [i.id, i]))
+    if (freshItems.length !== editItems.length || editItems.some((i) => !freshById.has(i.id))) {
+      throw new AccountingError(409, 'The order lines changed while you were editing — reload and try again')
+    }
+
     const computed = editItems.map((item) => {
-      const existing = existingById.get(item.id)!
+      const existing = freshById.get(item.id)!
       const medicine = medicineMap.get(existing.medicineId)
       const offerPercent = item.offerPercent ?? 0
       const salesTax = medicine?.salesTaxApplicable ? (item.salesTax ?? 0) : 0
@@ -96,10 +114,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const newCosts = new Map<string, number>()
     const newDeducted = new Map<string, number>()
-    // Re-read inside the transaction: only adjust stock if the order is still DELIVERED now (a concurrent
-    // cancel/un-deliver may have restocked it already).
-    const live = await tx.order.findUnique({ where: { id }, select: { status: true } })
-    if (live?.status === 'DELIVERED') {
+    if (liveStatus === 'DELIVERED') {
       for (const item of computed) {
         const delta = item.quantity - item.existing.quantity
         if (delta === 0) continue
@@ -115,7 +130,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: only partially deducted — not enough stock for the extra ${delta} unit(s)`)
           }
         } else {
-          const restockQty = -delta
+          // Never put back more than this line actually took off the shelf.
+          const restockQty = restockOnDecrease(item.existing.deductedQty, item.existing.quantity, delta)
           const { restocked, warning } = await restockFefo(tx, item.medicineId, restockQty)
           newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, item.existing.quantity, { restocked }))
           if (warning) warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: ${warning}`)
@@ -166,7 +182,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     return updatedOrder
-  })
+  }, { maxWait: 10000, timeout: 20000 })
+  } catch (err) {
+    if (err instanceof AccountingError) return NextResponse.json({ error: err.message }, { status: err.status })
+    throw err
+  }
 
   await syncAllSafe([['INVOICE', order.invoice?.id], ['DELIVERY_COGS', id]])
 
@@ -187,7 +207,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // Both paths restock a DELIVERED order's deducted units (see lib/orders/lifecycle.ts); the approvals executor
   // calls the same functions for a MANAGER-requested delete.
   return handleDelete(req, hard ? 'Order-Hard' : 'Order', id, order.orderNumber, async () => {
-    const { warnings } = hard ? await hardDeleteOrder(id) : await cancelOrder(id)
-    return { warnings }
+    try {
+      const { warnings } = hard ? await hardDeleteOrder(id) : await cancelOrder(id)
+      return { warnings }
+    } catch (err) {
+      // e.g. the delivery cost was posted in a locked accounting period: nothing is changed.
+      if (err instanceof AccountingError) return NextResponse.json({ error: err.message }, { status: err.status })
+      throw err
+    }
   })
 }

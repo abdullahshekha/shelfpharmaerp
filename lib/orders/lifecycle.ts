@@ -4,11 +4,13 @@
 // actually came off the shelf; null on legacy rows = quantity). Whenever an order leaves DELIVERED those units are
 // put back (restockFefo, earliest-expiring batch) and unitCost/deductedQty are cleared, so the DELIVERY_COGS
 // entry disappears on the next sync and the Inventory ledger matches physical stock again.
-// Restock happens ONLY on the DELIVERED -> something transition, claimed with a conditional
+// If the order's DELIVERY_COGS entry is in a locked period the transition is refused (AccountingError 409) and
+// nothing changes. Restock happens ONLY on the DELIVERED -> something transition, claimed with a conditional
 // `updateMany where status = DELIVERED`: concurrent requests serialise on the row lock and only one sees count 1.
 import { prisma } from '@/lib/prisma'
 import { restockFefo, restockQtyFor } from '@/lib/accounting/cost'
 import { syncAllSafe } from '@/lib/accounting/sync'
+import { AccountingError, assertNotLocked, getSettings } from '@/lib/accounting/core'
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
 
@@ -36,8 +38,23 @@ export async function restockOrderItems(tx: Tx, orderId: string): Promise<string
 export async function undeliverInTx(tx: Tx, orderId: string, status: string): Promise<string[] | null> {
   const claim = await tx.order.updateMany({ where: { id: orderId, status: 'DELIVERED' }, data: { status } })
   if (claim.count === 0) return null
+  // The COGS entry must be removable, otherwise stock would come back while the ledger keeps the cost. Sync skips
+  // sources whose existing entries are locked, so refuse here (throwing rolls the claim back: nothing changes).
+  const settings = await getSettings(tx)
+  if (settings.goLiveDate) {
+    const cogs = await tx.journalEntry.findMany({ where: { sourceType: 'DELIVERY_COGS', sourceId: orderId, isManual: false }, select: { date: true } })
+    for (const e of cogs) {
+      try {
+        assertNotLocked(settings, e.date)
+      } catch {
+        throw new AccountingError(409, COGS_LOCKED_MESSAGE)
+      }
+    }
+  }
   return restockOrderItems(tx, orderId)
 }
+
+export const COGS_LOCKED_MESSAGE = 'Cannot cancel or un-deliver: the delivery cost was posted in a locked accounting period'
 
 /** Soft cancel (status CANCELLED). Restocks first if the order was DELIVERED. The Delivery row is left as is. */
 export async function cancelOrder(orderId: string): Promise<{ warnings: string[] }> {

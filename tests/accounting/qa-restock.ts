@@ -176,6 +176,57 @@ async function main() {
     res = await api(`/api/approvals/${j.approvalId}`, ADMIN, { method: 'POST', body: JSON.stringify({ action: 'APPROVE' }) })
     check('approving twice -> 404, no double restock', res.status === 404 && (await stock(med.id)) === 120)
 
+    // ---- 12. delivery cost in a locked period: cancel / hard delete / un-deliver / approval refused, nothing changes ----
+    {
+      const O8 = await mkOrder(med.id, 3)
+      await confirmAndDeliver(O8) // 117
+      const cogs0 = await cogs(O8)
+      const goLive = (await prisma.accountingSettings.findFirst())!.goLiveDate!
+      await prisma.accountingSettings.updateMany({ data: { lockedThrough: goLive } }) // today's COGS date is now locked
+      const unchanged = async () => (await stock(med.id)) === 117 && (await prisma.order.findUnique({ where: { id: O8 } }))?.status === 'DELIVERED' &&
+        JSON.stringify(await cogs(O8)) === JSON.stringify(cogs0) && (await prisma.orderItem.findFirst({ where: { orderId: O8 } }))!.deductedQty === 3
+      const msg = 'Cannot cancel or un-deliver: the delivery cost was posted in a locked accounting period'
+      res = await api(`/api/orders/${O8}`, ADMIN, { method: 'DELETE' })
+      check('locked COGS: soft cancel -> 409 with message, stock/status/COGS unchanged', res.status === 409 && (await json(res))?.error === msg && cogs0.count === 1 && (await unchanged()))
+      res = await api(`/api/orders/${O8}?hard=true`, ADMIN, { method: 'DELETE' })
+      check('locked COGS: hard delete -> 409, order still there, unchanged', res.status === 409 && (await unchanged()))
+      res = await setStatus(O8, 'DISPATCHED')
+      check('locked COGS: un-deliver via status PUT -> 409, unchanged, delivery still DELIVERED', res.status === 409 && (await unchanged()) && (await prisma.delivery.findUnique({ where: { orderId: O8 } }))?.status === 'DELIVERED')
+      res = await api(`/api/orders/${O8}`, MGR, { method: 'DELETE' })
+      const ap = await json(res)
+      if (ap?.approvalId) created.approvals.push(ap.approvalId)
+      res = await api(`/api/approvals/${ap.approvalId}`, ADMIN, { method: 'POST', body: JSON.stringify({ action: 'APPROVE' }) })
+      check('locked COGS: MANAGER cancel approved -> 409, request stays PENDING, unchanged', res.status === 409 && (await prisma.deleteApproval.findUnique({ where: { id: ap.approvalId } }))!.status === 'PENDING' && (await unchanged()))
+      await prisma.accountingSettings.updateMany({ data: { lockedThrough: null } })
+      res = await api(`/api/approvals/${ap.approvalId}`, ADMIN, { method: 'POST', body: JSON.stringify({ action: 'APPROVE' }) })
+      check('after unlock: approval executes the cancel, stock 120, COGS gone', res.status === 200 && (await stock(med.id)) === 120 && (await cogs(O8)).count === 0)
+    }
+
+    // ---- 13. concurrency: admin edit racing a cancel; two racing admin edits ----
+    {
+      const O9 = await mkOrder(med.id, 10)
+      await confirmAndDeliver(O9) // 110
+      const it9 = (await prisma.orderItem.findFirst({ where: { orderId: O9 } }))!
+      const [e1, c1] = await Promise.all([
+        api(`/api/orders/${O9}`, ADMIN, { method: 'PUT', body: JSON.stringify({ items: [{ id: it9.id, quantity: 13, unitPrice: 100 }] }) }),
+        api(`/api/orders/${O9}`, ADMIN, { method: 'DELETE' }),
+      ])
+      check('edit racing cancel: cancel 200, edit 200 or 409, final stock 120, no COGS, CANCELLED', c1.status === 200 && (e1.status === 200 || e1.status === 409) && (await stock(med.id)) === 120 &&
+        (await cogs(O9)).count === 0 && (await prisma.order.findUnique({ where: { id: O9 } }))!.status === 'CANCELLED', `edit ${e1.status}, stock ${await stock(med.id)}`)
+      const O10 = await mkOrder(med.id, 10)
+      await confirmAndDeliver(O10) // 110
+      const it10 = (await prisma.orderItem.findFirst({ where: { orderId: O10 } }))!
+      const [x1, x2] = await Promise.all([
+        api(`/api/orders/${O10}`, ADMIN, { method: 'PUT', body: JSON.stringify({ items: [{ id: it10.id, quantity: 12, unitPrice: 100 }] }) }),
+        api(`/api/orders/${O10}`, ADMIN, { method: 'PUT', body: JSON.stringify({ items: [{ id: it10.id, quantity: 7, unitPrice: 100 }] }) }),
+      ])
+      const f10 = (await prisma.orderItem.findUnique({ where: { id: it10.id } }))!
+      check('two racing edits: both 200, deductedQty == final quantity, stock == 120 - deductedQty', x1.status === 200 && x2.status === 200 && f10.deductedQty === f10.quantity && (await stock(med.id)) === 120 - f10.quantity,
+        `qty ${f10.quantity} deducted ${f10.deductedQty} stock ${await stock(med.id)}`)
+      res = await api(`/api/orders/${O10}`, ADMIN, { method: 'DELETE' })
+      check('cancel after racing edits: stock 120', res.status === 200 && (await stock(med.id)) === 120)
+    }
+
     // ---- ledger integrity ----
     const tb = await prisma.journalLine.aggregate({ _sum: { debit: true, credit: true } })
     check('trial balance: debits == credits', paisa(tb._sum.debit) === paisa(tb._sum.credit))

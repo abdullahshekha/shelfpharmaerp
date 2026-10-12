@@ -70,6 +70,15 @@ export function adjustDeductedQty(
   return Math.max(0, base + (change.deducted ?? 0) - (change.restocked ?? 0))
 }
 
+/**
+ * Units to put back for an admin quantity decrease of `-delta` on a DELIVERED line: never more than the line actually
+ * took off the shelf (deductedQty; legacy null = the old ordered quantity).
+ */
+export function restockOnDecrease(current: number | null | undefined, oldQuantity: number, delta: number): number {
+  if (delta >= 0) return 0
+  return Math.max(0, Math.min(-delta, current ?? oldQuantity))
+}
+
 /** Per-unit cost stored on OrderItem.unitCost (4 dp): total deducted cost over the ordered quantity. */
 export function unitCostFrom(costSum: number, qty: number): number {
   return Math.round((costSum / qty) * 10000) / 10000

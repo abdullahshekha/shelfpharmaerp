@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
 import { syncAllSafe } from '@/lib/accounting/sync'
 import { undeliverInTx } from '@/lib/orders/lifecycle'
+import { AccountingError } from '@/lib/accounting/core'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +13,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { status } = await req.json()
   const warnings: string[] = []
 
-  const order = await prisma.$transaction(async (tx) => {
+  let order
+  try {
+  order = await prisma.$transaction(async (tx) => {
     // Re-setting DELIVERED must be a no-op for stock and deliveredAt. The conditional update also serialises
     // concurrent DELIVERED requests on the row lock: only the one that actually flips the status sees count 1.
     let alreadyDelivered = false
@@ -99,6 +102,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     return updated
   }, { maxWait: 10000, timeout: 20000 })
+  } catch (err) {
+    // e.g. un-delivering an order whose delivery cost is in a locked accounting period: nothing changed.
+    if (err instanceof AccountingError) return NextResponse.json({ error: err.message }, { status: err.status })
+    throw err
+  }
 
   // Ledger sync after the business transaction has committed (never fails the request).
   const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } }).catch(() => null)
