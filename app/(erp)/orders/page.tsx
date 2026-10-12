@@ -142,6 +142,7 @@ export default function OrdersPage() {
                             if (res.ok) {
                               if (j.pending) toast.info(j.message)
                               else toast.success('Order deleted')
+                              if (j.warnings?.length) j.warnings.forEach((w: string) => toast.warning(w))
                               fetchOrders()
                             } else toast.error(j.error ?? 'Failed to delete')
                           }}

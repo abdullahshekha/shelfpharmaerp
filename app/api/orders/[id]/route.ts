@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
-import { deductFefo, blendUnitCost } from '@/lib/accounting/cost'
-import { syncSafe, syncAllSafe } from '@/lib/accounting/sync'
+import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty } from '@/lib/accounting/cost'
+import { syncAllSafe } from '@/lib/accounting/sync'
+import { cancelOrder, hardDeleteOrder } from '@/lib/orders/lifecycle'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,31 +95,30 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
 
     const newCosts = new Map<string, number>()
-    if (order.status === 'DELIVERED') {
+    const newDeducted = new Map<string, number>()
+    // Re-read inside the transaction: only adjust stock if the order is still DELIVERED now (a concurrent
+    // cancel/un-deliver may have restocked it already).
+    const live = await tx.order.findUnique({ where: { id }, select: { status: true } })
+    if (live?.status === 'DELIVERED') {
       for (const item of computed) {
         const delta = item.quantity - item.existing.quantity
         if (delta === 0) continue
 
         if (delta > 0) {
-          const { costSum: extraCostSum, remaining } = await deductFefo(tx, item.medicineId, delta)
+          const { costSum: extraCostSum, deducted, remaining } = await deductFefo(tx, item.medicineId, delta)
           // Keep the weighted COGS unit cost in step: blend the old cost with the newly deducted units.
           const oldCost = item.existing.unitCost
           const blended = blendUnitCost(item.existing.quantity, oldCost === null ? null : Number(oldCost), extraCostSum, delta)
           if (blended !== null) newCosts.set(item.existing.id, blended)
+          newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, item.existing.quantity, { deducted }))
           if (remaining > 0) {
             warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: only partially deducted — not enough stock for the extra ${delta} unit(s)`)
           }
         } else {
           const restockQty = -delta
-          const batch = await tx.medicineBatch.findFirst({
-            where: { medicineId: item.medicineId },
-            orderBy: { expiryDate: 'asc' },
-          })
-          if (batch) {
-            await tx.medicineBatch.update({ where: { id: batch.id }, data: { currentQty: batch.currentQty + restockQty } })
-          } else {
-            warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: no batch found to restock ${restockQty} unit(s) onto`)
-          }
+          const { restocked, warning } = await restockFefo(tx, item.medicineId, restockQty)
+          newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, item.existing.quantity, { restocked }))
+          if (warning) warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: ${warning}`)
         }
       }
     }
@@ -136,6 +136,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           bonusQty: item.bonusQty,
           lineTotal: item.lineTotal,
           ...(newCosts.has(item.existing.id) ? { unitCost: newCosts.get(item.existing.id) } : {}),
+          ...(newDeducted.has(item.existing.id) ? { deductedQty: newDeducted.get(item.existing.id) } : {}),
         },
       })
     }
@@ -183,40 +184,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   // Distinct model tag so a MANAGER's pending request replays the right action on approval
   // (see app/api/approvals/[id]/route.ts) — soft cancel vs. permanent delete are not interchangeable.
+  // Both paths restock a DELIVERED order's deducted units (see lib/orders/lifecycle.ts); the approvals executor
+  // calls the same functions for a MANAGER-requested delete.
   return handleDelete(req, hard ? 'Order-Hard' : 'Order', id, order.orderNumber, async () => {
-    if (!hard) {
-      await prisma.order.update({ where: { id }, data: { status: 'CANCELLED' } })
-      await syncSafe('DELIVERY_COGS', id)
-      return
-    }
-
-    // Capture ids before the cascade-delete so their ledger entries can be removed afterwards.
-    const doomedInvoice = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } })
-    const doomedPayments = doomedInvoice
-      ? await prisma.payment.findMany({ where: { invoiceId: doomedInvoice.id }, select: { id: true } })
-      : []
-
-    // Hard delete — clean up related records first
-    await prisma.$transaction(async (tx) => {
-      // Remove delivery
-      await tx.delivery.deleteMany({ where: { orderId: id } })
-      await tx.deliveryChallan.deleteMany({ where: { orderId: id } })
-
-      // Void invoice (delete payments first, then invoice)
-      const invoice = await tx.invoice.findUnique({ where: { orderId: id } })
-      if (invoice) {
-        await tx.payment.deleteMany({ where: { invoiceId: invoice.id } })
-        await tx.invoice.delete({ where: { id: invoice.id } })
-      }
-
-      // Delete order (cascades to order items via Prisma schema)
-      await tx.order.delete({ where: { id } })
-    })
-
-    await syncAllSafe([
-      ['INVOICE', doomedInvoice?.id],
-      ['DELIVERY_COGS', id],
-      ...doomedPayments.map((p): ['PAYMENT', string] => ['PAYMENT', p.id]),
-    ])
+    const { warnings } = hard ? await hardDeleteOrder(id) : await cancelOrder(id)
+    return { warnings }
   })
 }

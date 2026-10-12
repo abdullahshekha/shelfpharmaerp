@@ -51,7 +51,9 @@ export default function ApprovalsPage() {
       body: JSON.stringify({ action, reviewNote }),
     })
     if (res.ok) {
+      const j = await res.json().catch(() => ({}))
       toast.success(action === 'APPROVE' ? 'Deletion approved and executed.' : 'Deletion rejected.')
+      if (j.warnings?.length) j.warnings.forEach((w: string) => toast.warning(w))
       setReviewingId(null)
       setReviewNote('')
       fetch_()

@@ -142,6 +142,7 @@ export default function OrderDetailPage() {
     if (res.ok) {
       if (j.pending) toast.info(j.message)
       else toast.success('Order cancelled')
+      if (j.warnings?.length) j.warnings.forEach((w: string) => toast.warning(w))
       fetchOrder()
     } else {
       toast.error(j.error ?? 'Failed to cancel order')
@@ -161,6 +162,7 @@ export default function OrderDetailPage() {
     if (res.ok) {
       if (j.pending) { toast.info(j.message); setUpdating(false); return }
       toast.success('Order deleted')
+      if (j.warnings?.length) j.warnings.forEach((w: string) => toast.warning(w))
       router.push('/orders')
     } else {
       toast.error(j.error ?? 'Failed to delete order')

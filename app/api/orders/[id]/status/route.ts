@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
 import { syncAllSafe } from '@/lib/accounting/sync'
+import { undeliverInTx } from '@/lib/orders/lifecycle'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
@@ -9,6 +10,7 @@ export const dynamic = 'force-dynamic'
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const { status } = await req.json()
+  const warnings: string[] = []
 
   const order = await prisma.$transaction(async (tx) => {
     // Re-setting DELIVERED must be a no-op for stock and deliveredAt. The conditional update also serialises
@@ -17,6 +19,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (status === 'DELIVERED') {
       const claim = await tx.order.updateMany({ where: { id, status: { not: 'DELIVERED' } }, data: { status } })
       alreadyDelivered = claim.count === 0
+    } else {
+      // Leaving DELIVERED puts the deducted stock back (claimed, so concurrent requests restock once).
+      const w = await undeliverInTx(tx, id, status)
+      if (w !== null) {
+        warnings.push(...w)
+        // Moving back to an earlier (non-cancelled) status: the delivery is no longer done.
+        if (status !== 'CANCELLED') {
+          await tx.delivery.updateMany({ where: { orderId: id }, data: { status: 'SCHEDULED', deliveredAt: null } })
+        }
+      }
     }
 
     const updated = await tx.order.update({
@@ -72,9 +84,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (status === 'DELIVERED' && !alreadyDelivered) {
       for (const item of updated.items) {
         const { costSum, deducted } = await deductFefo(tx, item.medicineId, item.quantity)
-        if (deducted > 0) {
-          await tx.orderItem.update({ where: { id: item.id }, data: { unitCost: unitCostFrom(costSum, item.quantity) } })
-        }
+        // deductedQty records what actually came off the shelf (0 on a full shortfall) so an un-deliver/cancel
+        // restocks exactly that.
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: { deductedQty: deducted, ...(deducted > 0 ? { unitCost: unitCostFrom(costSum, item.quantity) } : {}) },
+        })
       }
 
       // Keep a deliveredAt the Deliveries page already recorded (it dates the COGS posting).
@@ -83,11 +98,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     return updated
-  })
+  }, { maxWait: 10000, timeout: 20000 })
 
   // Ledger sync after the business transaction has committed (never fails the request).
   const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } }).catch(() => null)
   await syncAllSafe([['INVOICE', inv?.id], ['DELIVERY_COGS', id]])
 
-  return NextResponse.json({ data: order })
+  return NextResponse.json({ data: order, warnings })
 }

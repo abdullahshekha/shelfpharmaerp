@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
-import { syncSafe, syncAllSafe } from '@/lib/accounting/sync'
+import { syncSafe } from '@/lib/accounting/sync'
+import { AccountingError } from '@/lib/accounting/core'
+import { cancelOrder, hardDeleteOrder } from '@/lib/orders/lifecycle'
+import { deleteBatch } from '@/lib/inventory/batch-delete'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,42 +24,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
 
-  await prisma.deleteApproval.update({
-    where: { id },
+  // Claim the approval atomically so two concurrent reviews cannot both execute it.
+  const claim = await prisma.deleteApproval.updateMany({
+    where: { id, status: 'PENDING' },
     data: { status: newStatus, reviewedById: reviewerId, reviewedAt: new Date(), reviewNote: reviewNote ?? null },
   })
+  if (claim.count === 0) {
+    return NextResponse.json({ error: 'Approval not found or already resolved' }, { status: 404 })
+  }
 
+  let warnings: string[] = []
   if (action === 'APPROVE') {
-    // Perform the actual deletion
+    // Perform the actual deletion — same code paths as the direct (ADMIN) routes.
     try {
       switch (approval.model) {
         case 'Order':
-          await prisma.order.update({ where: { id: approval.recordId }, data: { status: 'CANCELLED' } })
-          await syncSafe('DELIVERY_COGS', approval.recordId)
+          warnings = (await cancelOrder(approval.recordId)).warnings
           break
-        case 'Order-Hard': {
-          const orderId = approval.recordId
-          const doomedInvoice = await prisma.invoice.findUnique({ where: { orderId }, select: { id: true } })
-          const doomedPayments = doomedInvoice
-            ? await prisma.payment.findMany({ where: { invoiceId: doomedInvoice.id }, select: { id: true } })
-            : []
-          await prisma.$transaction(async (tx) => {
-            await tx.delivery.deleteMany({ where: { orderId } })
-            await tx.deliveryChallan.deleteMany({ where: { orderId } })
-            const invoice = await tx.invoice.findUnique({ where: { orderId } })
-            if (invoice) {
-              await tx.payment.deleteMany({ where: { invoiceId: invoice.id } })
-              await tx.invoice.delete({ where: { id: invoice.id } })
-            }
-            await tx.order.delete({ where: { id: orderId } })
-          })
-          await syncAllSafe([
-            ['INVOICE', doomedInvoice?.id],
-            ['DELIVERY_COGS', orderId],
-            ...doomedPayments.map((p): ['PAYMENT', string] => ['PAYMENT', p.id]),
-          ])
+        case 'Order-Hard':
+          warnings = (await hardDeleteOrder(approval.recordId)).warnings
           break
-        }
         case 'Invoice':
           await prisma.invoice.update({ where: { id: approval.recordId }, data: { status: 'DRAFT' } })
           await syncSafe('INVOICE', approval.recordId)
@@ -68,7 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await prisma.medicine.update({ where: { id: approval.recordId }, data: { isActive: false } })
           break
         case 'MedicineBatch':
-          await prisma.medicineBatch.delete({ where: { id: approval.recordId } })
+          await deleteBatch(approval.recordId, { userId: reviewerId || undefined })
           break
         case 'Employee':
           await prisma.employee.update({ where: { id: approval.recordId }, data: { isActive: false } })
@@ -77,8 +64,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await prisma.supplier.update({ where: { id: approval.recordId }, data: { isActive: false } })
           break
       }
-    } catch {
-      // Record may already be gone — ignore
+    } catch (err) {
+      // A refusal (e.g. stock write-off into a locked accounting period) leaves the request pending so it can be
+      // approved later. A missing record (404) or any other failure is ignored as before (record may already be gone).
+      if (err instanceof AccountingError && err.status !== 404) {
+        await prisma.deleteApproval.update({
+          where: { id },
+          data: { status: 'PENDING', reviewedById: null, reviewedAt: null, reviewNote: null },
+        })
+        return NextResponse.json({ error: err.message }, { status: err.status })
+      }
     }
   }
 
@@ -93,5 +88,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     },
   })
 
-  return NextResponse.json({ success: true, status: newStatus })
+  return NextResponse.json({ success: true, status: newStatus, warnings })
 }

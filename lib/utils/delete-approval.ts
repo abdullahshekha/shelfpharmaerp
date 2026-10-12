@@ -7,13 +7,15 @@ export async function handleDelete(
   model: string,
   recordId: string,
   recordLabel: string,
-  deleteFn: () => Promise<void>
+  // May return extra JSON fields for the success response (e.g. { warnings }) or a NextResponse to refuse.
+  deleteFn: () => Promise<void | Record<string, unknown> | NextResponse>
 ): Promise<NextResponse> {
   const { role, id: requesterId } = getUserFromRequest(req)
 
   if (canDeleteDirectly(role)) {
-    await deleteFn()
-    return NextResponse.json({ success: true })
+    const out = await deleteFn()
+    if (out instanceof NextResponse) return out
+    return NextResponse.json({ success: true, ...(out ?? {}) })
   }
 
   if (canRequestDelete(role) && requesterId) {

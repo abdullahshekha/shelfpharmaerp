@@ -361,6 +361,7 @@ model OrderItem {
   bonusQty       Int      @default(0)
   lineTotal      Decimal  @db.Decimal(10, 2)
   unitCost       Decimal? @db.Decimal(12, 4) // weighted FEFO cost per unit, set when the order is DELIVERED (accounting COGS)
+  deductedQty    Int? // units actually deducted from stock at DELIVERED (shortfall-aware); null on legacy rows = quantity. Restocked + nulled when un-delivered/cancelled
 
   @@index([orderId])
 }
@@ -645,6 +646,8 @@ model FixedAsset {
   paidFromAccountId String?
   notes             String?
   disposedAt        DateTime?
+  isOpening          Boolean  @default(false) // bought before go-live: opening entry Dr FA / Cr Accum Dep / Cr Opening Balance Equity (sourceId opening:<id>)
+  openingAccumulated Decimal  @default(0) @db.Decimal(12, 2) // depreciation accumulated before go-live (opening assets only)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
