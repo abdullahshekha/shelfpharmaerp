@@ -63,9 +63,10 @@ async function load(tx: Tx, type: SourceType, id: string): Promise<Loaded> {
       }
     }
     case 'DELIVERY_COGS': {
-      const r = await tx.order.findUnique({ where: { id }, include: { items: true, delivery: true } })
+      const r = await tx.order.findUnique({ where: { id }, include: { items: true, delivery: true, invoice: { select: { invoiceDate: true } } } })
       if (!r) return null
-      const date = r.delivery?.deliveredAt ?? r.updatedAt
+      // Stable fallback chain (never updatedAt, which moves on every edit): deliveredAt, then invoice date, then order date.
+      const date = r.delivery?.deliveredAt ?? r.invoice?.invoiceDate ?? r.orderDate
       if (r.status !== 'DELIVERED') return { date, entries: [] }
       return {
         date,
@@ -178,10 +179,20 @@ function entrySig(entries: { date: Date; memo: string | null; lines: { accountId
 }
 
 /** Throws on builder/data errors (callers classify). */
-async function syncInner(type: SourceType, id: string): Promise<SyncResult> {
+const LONG_TX = { maxWait: 10000, timeout: 15000 }
+// Hook (request-path) syncs: fail fast instead of stalling the business response; "Rebuild ledger" heals any miss.
+// Env overrides exist only so QA over a slow link (this dev machine is ~100 ms/query from the DB) can relax them.
+const SHORT_TX = {
+  maxWait: Number(process.env.ACCOUNTING_HOOK_TX_MAX_WAIT_MS) || 2000,
+  timeout: Number(process.env.ACCOUNTING_HOOK_TX_TIMEOUT_MS) || 5000,
+}
+
+async function syncInner(type: SourceType, id: string, opts: { short?: boolean; skipPrecheck?: boolean } = {}): Promise<SyncResult> {
   // Cheap pre-check outside any transaction: until a go-live date exists the hooks are inert.
-  const pre = await getSettings(prisma)
-  if (!pre.goLiveDate) return { status: 'skipped', reason: 'no go-live date set' }
+  if (!opts.skipPrecheck) {
+    const pre = await getSettings(prisma)
+    if (!pre.goLiveDate) return { status: 'skipped', reason: 'no go-live date set' }
+  }
 
   return prisma.$transaction(
     async (tx): Promise<SyncResult> => {
@@ -250,32 +261,47 @@ async function syncInner(type: SourceType, id: string): Promise<SyncResult> {
       if (entries.length) return { status: 'posted' }
       return reason ? { status: 'removed', reason } : { status: 'removed' }
     },
-    { maxWait: 10000, timeout: 15000 },
+    opts.short ? SHORT_TX : LONG_TX,
   )
 }
 
-export async function syncSource(type: SourceType, id: string): Promise<SyncResult> {
+export async function syncSource(type: SourceType, id: string, opts: { short?: boolean; skipPrecheck?: boolean } = {}): Promise<SyncResult> {
   try {
-    return await syncInner(type, id)
+    return await syncInner(type, id, opts)
   } catch (err) {
     return { status: 'skipped', reason: `error: ${err instanceof Error ? err.message : String(err)}` }
   }
 }
 
 /** Never throws. Await it after the business transaction has committed. */
-export async function syncSafe(type: SourceType, id: string | null | undefined): Promise<void> {
+export async function syncSafe(type: SourceType, id: string | null | undefined, opts: { skipPrecheck?: boolean } = {}): Promise<void> {
   if (!id) return
   try {
-    const r = await syncSource(type, id)
+    // Hooks run on the request path: short transaction limits so a slow DB cannot stall the business response.
+    let r = await syncSource(type, id, { short: true, skipPrecheck: opts.skipPrecheck })
+    // A short transaction can expire while queued behind concurrent syncs (per-day entry-number lock). The work is
+    // idempotent, so retry once once the burst has drained; anything still failing is healed by "Rebuild ledger".
+    if (r.reason && /Transaction API error|expired transaction|P2028|Unable to start a transaction/i.test(r.reason)) {
+      r = await syncSource(type, id, { short: true, skipPrecheck: opts.skipPrecheck })
+    }
     if (r.reason?.startsWith('error:')) console.error(`[accounting] sync ${type} ${id} failed: ${r.reason}`)
   } catch (err) {
     console.error(`[accounting] sync ${type} ${id} failed`, err)
   }
 }
 
-/** Sync several (type, id) pairs sequentially; never throws. */
+/** Sync several (type, id) pairs sequentially; never throws. Reads settings once; one cheap query when go-live is unset. */
 export async function syncAllSafe(pairs: [SourceType, string | null | undefined][]): Promise<void> {
-  for (const [t, id] of pairs) await syncSafe(t, id)
+  const real = pairs.filter(([, id]) => !!id)
+  if (!real.length) return
+  try {
+    const pre = await getSettings(prisma)
+    if (!pre.goLiveDate) return
+  } catch (err) {
+    console.error('[accounting] sync settings read failed', err)
+    return
+  }
+  for (const [t, id] of real) await syncSafe(t, id, { skipPrecheck: true })
 }
 
 // ---------------- Rebuild (chunkable) ----------------
@@ -309,11 +335,17 @@ function qualifying(type: SourceType, from: Date): any {
     case 'INVOICE':
       return { invoiceDate: { gte: from } }
     case 'DELIVERY_COGS':
+      // Mirrors load(): deliveredAt, else invoice date, else order date.
       return {
         status: 'DELIVERED',
         OR: [
           { delivery: { is: { deliveredAt: { gte: from } } } },
-          { AND: [{ OR: [{ delivery: { is: null } }, { delivery: { is: { deliveredAt: null } } }] }, { updatedAt: { gte: from } }] },
+          {
+            AND: [
+              { OR: [{ delivery: { is: null } }, { delivery: { is: { deliveredAt: null } } }] },
+              { OR: [{ invoice: { is: { invoiceDate: { gte: from } } } }, { AND: [{ invoice: { is: null } }, { orderDate: { gte: from } }] }] },
+            ],
+          },
         ],
       }
     case 'PAYMENT':

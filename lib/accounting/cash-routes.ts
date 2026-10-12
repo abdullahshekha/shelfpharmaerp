@@ -45,7 +45,7 @@ export async function postCashEntry(req: NextRequest, kind: Kind) {
   let sourceId: string | undefined
   if (body.requestId !== undefined && body.requestId !== null && body.requestId !== '') {
     if (typeof body.requestId !== 'string' || body.requestId.length > 100) return bad('Invalid requestId')
-    sourceId = `req:${body.requestId}`
+    sourceId = `req:${kind}:${body.requestId}`
   }
   const memo = typeof body.memo === 'string' && body.memo.trim() ? body.memo.trim().slice(0, 500) : undefined
 

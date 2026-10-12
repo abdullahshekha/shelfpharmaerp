@@ -115,7 +115,7 @@ async function main() {
     // ---- receipt ----
     r = await post('receipt', { toAccountId: cash.id, sourceAccountId: equity!.id, amount: 5000, date: goDay, memo: 'QA seed', requestId: 'qa-r1' })
     const rec = (await json(r))?.data
-    check('receipt: 201, manual MANUAL_CASH, createdBy qa, sourceId req:', r.status === 201 && rec.isManual === true && rec.sourceType === 'MANUAL_CASH' && rec.createdById === 'qa' && rec.sourceId === 'req:qa-r1')
+    check('receipt: 201, manual MANUAL_CASH, createdBy qa, sourceId req:receipt:', r.status === 201 && rec.isManual === true && rec.sourceType === 'MANUAL_CASH' && rec.createdById === 'qa' && rec.sourceId === 'req:receipt:qa-r1')
     const recLines = await prisma.journalLine.findMany({ where: { entryId: rec.id } })
     check('receipt: Dr cash 5000 / Cr source 5000', recLines.some((l) => l.accountId === cash.id && Number(l.debit) === 5000) && recLines.some((l) => l.accountId === equity!.id && Number(l.credit) === 5000))
     L = await listData()
@@ -131,7 +131,13 @@ async function main() {
       post('receipt', { toAccountId: cash.id, sourceAccountId: equity!.id, amount: 1, date: goDay, requestId: 'qa-race' }),
     ])
     check('concurrent same requestId: exactly one 201 and one 409', [d1.status, d2.status].sort().join() === '201,409', `${d1.status},${d2.status}`)
-    check('exactly one entry per requestId', (await prisma.journalEntry.count({ where: { sourceId: 'req:qa-r1' } })) === 1 && (await prisma.journalEntry.count({ where: { sourceId: 'req:qa-race' } })) === 1)
+    check('exactly one entry per requestId', (await prisma.journalEntry.count({ where: { sourceId: 'req:receipt:qa-r1' } })) === 1 && (await prisma.journalEntry.count({ where: { sourceId: 'req:receipt:qa-race' } })) === 1)
+
+    // requestId is scoped per kind: the same id on a transfer is not a duplicate of the receipt's
+    r = await post('transfer', { fromAccountId: cash.id, toAccountId: b1.id, amount: 1, date: goDay, requestId: 'qa-r1' })
+    check('same requestId on a different kind -> 201 (scoped req:<kind>:<id>)', r.status === 201)
+    r = await post('transfer', { fromAccountId: b1.id, toAccountId: cash.id, amount: 1, date: goDay, requestId: 'qa-r1-back' })
+    check('transfer back restores balances', r.status === 201)
 
     // ---- transfer keeps total constant ----
     L = await listData()
@@ -182,7 +188,7 @@ async function main() {
     // ---- locked period ----
     await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: goLive.toISOString() }) })
     r = await post('transfer', { fromAccountId: cash.id, toAccountId: b1.id, amount: 5, date: goDay, requestId: 'qa-lock' })
-    check('locked period -> 409, nothing posted', r.status === 409 && (await prisma.journalEntry.count({ where: { sourceId: 'req:qa-lock' } })) === 0)
+    check('locked period -> 409, nothing posted', r.status === 409 && (await prisma.journalEntry.count({ where: { sourceId: 'req:transfer:qa-lock' } })) === 0)
     await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: null }) })
 
     // ---- list balance = GL ledger closing ----

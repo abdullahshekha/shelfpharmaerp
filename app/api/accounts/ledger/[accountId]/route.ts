@@ -8,6 +8,7 @@ import { endExclusive, parseDateInput } from '@/lib/accounting/dates'
 export const dynamic = 'force-dynamic'
 
 // Account ledger: opening balance before `from`, then every line in range with a running balance.
+// Rows are capped (limit, default 5000, max 20000): the FIRST rows are kept; opening/totals/closing are aggregates and always exact.
 // Debit-normal for ASSET/EXPENSE, credit-normal otherwise. Optional retailerId/supplierId narrow to one party.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ accountId: string }> }) {
   const auth = requireAccountsUser(req)
@@ -40,20 +41,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ acco
     openingPaisa = sign * (toPaisa(Number(s._sum.debit ?? 0)) - toPaisa(Number(s._sum.credit ?? 0)))
   }
 
-  const lines = await prisma.journalLine.findMany({
-    where: { ...base, entry: { date: { ...(from && { gte: from }), ...(to && { lt: to }) } } },
-    include: { entry: { select: { id: true, entryNumber: true, date: true, memo: true, sourceType: true, sourceId: true, isManual: true, createdAt: true } } },
-  })
-  lines.sort((a, b) => a.entry.date.getTime() - b.entry.date.getTime() || a.entry.createdAt.getTime() - b.entry.createdAt.getTime() || a.id.localeCompare(b.id))
+  const limitRaw = Number(sp.get('limit'))
+  const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(20000, Math.floor(limitRaw)) : 5000
+  const rangeWhere: Prisma.JournalLineWhereInput = { ...base, entry: { date: { ...(from && { gte: from }), ...(to && { lt: to }) } } }
+
+  // True range totals come from aggregates, so they stay exact even when the row list is truncated.
+  const [agg, totalLines, lines] = await Promise.all([
+    prisma.journalLine.aggregate({ where: rangeWhere, _sum: { debit: true, credit: true } }),
+    prisma.journalLine.count({ where: rangeWhere }),
+    prisma.journalLine.findMany({
+      where: rangeWhere,
+      include: { entry: { select: { id: true, entryNumber: true, date: true, memo: true, sourceType: true, sourceId: true, isManual: true, createdAt: true } } },
+      orderBy: [{ entry: { date: 'asc' } }, { entry: { createdAt: 'asc' } }, { id: 'asc' }],
+      take: limit,
+    }),
+  ])
+  const truncated = totalLines > lines.length
+  const totalDebit = toPaisa(Number(agg._sum.debit ?? 0))
+  const totalCredit = toPaisa(Number(agg._sum.credit ?? 0))
+  const closingPaisa = openingPaisa + sign * (totalDebit - totalCredit)
 
   let running = openingPaisa
-  let totalDebit = 0
-  let totalCredit = 0
   const rows = lines.map((l) => {
     const d = toPaisa(Number(l.debit))
     const c = toPaisa(Number(l.credit))
-    totalDebit += d
-    totalCredit += c
     running += sign * (d - c)
     return {
       lineId: l.id,
@@ -79,8 +90,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ acco
       opening: openingPaisa / 100,
       totalDebit: totalDebit / 100,
       totalCredit: totalCredit / 100,
-      closing: running / 100,
+      closing: closingPaisa / 100,
       rows,
+      truncated,
+      totalLines,
+      limit,
     },
   })
 }

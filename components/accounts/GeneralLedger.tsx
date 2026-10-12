@@ -22,12 +22,19 @@ interface LedgerRow {
 interface Ledger {
   account: { id: string; code: string; name: string; type: string; normal: 'DEBIT' | 'CREDIT' }
   opening: number; totalDebit: number; totalCredit: number; closing: number; rows: LedgerRow[]
+  truncated?: boolean; totalLines?: number; limit?: number
+}
+
+// Default view is the current Karachi month so a long-lived account never loads its whole history.
+function currentMonthRange(): DateRange {
+  const today = todayKarachi()
+  return { from: `${today.slice(0, 7)}-01`, to: today, label: 'This Month' }
 }
 
 export function GeneralLedger() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountId, setAccountId] = useState('')
-  const [range, setRange] = useState<DateRange | null>(null)
+  const [range, setRange] = useState<DateRange | null>(currentMonthRange)
   const [ledger, setLedger] = useState<Ledger | null>(null)
   const [loading, setLoading] = useState(false)
   const [journalOpen, setJournalOpen] = useState(false)
@@ -100,8 +107,14 @@ export function GeneralLedger() {
     }
   }
 
+  const allDates = () => {
+    if (!confirm('Load every posting for this account? Large ledgers are capped and may be truncated.')) return
+    setRange(null)
+  }
+
   const exportCsv = () => {
     if (!ledger) return
+    if (ledger.truncated && !confirm(`Only the first ${ledger.rows.length} of ${ledger.totalLines} lines are loaded; the CSV will contain just those (totals and closing balance are exact). Continue?`)) return
     downloadCsv(
       `ledger-${ledger.account.code}-${todayKarachi()}.csv`,
       ['Date', 'Entry', 'Source', 'Memo', 'Debit', 'Credit', 'Balance'],
@@ -132,8 +145,14 @@ export function GeneralLedger() {
       <div className="flex flex-wrap items-center gap-3">
         <AccountSelect accounts={accounts} value={accountId} onChange={setAccountId} className="w-72 h-8 text-sm" />
         <DateRangePicker value={range} onChange={setRange} />
-        {range && <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500" onClick={() => setRange(null)}>All dates</Button>}
+        {range && <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500" onClick={allDates}>All dates</Button>}
       </div>
+
+      {ledger?.truncated && (
+        <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Showing the first {ledger.rows.length.toLocaleString()} of {(ledger.totalLines ?? 0).toLocaleString()} lines. Opening, totals and closing balance are exact; pick a narrower date range to see every line.
+        </div>
+      )}
 
       {ledger && (
         <p className="text-sm text-slate-600">

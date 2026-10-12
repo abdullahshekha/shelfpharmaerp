@@ -40,7 +40,7 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
     where: { OR: [
       { sourceId: { in: [...everything, ...allAssets] } },
       ...allAssets.map((i) => ({ sourceId: { startsWith: `${i}:` } })),
-      { sourceType: 'MANUAL_CASH', sourceId: { startsWith: 'req:qa-rep' } },
+      { sourceType: 'MANUAL_CASH', sourceId: { contains: ':qa-rep' } },
     ] },
   })
   await prisma.fixedAsset.deleteMany({ where: { id: { in: allAssets } } })
