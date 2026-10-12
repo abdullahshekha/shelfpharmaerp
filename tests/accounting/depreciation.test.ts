@@ -72,3 +72,18 @@ test('year boundaries, month helpers, regular amount', () => {
   assert.equal(regularMonthlyAmount({ cost: 1000, salvageValue: 0, usefulLifeMonths: 3 }), 333.33)
   assert.throws(() => monthDiff('2026-13', '2026-01'))
 })
+
+import { addMonths as libAddMonths, catchUpMonths } from '../../lib/accounting/depreciation'
+
+test('addMonths crosses year boundaries both ways', () => {
+  assert.equal(libAddMonths('2026-11', 3), '2027-02')
+  assert.equal(libAddMonths('2026-01', -1), '2025-12')
+  assert.equal(libAddMonths('2026-12', 0), '2026-12')
+})
+
+test('catchUpMonths: purchase month through requested, never before go-live, capped at useful life', () => {
+  assert.deepEqual(catchUpMonths({ purchaseMonth: '2026-05', usefulLifeMonths: 60 }, '2026-01', '2026-08'), ['2026-05', '2026-06', '2026-07', '2026-08'])
+  assert.deepEqual(catchUpMonths({ purchaseMonth: '2025-11', usefulLifeMonths: 60 }, '2026-02', '2026-04'), ['2026-02', '2026-03', '2026-04'])
+  assert.deepEqual(catchUpMonths({ purchaseMonth: '2026-01', usefulLifeMonths: 3 }, '2026-01', '2026-12'), ['2026-01', '2026-02', '2026-03'])
+  assert.deepEqual(catchUpMonths({ purchaseMonth: '2026-09', usefulLifeMonths: 3 }, '2026-01', '2026-08'), [])
+})

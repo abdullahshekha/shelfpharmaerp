@@ -340,7 +340,7 @@ export function Payroll() {
             </DialogHeader>
             <div className="space-y-3">
               <div><p className="text-xs text-slate-500 mb-1">Paid from</p><AccountSelect accounts={cashAccounts} value={fromId} onChange={setFromId} className="w-full h-8 text-sm" /></div>
-              <div><p className="text-xs text-slate-500 mb-1">Payment date</p><Input type="date" className="h-8 w-44 text-sm" value={payDate} onChange={e => setPayDate(e.target.value)} /></div>
+              <div><p className="text-xs text-slate-500 mb-1">Payment date</p><Input type="date" max={todayKarachi()} className="h-8 w-44 text-sm" value={payDate} onChange={e => setPayDate(e.target.value)} /></div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setPayOpen(false)}>Cancel</Button>
@@ -411,6 +411,9 @@ export function Payroll() {
             <div>
               <p className="text-xs text-slate-500 mb-1">Month</p>
               <Input type="month" aria-label="Payroll month" className="h-8 w-48 text-sm" value={month} max={todayKarachi().slice(0, 7)} onChange={e => setMonth(e.target.value)} />
+              {month === todayKarachi().slice(0, 7) && (
+                <p className="text-xs text-amber-700 mt-1">This is the current month: the payroll entry is dated month end, and the payment can be recorded after that date.</p>
+              )}
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={pickEmps} onChange={e => setPickEmps(e.target.checked)} /> Select employees (default: all)

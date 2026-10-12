@@ -71,6 +71,7 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
           usefulLifeMonths: f.usefulLifeMonths ?? asset.usefulLifeMonths,
           paidFromAccountId: f.paidFromAccountId ?? asset.paidFromAccountId,
         }
+        if (next.salvageValue >= next.cost) throw new AccountingError(400, 'Salvage value must be less than the cost')
         if (!next.paidFromAccountId) throw new AccountingError(400, 'Funding account is required')
         assertManualPostable(settings, next.purchaseDate)
         notLocked(settings, asset.purchaseDate)

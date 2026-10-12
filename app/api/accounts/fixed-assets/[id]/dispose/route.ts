@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAccountsUser } from '@/lib/accounting/guard'
 import { ensureChart } from '@/lib/accounting/accounts'
-import { AccountingError, assertManualPostable, getSettings, postEntry, type LineInput } from '@/lib/accounting/core'
+import { AccountingError, assertManualPostable, getSettings, karachiDayKey, postEntry, type LineInput } from '@/lib/accounting/core'
 import { parseDateInput } from '@/lib/accounting/dates'
 import { assetView, depreciationSummary, lockAsset } from '@/lib/accounting/assets'
 
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   const date = parseDateInput(body?.date)
   if (!date) return fail('Invalid disposal date')
+  if (karachiDayKey(date) > karachiDayKey(new Date())) return fail('Disposal date cannot be in the future')
   try {
     const result = await prisma.$transaction(
       async (tx) => {

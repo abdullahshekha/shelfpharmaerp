@@ -134,7 +134,7 @@ async function main() {
       (await prisma.purchaseInvoice.count({ where: { invoiceDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
       (await prisma.supplierPayment.count({ where: { paymentDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
       (await prisma.supplierReturn.count({ where: { returnDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
-      (await prisma.order.count({ where: { status: 'DELIVERED', retailerId: { not: retailer.id }, OR: [{ delivery: { is: { deliveredAt: { gte: goLive } } } }, { updatedAt: { gte: goLive } }] } }))
+      (await prisma.order.count({ where: { status: 'DELIVERED', retailerId: { not: retailer.id }, OR: [{ delivery: { is: { deliveredAt: { gte: goLive } } } }, { invoice: { is: { invoiceDate: { gte: goLive } } } }, { orderDate: { gte: goLive } }] } }))
 
     // ---- settings API ----
     let r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ goLiveDate: 'garbage' }) })
@@ -246,9 +246,39 @@ async function main() {
     check('COGS == qty x batch purchase price (10 x 60)', cogs.debit === 600 && cogs.credit === 0, JSON.stringify(cogs))
     const invCogs = await acctSum('INVENTORY', [order.id])
     check('COGS: Cr Inventory 600', invCogs.credit === 600)
+    const stockAfterFirst = (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty
+    const deliveredAt1 = (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt
+    const unitCost1 = (await prisma.orderItem.findFirst({ where: { orderId: order.id } }))!.unitCost
     st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
+    check('double DELIVERED PUT: stock deducted once (990), deliveredAt and unitCost unchanged', st.status === 200 && stockAfterFirst === 990 &&
+      (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 990 &&
+      (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt?.getTime() === deliveredAt1?.getTime() && !!deliveredAt1 &&
+      Number((await prisma.orderItem.findFirst({ where: { orderId: order.id } }))!.unitCost) === Number(unitCost1))
+    const dRow = await prisma.delivery.findUnique({ where: { orderId: order.id } })
+    const dr1 = await api(`/api/deliveries/${dRow!.id}`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
+    check('deliveries PUT DELIVERED again keeps the original deliveredAt', dr1.status === 200 && (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt?.getTime() === deliveredAt1?.getTime())
     check('double DELIVERED: still one COGS entry, amount unchanged', (await entryCount('DELIVERY_COGS', order.id)) === 1 && (await acctSum('COGS', [order.id])).debit === 600)
     check('invoice entry untouched by status changes', (await entryCount('INVOICE', inv0!.id)) === 1)
+    // COGS date fallback: no deliveredAt and no invoice -> order date (stable), never updatedAt
+    {
+      const od = new Date(goLive.getTime() + 3600_000)
+      const fo = await prisma.order.create({ data: { retailerId: retailer.id, status: 'DELIVERED', orderDate: od, totalAmount: 0, items: { create: [{ medicineId: med.id, quantity: 1, unitPrice: 100, lineTotal: 100, unitCost: 60 }] } } })
+      ids.orders.push(fo.id)
+      const f1 = await syncSource('DELIVERY_COGS', fo.id)
+      const e1 = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: fo.id } })
+      check('COGS date fallback: no deliveredAt/invoice -> order date', f1.status === 'posted' && e1?.date.getTime() === od.getTime(), JSON.stringify({ f1, d: e1?.date }))
+      await new Promise((res) => setTimeout(res, 30))
+      await prisma.order.update({ where: { id: fo.id }, data: { notes: 'QA touch' } }) // bumps updatedAt
+      const f2 = await syncSource('DELIVERY_COGS', fo.id)
+      check('COGS date fallback: editing the order does not move the COGS date (unchanged)', f2.status === 'unchanged')
+      const qual = await prisma.order.count({ where: { id: fo.id, status: 'DELIVERED', OR: [{ delivery: { is: { deliveredAt: { gte: goLive } } } }, { AND: [{ OR: [{ delivery: { is: null } }, { delivery: { is: { deliveredAt: null } } }] }, { OR: [{ invoice: { is: { invoiceDate: { gte: goLive } } } }, { AND: [{ invoice: { is: null } }, { orderDate: { gte: goLive } }] }] }] }] } })
+      check('COGS qualifying filter agrees with load()', qual === 1)
+      await prisma.orderItem.deleteMany({ where: { orderId: fo.id } })
+      await prisma.order.delete({ where: { id: fo.id } })
+      ids.orders.pop()
+      const f3 = await syncSource('DELIVERY_COGS', fo.id)
+      check('COGS fallback test order removed -> entry removed', f3.status === 'removed' && (await entryCount('DELIVERY_COGS', fo.id)) === 0)
+    }
     // DRAFT invoice is void: entries removed; back to UNPAID reposts
     await prisma.invoice.update({ where: { id: inv0!.id }, data: { status: 'DRAFT' } })
     const dr = await syncSource('INVOICE', inv0!.id)
@@ -284,6 +314,36 @@ async function main() {
     check('ledger API: opening before from includes earlier lines', led2.opening === invTotal - 500 && led2.rows.length === 0)
     r = await api(`/api/accounts/ledger/${salesAcc.id}`, ACCT)
     check('ledger API: credit-normal account (Sales) positive balance', (await json(r)).data.closing >= 810)
+    // truncation: low limit keeps the FIRST rows but opening/totals/closing stay exact
+    r = await api(`/api/accounts/ledger/${arAcc.id}?retailerId=${retailer.id}&from=${goDay}&limit=2`, ACCT)
+    const lt = (await json(r)).data
+    check('ledger truncated (limit=2 of 3): flags set, closing still exact, first rows kept', r.status === 200 && lt.truncated === true && lt.totalLines === 3 && lt.rows.length === 2 && lt.limit === 2 && lt.closing === led.closing && lt.opening === led.opening && lt.totalDebit === led.totalDebit && lt.totalCredit === led.totalCredit && lt.rows[0].lineId === led.rows[0].lineId && lt.rows[1].balance === led.rows[1].balance, JSON.stringify({ t: lt?.truncated, n: lt?.rows?.length, c: lt?.closing, e: led.closing }))
+    r = await api(`/api/accounts/ledger/${arAcc.id}?retailerId=${retailer.id}&limit=1`, ACCT)
+    const lt1 = (await json(r)).data
+    check('ledger truncated (limit=1, no from): closing == AR balance', lt1.truncated === true && lt1.rows.length === 1 && lt1.closing === invTotal - 500 && lt1.totalLines === 3)
+    check('ledger not truncated within the limit', led.truncated === false && led.totalLines === 3)
+    r = await api(`/api/accounts/ledger/${arAcc.id}?retailerId=${retailer.id}&limit=999999`, ACCT)
+    check('ledger limit above max is clamped to 20000', (await json(r)).data.limit === 20000)
+
+    // ---- settings role rules ----
+    r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: '2020-01-01' }) })
+    check('settings: ADMIN sets lockedThrough', r.status === 200)
+    r = await api('/api/accounts/settings', ACCT, { method: 'PUT', body: JSON.stringify({ lockedThrough: '2020-01-02' }) })
+    check('settings: ACCOUNTANT may move lock forward', r.status === 200)
+    r = await api('/api/accounts/settings', ACCT, { method: 'PUT', body: JSON.stringify({ lockedThrough: '2020-01-01' }) })
+    check('settings: ACCOUNTANT cannot move lock backwards -> 403', r.status === 403)
+    r = await api('/api/accounts/settings', ACCT, { method: 'PUT', body: JSON.stringify({ lockedThrough: null }) })
+    check('settings: ACCOUNTANT cannot clear lock -> 403', r.status === 403)
+    r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: '2020-01-01' }) })
+    check('settings: ADMIN may move lock backwards', r.status === 200)
+    r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ lockedThrough: null }) })
+    check('settings: ADMIN may clear lock', r.status === 200)
+    r = await api('/api/accounts/settings', ACCT, { method: 'PUT', body: JSON.stringify({ goLiveDate: '2020-02-02' }) })
+    check('settings: ACCOUNTANT cannot change go-live once entries exist -> 403', r.status === 403 && (await prisma.accountingSettings.findFirst())!.goLiveDate?.getTime() === goLive.getTime())
+    r = await api('/api/accounts/settings', ACCT, { method: 'PUT', body: JSON.stringify({ goLiveDate: goLive.toISOString() }) })
+    check('settings: ACCOUNTANT re-sending the same go-live is fine', r.status === 200)
+    r = await api('/api/accounts/rebuild', ACCT, { method: 'POST', body: JSON.stringify({ after: 'abc' }) })
+    check('rebuild: after without type -> 400', r.status === 400)
 
     // ---- sales return (two entries, one source) ----
     r = await api('/api/sales-returns', ADMIN, { method: 'POST', body: JSON.stringify({ retailerId: retailer.id, items: [{ medicineId: med.id, batchId: batch.id, quantity: 2, unitPrice: 90, restocked: true }] }) })

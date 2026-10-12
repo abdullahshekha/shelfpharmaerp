@@ -103,6 +103,8 @@ async function main() {
     await v('cost string -> 400', mk({ cost: '5' }), 400)
     await v('cost > 1e9 -> 400', mk({ cost: 1e9 + 1 }), 400)
     await v('negative salvage -> 400', mk({ salvageValue: -1 }), 400)
+    await v('salvage == cost -> 400', mk({ salvageValue: 1000 }), 400)
+    await v('salvage > cost -> 400', mk({ salvageValue: 1500 }), 400)
     await v('life 0 -> 400', mk({ usefulLifeMonths: 0 }), 400)
     await v('life 1.5 -> 400', mk({ usefulLifeMonths: 1.5 }), 400)
     await v('blank name -> 400', mk({ name: '  ' }), 400)
@@ -164,6 +166,9 @@ async function main() {
     const D = (await mkAsset(mk({ name: 'QA Asset D', purchaseDate: dayIn(-1, 15), cost: 500, salvageValue: 0, usefulLifeMonths: 5 }))).d
     const F = (await mkAsset(mk({ name: 'QA Asset F', purchaseDate: today, cost: 300, salvageValue: 0, usefulLifeMonths: 3 }))).d
     check('C, E, D, F created', !!(C && E && D && F))
+    // G: bought in month -3 but only created now (after the M-3 and M-2 runs) -> the M-1 run must catch it up
+    const G = (await mkAsset(mk({ name: 'QA Asset G', purchaseDate: dayIn(-3, 8), cost: 900, salvageValue: 0, usefulLifeMonths: 3 }))).d
+    check('G created (catch-up asset)', !!G)
 
     // ---- edit before depreciation ----
     const fa0 = (await balances()).FIXED_ASSETS
@@ -173,6 +178,8 @@ async function main() {
     check('edit D cost+funding before depreciation: entry re-posted (single, 800, credit equity)', r.status === 200 && Dn.cost === 800 && eD.length === 1 && eD[0].lines.some((l) => Number(l.debit) === 800) && eD[0].lines.some((l) => l.accountId === equity.id && Number(l.credit) === 800) && Math.round(((await balances()).FIXED_ASSETS - fa0) * 100) === 30000)
     r = await put(`/api/accounts/fixed-assets/${D.id}`, { cost: -5 })
     check('edit: invalid cost -> 400', r.status === 400)
+    r = await put(`/api/accounts/fixed-assets/${D.id}`, { salvageValue: 800 })
+    check('edit: salvage >= cost -> 400', r.status === 400)
     r = await put(`/api/accounts/fixed-assets/${D.id}`, { paidFromAccountId: ar.id })
     check('edit: AR funding -> 400', r.status === 400)
 
@@ -195,7 +202,11 @@ async function main() {
     // ---- M-1 run, idempotent ----
     r = await post('/api/accounts/fixed-assets/depreciation', { month: monthOf(-1) })
     j = (await json(r))?.data
-    check('run M-1: 5 posted (A,B,C,D,E), F skipped (not in service)', j.posted.length === 5 && j.skipped.some((s: any) => s.name === 'QA Asset F' && /Nothing to depreciate/.test(s.reason)) && j.failed.length === 0, JSON.stringify({ p: j.posted.map((x: any) => x.name + x.amount), s: j.skipped }))
+    check('run M-1: 5 regular + 3 catch-up months for G posted, F skipped (not in service)', j.posted.length === 8 && j.skipped.some((s: any) => s.name === 'QA Asset F' && /Nothing to depreciate/.test(s.reason)) && j.failed.length === 0, JSON.stringify({ p: j.posted.map((x: any) => x.name + x.amount), s: j.skipped }))
+    const gEntries = await prisma.journalEntry.findMany({ where: { sourceType: 'DEPRECIATION', sourceId: { startsWith: `${G.id}:` } }, orderBy: { sourceId: 'asc' } })
+    check('catch-up: G has M-3, M-2, M-1 entries, each dated its own month-end, 300 each',
+      gEntries.length === 3 && [-3, -2, -1].every((o, i) => gEntries[i].sourceId === `${G.id}:${monthOf(o)}` && new Date(gEntries[i].date.getTime() + 5 * 3600_000).toISOString().slice(0, 10) === lastDay(o)) && (await depSum(G.id)) === 90000)
+    check('catch-up response lists per-month counts for M-3..M-1', Array.isArray(j.months) && [monthOf(-3), monthOf(-2), monthOf(-1)].every((m) => j.months.some((x: any) => x.month === m)) && j.months.find((x: any) => x.month === monthOf(-3)).posted === 1, JSON.stringify(j.months))
     r = await post('/api/accounts/fixed-assets/depreciation', { month: monthOf(-1) })
     j = (await json(r))?.data
     check('re-run M-1: 0 posted', j.posted.length === 0)
@@ -232,6 +243,8 @@ async function main() {
     check('dispose before last depreciation entry -> 400', r.status === 400)
     r = await post(`/api/accounts/fixed-assets/${C.id}/dispose`, { date: 'nope' })
     check('dispose invalid date -> 400', r.status === 400)
+    r = await post(`/api/accounts/fixed-assets/${C.id}/dispose`, { date: new Date(Date.now() + 3 * 86400_000 + 5 * 3600_000).toISOString().slice(0, 10) })
+    check('dispose future date -> 400', r.status === 400 && /future/i.test((await json(r))?.error ?? ''))
     const bBefore = await balances()
     r = await post(`/api/accounts/fixed-assets/${C.id}/dispose`, { date: today })
     const dj = (await json(r))?.data

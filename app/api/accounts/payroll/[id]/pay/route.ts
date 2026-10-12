@@ -28,6 +28,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   try {
     const date = parseDateInput(body?.date)
     if (!date) bad('Invalid payment date')
+    if (karachiDayKey(date) > karachiDayKey(new Date())) bad('Payment date cannot be in the future')
     if (typeof body.fromAccountId !== 'string' || !body.fromAccountId) bad('Choose the cash/bank account the salaries are paid from')
     if (body.requestId !== undefined && body.requestId !== null && body.requestId !== '' && (typeof body.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(body.requestId))) bad('Invalid requestId')
     await prisma.$transaction(

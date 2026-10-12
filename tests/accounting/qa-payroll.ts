@@ -273,6 +273,8 @@ async function main() {
     check('pay date before posting date -> 400', res.status === 400)
     res = await post(`/api/accounts/payroll/${runId}/pay`, payBody({ date: dayIn(-2, 15) }))
     check('pay date before go-live -> 400', res.status === 400)
+    res = await post(`/api/accounts/payroll/${runId}/pay`, payBody({ date: new Date(Date.now() + 3 * 86400_000 + 5 * 3600_000).toISOString().slice(0, 10) }))
+    check('pay date in the future -> 400', res.status === 400 && /future/i.test((await json(res))?.error ?? ''))
     res = await post(`/api/accounts/payroll/${runId}/pay`, payBody({ requestId: 'bad id!' }))
     check('bad requestId -> 400', res.status === 400)
     await setSettings({ lockedThrough: new Date(`${today}T00:00:00+05:00`).toISOString() })

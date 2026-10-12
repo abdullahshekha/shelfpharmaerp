@@ -20,8 +20,8 @@ interface Asset {
   depreciationEntries: number
 }
 interface Meta { count: number; totalCost: number; totalAccumulated: number; totalBookValue: number }
-interface RunRow { assetId: string; name: string; amount?: number; entryNumber?: string; reason?: string }
-interface RunResult { month: string; date: string; posted: RunRow[]; skipped: RunRow[]; failed: RunRow[]; totalPosted: number; message?: string }
+interface RunRow { assetId: string; name: string; month: string; amount?: number; entryNumber?: string; reason?: string }
+interface RunResult { month: string; date: string; posted: RunRow[]; skipped: RunRow[]; failed: RunRow[]; months?: { month: string; posted: number; skipped: number; failed: number; totalPosted: number }[]; totalPosted: number; message?: string }
 
 const newRequestId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -314,8 +314,8 @@ export function FixedAssets() {
           <DialogHeader>
             <DialogTitle>Run depreciation</DialogTitle>
             <DialogDescription>
-              Posts one entry per active asset for the month, dated the last day of the month. Safe to re-run — a month already posted for an asset is skipped.
-              The first depreciation month of an asset is its purchase month.
+              Catches up every missing month from each asset&apos;s first depreciation month (its purchase month, never before the go-live month) through the month you pick.
+              Each entry is dated the last day of its own month, so running the current month posts a month-end date in the future of today. Safe to re-run — months already posted are skipped, and months in a locked period are skipped and reported.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -326,10 +326,15 @@ export function FixedAssets() {
             {result && (
               <div className="rounded-md border p-3 text-sm space-y-2 max-h-72 overflow-y-auto">
                 {result.message && <p className="text-amber-700">{result.message}</p>}
+                {result.months && result.months.length > 0 && (
+                  <div className="text-xs text-slate-600">
+                    {result.months.map(m => <p key={m.month}>{m.month}: posted {m.posted} · skipped {m.skipped}{m.failed ? ` · failed ${m.failed}` : ''} · {formatPKR(m.totalPosted)}</p>)}
+                  </div>
+                )}
                 <p className="font-medium">Posted {result.posted.length} · skipped {result.skipped.length}{result.failed.length ? ` · failed ${result.failed.length}` : ''} · total {formatPKR(result.totalPosted)}</p>
-                {result.posted.map(r => <p key={r.assetId} className="text-green-700">{r.name}: {formatPKR(r.amount ?? 0)} ({r.entryNumber})</p>)}
-                {result.skipped.map(r => <p key={r.assetId} className="text-slate-500">{r.name}: {r.reason}</p>)}
-                {result.failed.map(r => <p key={r.assetId} className="text-red-600">{r.name}: {r.reason}</p>)}
+                {result.posted.map(r => <p key={`${r.assetId}:${r.month}`} className="text-green-700">{r.name} ({r.month}): {formatPKR(r.amount ?? 0)} ({r.entryNumber})</p>)}
+                {result.skipped.map(r => <p key={`${r.assetId}:${r.month}`} className="text-slate-500">{r.name} ({r.month}): {r.reason}</p>)}
+                {result.failed.map(r => <p key={`${r.assetId}:${r.month}`} className="text-red-600">{r.name} ({r.month}): {r.reason}</p>)}
               </div>
             )}
           </div>
@@ -350,7 +355,7 @@ export function FixedAssets() {
           </DialogHeader>
           <div>
             <p className="text-xs text-slate-500 mb-1">Disposal date</p>
-            <Input type="date" className="h-8 w-44 text-sm" value={disposeDate} onChange={e => setDisposeDate(e.target.value)} />
+            <Input type="date" max={todayKarachi()} className="h-8 w-44 text-sm" value={disposeDate} onChange={e => setDisposeDate(e.target.value)} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDisposing(null)}>Cancel</Button>

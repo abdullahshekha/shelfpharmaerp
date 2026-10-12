@@ -11,6 +11,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { status } = await req.json()
 
   const order = await prisma.$transaction(async (tx) => {
+    // Re-setting DELIVERED must be a no-op for stock and deliveredAt. The conditional update also serialises
+    // concurrent DELIVERED requests on the row lock: only the one that actually flips the status sees count 1.
+    let alreadyDelivered = false
+    if (status === 'DELIVERED') {
+      const claim = await tx.order.updateMany({ where: { id, status: { not: 'DELIVERED' } }, data: { status } })
+      alreadyDelivered = claim.count === 0
+    }
+
     const updated = await tx.order.update({
       where: { id },
       data: { status },
@@ -61,7 +69,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
     }
 
-    if (status === 'DELIVERED') {
+    if (status === 'DELIVERED' && !alreadyDelivered) {
       for (const item of updated.items) {
         const { costSum, deducted } = await deductFefo(tx, item.medicineId, item.quantity)
         if (deducted > 0) {

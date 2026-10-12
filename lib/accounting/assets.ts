@@ -104,6 +104,7 @@ export function parseAssetBody(body: any, partial: boolean): Partial<AssetFields
     if (typeof body.paidFromAccountId !== 'string' || !body.paidFromAccountId) bad('Funding account is required')
     out.paidFromAccountId = body.paidFromAccountId
   }
+  if (out.cost !== undefined && out.salvageValue !== undefined && out.salvageValue >= out.cost) bad('Salvage value must be less than the cost')
   return out
 }
 

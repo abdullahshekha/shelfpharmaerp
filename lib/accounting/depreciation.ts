@@ -64,3 +64,29 @@ export function regularMonthlyAmount(asset: Pick<DepreciableAsset, 'cost' | 'sal
   if (base <= 0 || !(life >= 1)) return 0
   return fromPaisa(Math.floor(base / life))
 }
+
+/** YYYY-MM shifted by `k` months (k may be negative). */
+export function addMonths(month: string, k: number): string {
+  const m = MONTH_RE.exec(month)
+  if (!m) throw new Error('Invalid month')
+  const idx = Number(m[1]) * 12 + (Number(m[2]) - 1) + k
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`
+}
+
+/**
+ * Months (inclusive) a catch-up run should consider for one asset: from its first depreciation month (the
+ * purchase month, but never before the go-live month) through the requested month, capped at the last month of
+ * its useful life. Empty when nothing is due.
+ */
+export function catchUpMonths(
+  asset: { purchaseMonth: string; usefulLifeMonths: number },
+  goLiveMonth: string,
+  requested: string,
+): string[] {
+  const first = monthDiff(asset.purchaseMonth, goLiveMonth) > 0 ? goLiveMonth : asset.purchaseMonth
+  const lastOfLife = addMonths(asset.purchaseMonth, Math.floor(asset.usefulLifeMonths) - 1)
+  const last = monthDiff(lastOfLife, requested) > 0 ? lastOfLife : requested
+  const out: string[] = []
+  for (let m = first; monthDiff(m, last) >= 0; m = addMonths(m, 1)) out.push(m)
+  return out
+}
