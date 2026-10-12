@@ -4,6 +4,7 @@
 // Ledger footprint of a run (isManual=false; not in sync.ts SOURCE_TYPES, so sync/rebuild never touch them):
 //   PAYROLL          sourceId = run id   Dr SALARIES_EXPENSE (Σ net) / Cr SALARIES_PAYABLE (one line per employee, employeeId set)
 //   PAYROLL_PAYMENT  sourceId = run id   Dr SALARIES_PAYABLE (one line per employee) / Cr cash-bank (Σ net)
+//                    removed again by POST [id]/unpay (PAID -> POSTED) unless its date is locked / before go-live
 // Every mutation of one run takes the same advisory lock `PAYROLL:<runId>`; run creation also locks `PAYROLL_MONTH:<month>`.
 import { prisma } from '@/lib/prisma'
 import { AccountingError, karachiDayKey } from './core'

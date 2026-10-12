@@ -45,7 +45,7 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
   check('cleanup: no payroll runs left', (await prisma.payrollRun.count()) === 0)
   check('cleanup: no QA employee/attendance residue', (await prisma.employee.count({ where: { name: { startsWith: 'QA Payroll ' } } })) === 0 && (await prisma.attendance.count({ where: { employeeId: { in: eids } } })) === 0)
   const s = await prisma.accountingSettings.findFirst()
-  check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null))
+  check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null) && (s?.defaultBankAccountId ?? null) === (orig?.defaultBankAccountId ?? null))
 }
 
 const balanced = (e: any) => e.lines.reduce((s: number, l: any) => s + paisa(l.debit), 0) === e.lines.reduce((s: number, l: any) => s + paisa(l.credit), 0) && e.lines.length >= 2
@@ -71,6 +71,7 @@ async function main() {
         ['GET', '/api/accounts/payroll'], ['POST', '/api/accounts/payroll'], ['GET', '/api/accounts/payroll/employees'],
         ['GET', '/api/accounts/payroll/x'], ['DELETE', '/api/accounts/payroll/x'], ['PUT', '/api/accounts/payroll/x/lines'],
         ['POST', '/api/accounts/payroll/x/post'], ['POST', '/api/accounts/payroll/x/pay'], ['POST', '/api/accounts/payroll/x/reopen'],
+        ['POST', '/api/accounts/payroll/x/unpay'],
       ]
       let bad = 0
       for (const [method, path] of routes) {
@@ -301,6 +302,24 @@ async function main() {
     check('post a paid run -> 409', res.status === 409)
     res = await edit([{ id: L(A.id).id, deduction: 0, bonus: 0 }])
     check('edit a paid run -> 409', res.status === 409)
+
+    // ---- undo payment (unpay) ----
+    await setSettings({ lockedThrough: new Date(`${today}T00:00:00+05:00`).toISOString() })
+    res = await post(`/api/accounts/payroll/${runId}/unpay`)
+    check('unpay when the payment date is locked -> 409, payment entry survives', res.status === 409 && (await prisma.journalEntry.count({ where: { sourceType: 'PAYROLL_PAYMENT', sourceId: runId } })) === 1 && (await prisma.payrollRun.findUnique({ where: { id: runId } }))!.status === 'PAID')
+    await setSettings({ lockedThrough: null })
+    const [u1, u2] = await Promise.all([post(`/api/accounts/payroll/${runId}/unpay`), post(`/api/accounts/payroll/${runId}/unpay`)])
+    check('concurrent unpay: exactly one 200, one 409', [u1.status, u2.status].sort().join() === '200,409', `${u1.status},${u2.status}`)
+    j = (await json(await get(`/api/accounts/payroll/${runId}`))).data
+    check('after unpay: run POSTED, only the PAYROLL entry left', j.status === 'POSTED' && j.entries.length === 1 && j.entries[0].sourceType === 'PAYROLL' && (await prisma.journalEntry.count({ where: { sourceType: 'PAYROLL_PAYMENT', sourceId: runId } })) === 0)
+    check('after unpay: Salaries Payable back to the posted amount, cash restored', (await acctNet('SALARIES_PAYABLE')) === sumNet2 && (await acctNet('CASH')) === cash0)
+    res = await post(`/api/accounts/payroll/${runId}/unpay`)
+    check('unpay an unpaid run -> 409 "not paid"', res.status === 409 && /not paid/i.test((await json(res))?.error ?? ''))
+    res = await post(`/api/accounts/payroll/${runId}/unpay`, {}, staffCookie('MANAGER'))
+    check('unpay as MANAGER -> 403', res.status === 403)
+    res = await post(`/api/accounts/payroll/${runId}/pay`, payBody({ requestId: 'qa-pay-2' }))
+    check('re-pay after unpay: 200, payable cleared again', res.status === 200 && (await acctNet('SALARIES_PAYABLE')) === 0 && (await acctNet('CASH')) - cash0 === sumNet2 && (await prisma.journalEntry.count({ where: { sourceType: 'PAYROLL_PAYMENT', sourceId: runId } })) === 1)
+
     res = await get('/api/accounts/payroll/nope')
     check('GET unknown run -> 404', res.status === 404)
 

@@ -267,6 +267,7 @@ export function Payroll() {
               {draft && <Button size="sm" className="gap-2" disabled={busy} onClick={() => action('post', 'Payroll posted to the ledger', `Post payroll for ${detail.month}? This books ${formatPKR(detail.totals.net)} as salaries expense and payable.`)}><Send size={14} /> Post</Button>}
               {detail.status === 'POSTED' && <Button variant="outline" size="sm" className="gap-2" disabled={busy} onClick={() => action('reopen', 'Run re-opened as draft', 'Re-open this run? Its ledger entry will be removed.')}><RotateCcw size={14} /> Re-open</Button>}
               {detail.status === 'POSTED' && <Button size="sm" className="gap-2" disabled={busy} onClick={openPay}><Banknote size={14} /> Mark paid</Button>}
+              {detail.status === 'PAID' && <Button variant="outline" size="sm" className="gap-2" disabled={busy} onClick={() => action('unpay', 'Payment undone — run is back to posted', `Undo the salary payment for ${detail.month}? The payment entry (${formatPKR(detail.totals.net)}) will be removed from the ledger and the salaries will show as payable again.`)}><RotateCcw size={14} /> Undo payment</Button>}
             </div>
           )}
         </div>
