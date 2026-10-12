@@ -22,7 +22,7 @@ interface PurchaseInvoice {
   _count: { items: number }
 }
 
-interface Meta { page: number; pageSize: number; total: number; totalPages: number }
+interface Meta { page: number; pageSize: number; total: number; totalPages: number; outstanding?: number }
 
 const STATUS_COLORS: Record<string, string> = {
   UNPAID:  'bg-red-100 text-red-700',
@@ -84,9 +84,8 @@ export default function PurchaseInvoicesPage() {
       )
     : invoices
 
-  const totalUnpaid = invoices
-    .filter(i => i.status !== 'PAID')
-    .reduce((s, i) => s + Number(i.totalAmount), 0)
+  // Server-computed over every invoice matching the filters (net of payments), not just this page
+  const totalUnpaid = meta.outstanding ?? 0
 
   return (
     <div className="space-y-6">
@@ -99,7 +98,7 @@ export default function PurchaseInvoicesPage() {
             <p className="text-slate-500 text-sm">
               {meta.total} invoices
               {totalUnpaid > 0 && (
-                <span className="text-red-600 ml-2">· Outstanding: {formatPKR(totalUnpaid)}</span>
+                <span className="text-red-600 ml-2">· Unpaid (net of payments): {formatPKR(totalUnpaid)}</span>
               )}
             </p>
           </div>

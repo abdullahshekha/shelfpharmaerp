@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { loadReceivableOutstanding } from '@/lib/utils/outstanding'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,8 +22,7 @@ export async function GET() {
     tomorrowDeliveries,
     lowStockMeds,
     nearExpiryBatches,
-    outstandingSum,
-    returnCredits,
+    receivable,
   ] = await Promise.all([
     prisma.order.findMany({
       where: { orderDate: { gte: startOfDay, lt: tomorrow } },
@@ -41,11 +41,7 @@ export async function GET() {
       orderBy: { expiryDate: 'asc' },
       take: 10,
     }),
-    prisma.invoice.aggregate({
-      where: { status: { in: ['UNPAID', 'PARTIAL', 'OVERDUE'] } },
-      _sum: { totalAmount: true },
-    }),
-    prisma.salesReturn.aggregate({ _sum: { totalAmount: true } }),
+    loadReceivableOutstanding(prisma),
   ])
 
   const todayTotal = todayOrders.reduce((sum, o) => sum + Number(o.totalAmount), 0)
@@ -65,7 +61,7 @@ export async function GET() {
       tomorrowDeliveries,
       lowStock,
       nearExpiryBatches,
-      outstandingReceivables: Number(outstandingSum._sum.totalAmount ?? 0) - Number(returnCredits._sum.totalAmount ?? 0),
+      outstandingReceivables: receivable.outstanding,
     },
   })
 }

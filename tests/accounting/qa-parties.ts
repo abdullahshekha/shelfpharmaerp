@@ -93,6 +93,8 @@ async function main() {
     check('opening balance unknown party -> 400', r.status === 400)
     r = await api('/api/accounts/receivable/opening-balance', ACCT, { method: 'POST', body: JSON.stringify({ amount: 5 }) })
     check('opening balance missing party -> 400', r.status === 400)
+    r = await api('/api/accounts/receivable/opening-balance', ACCT, { method: 'POST', body: JSON.stringify({ partyId: retailer.id, amount: 2e9 }) })
+    check('opening balance above 1e9 -> 400', r.status === 400)
     check('failed attempts posted nothing', (await prisma.journalEntry.count()) === 0)
     r = await api('/api/accounts/receivable/x?from=2026-02-31', ACCT)
     check('statement: invalid from -> 400', r.status === 400)
@@ -108,6 +110,9 @@ async function main() {
     const eqL = obLines.find((l) => l.account.systemKey === 'OPENING_EQUITY')
     check('AR opening: Dr AR[party] 1000 / Cr Opening Equity 1000, manual, dated go-live',
       Number(arL?.debit) === 1000 && arL?.retailerId === retailer.id && Number(eqL?.credit) === 1000 && ob.isManual === true && ob.memo === 'Opening balance' && new Date(ob.date).getTime() === goLive.getTime())
+
+    r = await api('/api/accounts/receivable/opening-balance', ACCT, { method: 'POST', body: JSON.stringify({ partyId: retailer.id, amount: 1000 }) })
+    check('AR opening balance double submit (sequential) -> 409, still one entry', r.status === 409 && /already exists/i.test((await json(r))?.error ?? '') && (await prisma.journalEntry.count({ where: { isManual: true, memo: 'Opening balance', lines: { some: { retailerId: retailer.id } } } })) === 1)
 
     const mk = await api('/api/orders', ADMIN, { method: 'POST', body: JSON.stringify({ retailerId: retailer.id, items: [{ medicineId: med.id, quantity: 10, unitPrice: 100, offerPercent: 10, salesTax: 0 }] }) })
     const order = (await json(mk)).data
@@ -128,6 +133,9 @@ async function main() {
     ids.payments.push(pay.id)
     r = await api(`/api/accounts/receivable/${retailer.id}`, ACCT)
     st = (await json(r)).data
+    r = await api(`/api/retailers/${retailer.id}`, ADMIN)
+    const rd = (await json(r))?.data
+    check('customer outstandingBalance nets the payment on a PARTIAL invoice (900 - 300 = 600)', r.status === 200 && rd.outstandingBalance === 600, JSON.stringify({ ob: rd?.outstandingBalance, status: inv && (await prisma.invoice.findUnique({ where: { id: inv.id } }))?.status }))
     check('after payment 300: running 1000/1900/1600, difference still 1000', st.rows.length === 3 && st.rows[2].balance === 1600 && st.ledgerBalance === 1600 && st.invoiceBalance === 600 && st.difference === 1000, JSON.stringify({ l: st.ledgerBalance, i: st.invoiceBalance }))
     r = await api(`/api/accounts/receivable/${retailer.id}?from=2099-01-01`, ACCT)
     st = (await json(r)).data
@@ -153,9 +161,12 @@ async function main() {
     await prisma.retailer.delete({ where: { id: idle.id } })
 
     // ---- AP ----
-    r = await api('/api/accounts/payable/opening-balance', ACCT, { method: 'POST', body: JSON.stringify({ partyId: supplier.id, amount: 250 }) })
+    const apBody = JSON.stringify({ partyId: supplier.id, amount: 250 })
+    const apRes = await Promise.all([api('/api/accounts/payable/opening-balance', ACCT, { method: 'POST', body: apBody }), api('/api/accounts/payable/opening-balance', ACCT, { method: 'POST', body: apBody })])
+    check('AP opening balance concurrent double submit: exactly one 201 and one 409', apRes.map((x) => x.status).sort().join() === '201,409', apRes.map((x) => x.status).join())
+    r = apRes.find((x) => x.status === 201)!
     const apOb = (await json(r))?.data
-    check('AP opening balance: 201', r.status === 201 && !!apOb)
+    check('AP opening balance: 201, exactly one entry', r.status === 201 && !!apOb && (await prisma.journalEntry.count({ where: { isManual: true, memo: 'Opening balance', lines: { some: { supplierId: supplier.id } } } })) === 1)
     const apLines = await prisma.journalLine.findMany({ where: { entryId: apOb.id }, include: { account: true } })
     const apL = apLines.find((l) => l.account.systemKey === 'AP')
     const apEq = apLines.find((l) => l.account.systemKey === 'OPENING_EQUITY')

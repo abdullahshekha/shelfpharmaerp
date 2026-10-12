@@ -25,7 +25,13 @@ export async function GET(req: NextRequest) {
     }),
   }
 
-  const [invoices, total] = await Promise.all([
+  // Unpaid balance across ALL invoices matching the filters (not just this page): total - payments, never below 0.
+  const openInvoices = prisma.purchaseInvoice.findMany({
+    where: { AND: [where, { status: { not: 'PAID' } }] },
+    select: { totalAmount: true, payments: { select: { amount: true } } },
+  })
+
+  const [invoices, total, open] = await Promise.all([
     prisma.purchaseInvoice.findMany({
       where,
       include: {
@@ -37,9 +43,14 @@ export async function GET(req: NextRequest) {
       take: pageSize,
     }),
     prisma.purchaseInvoice.count({ where }),
+    openInvoices,
   ])
+  const outstanding = open.reduce(
+    (s, i) => s + Math.max(0, Math.round(Number(i.totalAmount) * 100) - i.payments.reduce((p, x) => p + Math.round(Number(x.amount) * 100), 0)),
+    0,
+  ) / 100
 
-  return NextResponse.json({ data: invoices, meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } })
+  return NextResponse.json({ data: invoices, meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize), outstanding } })
 }
 
 interface PurchaseInvoiceItemInput {

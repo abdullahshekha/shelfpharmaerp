@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { toPaisa } from './money'
+import { OUTSTANDING_STATUSES, dueByRetailer } from '@/lib/utils/outstanding'
 
 export type PartyKind = 'receivable' | 'payable'
 
@@ -42,11 +43,12 @@ export async function loadPartyBalances(kind: PartyKind): Promise<{ accountId: s
 
   const invoiceRows =
     kind === 'receivable'
-      ? await prisma.$queryRaw<{ id: string; amount: Prisma.Decimal }[]>`
-          SELECT i."retailerId" AS id, SUM(i."totalAmount" - COALESCE(p.paid, 0)) AS amount
-          FROM "Invoice" i
-          LEFT JOIN (SELECT "invoiceId", SUM(amount) AS paid FROM "Payment" WHERE "invoiceId" IS NOT NULL GROUP BY "invoiceId") p ON p."invoiceId" = i.id
-          WHERE i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE') GROUP BY i."retailerId"`
+      ? await prisma.invoice
+          .findMany({
+            where: { status: { in: [...OUTSTANDING_STATUSES] } },
+            select: { retailerId: true, status: true, totalAmount: true, payments: { select: { amount: true } } },
+          })
+          .then((invs) => Array.from(dueByRetailer(invs).entries()).map(([id, paisa]) => ({ id, amount: paisa / 100 })))
       : await prisma.$queryRaw<{ id: string; amount: Prisma.Decimal }[]>`
           SELECT i."supplierId" AS id, SUM(i."totalAmount" - COALESCE(p.paid, 0)) AS amount
           FROM "PurchaseInvoice" i

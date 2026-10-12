@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { loadReceivableOutstanding } from '@/lib/utils/outstanding'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,16 +35,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const outstanding = await prisma.invoice.aggregate({
-    where: { retailerId: id, status: { in: ['UNPAID', 'PARTIAL', 'OVERDUE'] } },
-    _sum: { totalAmount: true },
-  })
+  // Unpaid invoice balances (net of payments) minus sales-return credits — see lib/utils/outstanding.ts
+  const { outstanding: outstandingBalance, returnCredits } = await loadReceivableOutstanding(prisma, id)
 
-  // Sales returns are credited against what the customer owes (same idea as supplier returns)
-  const returnCredits = await prisma.salesReturn.aggregate({ where: { retailerId: id }, _sum: { totalAmount: true } })
-  const outstandingBalance = Number(outstanding._sum.totalAmount ?? 0) - Number(returnCredits._sum.totalAmount ?? 0)
-
-  return NextResponse.json({ data: { ...retailer, outstandingBalance, returnCredits: Number(returnCredits._sum.totalAmount ?? 0) } })
+  return NextResponse.json({ data: { ...retailer, outstandingBalance, returnCredits } })
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
