@@ -49,6 +49,23 @@ export async function PUT(req: NextRequest) {
   }
 
   const current = await getSettings(prisma)
+  const isAdmin = auth.user.role === 'ADMIN'
+
+  // Period lock: an ACCOUNTANT may only move it forward (or set it when unset); moving it back or clearing it reopens
+  // closed periods and is ADMIN-only.
+  if ('lockedThrough' in data && !isAdmin && current.lockedThrough) {
+    const next = data.lockedThrough
+    if (!next || next.getTime() < current.lockedThrough.getTime()) {
+      return NextResponse.json({ error: 'Only an Admin can move the period lock backwards or clear it' }, { status: 403 })
+    }
+  }
+  // Go-live: once any journal entry exists, changing it re-dates what the ledger includes — ADMIN only.
+  if ('goLiveDate' in data && !isAdmin && (data.goLiveDate?.getTime() ?? null) !== (current.goLiveDate?.getTime() ?? null)) {
+    if ((await prisma.journalEntry.count()) > 0) {
+      return NextResponse.json({ error: 'Only an Admin can change the go-live date once journal entries exist' }, { status: 403 })
+    }
+  }
+
   const updated = await prisma.accountingSettings.update({ where: { id: current.id }, data })
   const goLiveChanged = 'goLiveDate' in data && (data.goLiveDate?.getTime() ?? null) !== (current.goLiveDate?.getTime() ?? null)
   return NextResponse.json({

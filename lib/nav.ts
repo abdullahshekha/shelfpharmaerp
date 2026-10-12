@@ -71,19 +71,21 @@ export const NAV_HUBS: NavHub[] = [
     ],
   },
   {
-    key: 'settings', label: 'Settings', icon: Settings, roles: ADMIN_MANAGER,
+    // No hub-level roles: each tab carries its own. Chart of Accounts is ADMIN + ACCOUNTANT only (its APIs 403 for
+    // MANAGER), so an ACCOUNTANT sees a Settings hub containing just that tab and a MANAGER never sees it.
+    key: 'settings', label: 'Settings', icon: Settings,
     tabs: [
-      { href: '/settings/approvals',         label: 'Approvals' },
-      { href: '/settings/areas',             label: 'Areas' },
-      { href: '/settings/categories',        label: 'Categories' },
-      { href: '/settings/manufacturers',     label: 'Manufacturers' },
-      { href: '/settings/chart-of-accounts', label: 'Chart of Accounts' },
-      { href: '/hr',                         label: 'HR' },
+      { href: '/settings/approvals',         label: 'Approvals',         roles: ADMIN_MANAGER },
+      { href: '/settings/areas',             label: 'Areas',             roles: ADMIN_MANAGER },
+      { href: '/settings/categories',        label: 'Categories',        roles: ADMIN_MANAGER },
+      { href: '/settings/manufacturers',     label: 'Manufacturers',     roles: ADMIN_MANAGER },
+      { href: '/settings/chart-of-accounts', label: 'Chart of Accounts', roles: ACCOUNTS },
+      { href: '/hr',                         label: 'HR',                roles: ADMIN_MANAGER },
     ],
   },
 ]
 
-const allowed = (roles: string[] | undefined, role: string) => !roles || roles.includes(role)
+export const allowed = (roles: string[] | undefined, role: string) => !roles || roles.includes(role)
 
 export function visibleTabs(hub: NavHub, role: string): NavTab[] {
   return (hub.tabs ?? []).filter((t) => allowed(t.roles ?? hub.roles, role))

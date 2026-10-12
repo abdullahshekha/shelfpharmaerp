@@ -107,8 +107,10 @@ export async function postOpeningBalance(req: NextRequest, kind: PartyKind) {
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
   const partyId = typeof body?.partyId === 'string' ? body.partyId : ''
   if (!partyId) return NextResponse.json({ error: kind === 'receivable' ? 'Choose a customer' : 'Choose a supplier' }, { status: 400 })
-  const amount = Number(body?.amount)
-  if (!Number.isFinite(amount) || toPaisa(amount) <= 0) return NextResponse.json({ error: 'Amount must be greater than zero' }, { status: 400 })
+  const rawAmount = Number(body?.amount)
+  if (!Number.isFinite(rawAmount) || toPaisa(rawAmount) <= 0) return NextResponse.json({ error: 'Amount must be greater than zero' }, { status: 400 })
+  if (rawAmount > 1e9) return NextResponse.json({ error: 'Amount is too large (maximum Rs 1,000,000,000)' }, { status: 400 })
+  const amount = toPaisa(rawAmount) / 100 // round to paisa BEFORE posting
   const exists = kind === 'receivable'
     ? await prisma.retailer.count({ where: { id: partyId } })
     : await prisma.supplier.count({ where: { id: partyId } })
@@ -117,9 +119,22 @@ export async function postOpeningBalance(req: NextRequest, kind: PartyKind) {
   try {
     const entry = await prisma.$transaction(
       async (tx) => {
+        // One opening balance per party: serialise double/concurrent submits, then refuse if a live one exists.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`OPENING:${kind}:${partyId}`}))`
         const settings = await getSettings(tx)
         assertManualPostable(settings, settings.goLiveDate ?? new Date(0))
         const party = kind === 'receivable' ? { retailerId: partyId } : { supplierId: partyId }
+        const prior = await tx.journalEntry.findMany({
+          where: { isManual: true, memo: 'Opening balance', date: settings.goLiveDate!, lines: { some: party } },
+          select: { id: true },
+        })
+        if (prior.length) {
+          const reversed = await tx.journalEntry.findMany({ where: { reversesId: { in: prior.map((p) => p.id) } }, select: { reversesId: true } })
+          const done = new Set(reversed.map((r) => r.reversesId))
+          if (prior.some((p) => !done.has(p.id))) {
+            throw new AccountingError(409, 'An opening balance already exists for this party. Reverse it in the General Ledger first, then enter the new amount.')
+          }
+        }
         return postEntry(tx, {
           date: settings.goLiveDate!,
           memo: 'Opening balance',
