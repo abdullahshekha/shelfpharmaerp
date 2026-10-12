@@ -183,3 +183,25 @@ export function buildSupplierReturn(r: SupplierReturnInput): BuiltEntry[] {
     { accountKey: 'INVENTORY', credit: amt },
   ])
 }
+
+// ---- Stock batch write-off (batch deleted while the module is live) ----
+// Posted by lib/inventory/batch-delete.ts as sourceType BATCH_WRITEOFF (sourceId = batch id). Not a sync SOURCE_TYPE:
+// sync/rebuild never touch it, same family as DEPRECIATION / PAYROLL.
+export interface BatchWriteoffInput {
+  date: Date
+  medicineName: string
+  batchNumber: string
+  /** units physically disappearing: the batch's currentQty at deletion time */
+  quantity: number
+  purchasePrice: number
+}
+
+export function buildBatchWriteoff(b: BatchWriteoffInput): BuiltEntry[] {
+  if (!(b.quantity > 0) || !(b.purchasePrice > 0)) return []
+  const memo = `Stock write-off: ${b.medicineName} batch ${b.batchNumber} (${b.quantity} units)`
+  const amt = fromPaisa(p(b.quantity * b.purchasePrice))
+  return finish(b.date, memo, [
+    { accountKey: 'OTHER_EXPENSES', debit: amt, memo },
+    { accountKey: 'INVENTORY', credit: amt },
+  ])
+}

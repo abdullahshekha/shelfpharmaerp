@@ -23,6 +23,7 @@ Sales, purchases, payments and returns already exist and are edited/deleted in m
   | `SUPPLIER_PAYMENT` | date ≥ go-live | Dr Accounts Payable [party], Cr Cash/Bank |
   | `SUPPLIER_RETURN` | date ≥ go-live | Dr Accounts Payable [party], Cr Inventory `totalAmount` |
   | `PAYROLL`, `DEPRECIATION`, `ASSET_PURCHASE` | see below | see below |
+  | `BATCH_WRITEOFF` (added later; not a sync source, never touched by sync/rebuild) | stock batch deleted while live (now ≥ go-live, not locked; locked → delete refused 409) | Dr Other Expenses, Cr Inventory = batch `currentQty × purchasePrice`, dated at deletion, sourceId = batch id, same transaction as the delete |
 - `OrderItem.unitCost Decimal?` (additive, nullable) is **set when an order goes DELIVERED** from the FEFO batches actually deducted (weighted by quantity). COGS needs it because OrderItem has no batch link. Orders delivered before this ships have null → treated as no COGS entry (they predate go-live anyway).
 - Purchase tax line mapping follows the existing Purchase Invoice formula (`totalAmount = Σ line + Σ ST − Σ AIT collectible + Σ AIT payable`); the entry always balances by construction. **The accountant should review this mapping once** (it is the one non-obvious bit); the tax mapping is changeable in one file.
 

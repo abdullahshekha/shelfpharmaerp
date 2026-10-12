@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
+import { getUserFromRequest } from '@/lib/utils/auth'
+import { AccountingError } from '@/lib/accounting/core'
+import { deleteBatch } from '@/lib/inventory/batch-delete'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +21,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   })
   if (!batch) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // Writes the remaining stock off in the ledger (same transaction) once Accounts is live — see lib/inventory/batch-delete.ts.
   return handleDelete(req, 'MedicineBatch', batchId, `${batch.medicine.name} — Batch ${batch.batchNumber}`, async () => {
-    await prisma.medicineBatch.delete({ where: { id: batchId, medicineId: id } })
+    try {
+      const r = await deleteBatch(batchId, { medicineId: id, userId: getUserFromRequest(req).id || undefined })
+      return { writtenOff: r.writtenOff, entryNumber: r.entryNumber }
+    } catch (err) {
+      if (err instanceof AccountingError) return NextResponse.json({ error: err.message }, { status: err.status })
+      throw err
+    }
   })
 }

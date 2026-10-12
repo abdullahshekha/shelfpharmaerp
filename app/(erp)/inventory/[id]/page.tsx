@@ -111,12 +111,12 @@ export default function MedicineDetailPage() {
     setEditForm(f => ({ ...f, [field]: e.target.value }))
 
   const deleteBatch = async (batchId: string) => {
-    if (!confirm('Delete this batch?')) return
+    if (!confirm('Delete this batch? Any remaining stock in it is written off (Accounts: Other Expenses).')) return
     const res = await fetch(`/api/inventory/${id}/batches?batchId=${batchId}`, { method: 'DELETE' })
     const j = await res.json().catch(() => ({}))
     if (res.ok) {
       if (j.pending) toast.info(j.message)
-      else toast.success('Batch deleted')
+      else toast.success(j.writtenOff > 0 ? `Batch deleted — Rs. ${Number(j.writtenOff).toLocaleString('en-PK', { minimumFractionDigits: 2 })} written off to Other Expenses` : 'Batch deleted')
       fetchMedicine()
     } else {
       toast.error(j.error ?? 'Failed to delete batch')
