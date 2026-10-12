@@ -30,18 +30,18 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
   await prisma.accountingSettings.updateMany({ data: { goLiveDate: orig?.goLiveDate ?? null, lockedThrough: orig?.lockedThrough ?? null, defaultBankAccountId: orig?.defaultBankAccountId ?? null } })
   const assets = await prisma.fixedAsset.findMany({ where: { name: { startsWith: 'QA ' } }, select: { id: true } })
   const ids = Array.from(new Set([...assets.map((a) => a.id), ...created]))
-  await prisma.journalEntry.deleteMany({ where: { sourceType: { in: ASSET_TYPES }, OR: [{ sourceId: { in: ids } }, ...ids.map((i) => ({ sourceId: { startsWith: `${i}:` } }))] } })
+  await prisma.journalEntry.deleteMany({ where: { sourceType: { in: ASSET_TYPES }, OR: [{ sourceId: { in: [...ids, ...ids.map((i) => `opening:${i}`)] } }, ...ids.map((i) => ({ sourceId: { startsWith: `${i}:` } }))] } })
   await prisma.fixedAsset.deleteMany({ where: { id: { in: ids } } })
   const n1 = await prisma.journalEntry.count()
   check('cleanup: journal entry count restored', n1 === n0, `(${n1} vs ${n0})`)
   check('cleanup: no QA asset residue', (await prisma.fixedAsset.count()) === 0)
   const s = await prisma.accountingSettings.findFirst()
-  check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null))
+  check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null) && (s?.defaultBankAccountId ?? null) === (orig?.defaultBankAccountId ?? null))
 }
 
 async function entriesFor(id: string) {
   return prisma.journalEntry.findMany({
-    where: { sourceType: { in: ASSET_TYPES }, OR: [{ sourceId: id }, { sourceId: { startsWith: `${id}:` } }] },
+    where: { sourceType: { in: ASSET_TYPES }, OR: [{ sourceId: id }, { sourceId: `opening:${id}` }, { sourceId: { startsWith: `${id}:` } }] },
     include: { lines: true }, orderBy: [{ date: 'asc' }, { entryNumber: 'asc' }],
   })
 }
@@ -273,6 +273,93 @@ async function main() {
     check('dispose D today (before its current-month entry date) -> 400 unless month-end is today', r.status === 400 || today === lastDay(0), `status ${r.status}`)
     const disposedList = (await json(await api('/api/accounts/fixed-assets', ACCT))).data
     check('register totals exclude disposed assets', disposedList.find((a: any) => a.id === C.id).status === 'DISPOSED')
+
+    // ---- opening assets (bought before go-live) ----
+    {
+      const goLiveDay = dayIn(-3, 1)
+      const goLiveAt = new Date(`${goLiveDay}T00:00:00+05:00`)
+      const mo = (over: any = {}) => ({ name: 'QA Opening', category: 'QA', purchaseDate: dayIn(-6, 10), cost: 1200, salvageValue: 0, usefulLifeMonths: 12, isOpening: true, openingAccumulated: 300, ...over })
+      const ov = async (name: string, body: any, status: number) => { const x = await post('/api/accounts/fixed-assets', body); check(name, x.status === status, `got ${x.status} ${JSON.stringify(await json(x))}`) }
+      const n0o = await prisma.journalEntry.count()
+      await ov('opening: purchase date ON the go-live day -> 400', mo({ purchaseDate: goLiveDay }), 400)
+      await ov('opening: purchase date after go-live -> 400', mo({ purchaseDate: dayIn(-2, 3) }), 400)
+      await ov('opening: accumulated > cost - salvage -> 400', mo({ salvageValue: 100, openingAccumulated: 1100.01 }), 400)
+      await ov('opening: negative accumulated -> 400', mo({ openingAccumulated: -1 }), 400)
+      await ov('opening: isOpening not boolean -> 400', mo({ isOpening: 'yes' }), 400)
+      await prisma.accountingSettings.updateMany({ data: { goLiveDate: null } })
+      await ov('opening: no go-live date -> 400', mo(), 400)
+      await prisma.accountingSettings.updateMany({ data: { goLiveDate: goLiveAt } })
+      await setSettings({ lockedThrough: new Date(`${goLiveDay}T00:00:00+05:00`).toISOString() })
+      await ov('opening: go-live day locked -> 409', mo(), 409)
+      await setSettings({ lockedThrough: null })
+      check('opening: failed creates posted nothing and created no asset', (await prisma.journalEntry.count()) === n0o && (await prisma.fixedAsset.count({ where: { isOpening: true } })) === 0)
+
+      const bO = await balances()
+      r = await post('/api/accounts/fixed-assets', mo({ name: 'QA Opening O1', requestId: 'qa-o1', paidFromAccountId: cashAcc.id }))
+      const O1 = (await json(r))?.data
+      if (O1?.id) created.push(O1.id)
+      check('opening O1: 201, isOpening, accumulated 300, book value 900, no funding account', r.status === 201 && O1.isOpening === true && O1.accumulatedDepreciation === 300 && O1.bookValue === 900 && O1.paidFromAccountId === null, JSON.stringify(O1))
+      const eO1 = await entriesFor(O1.id)
+      const oe = eO1[0]
+      const obeId = equity.id
+      const accumId0 = (await prisma.account.findFirst({ where: { systemKey: 'ACCUM_DEPRECIATION' } }))!.id
+      const faId0 = (await prisma.account.findFirst({ where: { systemKey: 'FIXED_ASSETS' } }))!.id
+      check('opening O1: ONE balanced ASSET_PURCHASE entry, sourceId opening:<id>, dated the go-live date',
+        eO1.length === 1 && oe.sourceType === 'ASSET_PURCHASE' && oe.sourceId === `opening:${O1.id}` && !oe.isManual && balanced(oe) && oe.date.getTime() === goLiveAt.getTime())
+      check('opening O1 lines: Dr FA 1200 / Cr Accum 300 / Cr Opening Balance Equity 900',
+        oe.lines.length === 3 && oe.lines.some((l) => l.accountId === faId0 && paisa(l.debit) === 120000) && oe.lines.some((l) => l.accountId === accumId0 && paisa(l.credit) === 30000) && oe.lines.some((l) => l.accountId === obeId && paisa(l.credit) === 90000))
+      const bO1 = await balances()
+      check('ledger: FA +1200, cash untouched', paisa(bO1.FIXED_ASSETS - bO.FIXED_ASSETS) === 120000 && paisa(bO1.CASH - bO.CASH) === 0)
+
+      // O2: over-stated opening accumulation -> capped depreciation. 1000 - 100 salvage over 10 months = 90/month.
+      r = await post('/api/accounts/fixed-assets', mo({ name: 'QA Opening O2', purchaseDate: dayIn(-6, 1), cost: 1000, salvageValue: 100, usefulLifeMonths: 10, openingAccumulated: 800 }))
+      const O2 = (await json(r))?.data
+      if (O2?.id) created.push(O2.id)
+      // O3: opening accumulated already equals the depreciable amount -> nothing to depreciate; no OBE line.
+      r = await post('/api/accounts/fixed-assets', mo({ name: 'QA Opening O3', purchaseDate: dayIn(-6, 2), cost: 500, usefulLifeMonths: 5, openingAccumulated: 500 }))
+      const O3 = (await json(r))?.data
+      if (O3?.id) created.push(O3.id)
+      const eO3 = await entriesFor(O3.id)
+      check('opening O3 (fully depreciated): entry Dr FA 500 / Cr Accum 500 only', r.status === 201 && eO3.length === 1 && eO3[0].lines.length === 2 && balanced(eO3[0]) && eO3[0].lines.some((l) => l.accountId === accumId0 && paisa(l.credit) === 50000))
+
+      r = await post('/api/accounts/fixed-assets/depreciation', { month: monthOf(-1) })
+      const jo = (await json(r))?.data
+      check('run M-1 catches opening assets up from the go-live month (O1: 3 x 100)', r.status === 200 && (await depSum(O1.id)) === 30000 &&
+        (await prisma.journalEntry.count({ where: { sourceType: 'DEPRECIATION', sourceId: { startsWith: `${O1.id}:` } } })) === 3 &&
+        !(await prisma.journalEntry.findFirst({ where: { sourceType: 'DEPRECIATION', sourceId: { startsWith: `${O1.id}:${monthOf(-4)}` } } })), JSON.stringify(jo?.posted?.filter((p: any) => /Opening/.test(p.name))))
+      check('O2 capped: M-3 90, M-2 10 (opening 800 + 100 = cost - salvage), nothing after', (await depSum(O2.id)) === 10000 &&
+        paisa((await prisma.journalEntry.findFirst({ where: { sourceType: 'DEPRECIATION', sourceId: `${O2.id}:${monthOf(-2)}` }, include: { lines: true } }))?.lines.find((l) => Number(l.debit) > 0)?.debit ?? 0) === 1000)
+      check('O3: nothing posted', (await depSum(O3.id)) === 0 && jo.skipped.some((x: any) => x.name === 'QA Opening O3'))
+      const reg = (await json(await api('/api/accounts/fixed-assets', ACCT))).data
+      const rO2 = reg.find((a: any) => a.id === O2.id)
+      check('register: O2 accumulated 900 (800 opening + 100), book value 100 = salvage, Opening flag', rO2.accumulatedDepreciation === 900 && rO2.bookValue === 100 && rO2.isOpening === true, JSON.stringify(rO2))
+
+      // edit freeze + delete
+      r = await put(`/api/accounts/fixed-assets/${O3.id}`, { cost: 600 })
+      check('opening asset: cost edit -> 409 (frozen from the start)', r.status === 409)
+      r = await put(`/api/accounts/fixed-assets/${O3.id}`, { openingAccumulated: 100 })
+      check('opening asset: openingAccumulated edit -> 409', r.status === 409)
+      r = await put(`/api/accounts/fixed-assets/${O3.id}`, { name: 'QA Opening O3 renamed', notes: 'x' })
+      check('opening asset: rename/notes -> 200', r.status === 200)
+      r = await del(`/api/accounts/fixed-assets/${O2.id}`)
+      check('opening asset with depreciation: delete -> 409', r.status === 409)
+      r = await del(`/api/accounts/fixed-assets/${O3.id}`)
+      check('opening asset without depreciation: delete -> 200, opening entry removed', r.status === 200 && (await entriesFor(O3.id)).length === 0 && !(await prisma.fixedAsset.findUnique({ where: { id: O3.id } })))
+      const gO1 = await json(await api(`/api/accounts/fixed-assets/${O1.id}`, ACCT))
+      check('GET [id] of an opening asset lists its opening entry + depreciation', gO1.data.entries.length === 4 && gO1.data.entries.some((e: any) => e.sourceId === `opening:${O1.id}`))
+
+      // dispose clears accumulated including the opening component
+      r = await post(`/api/accounts/fixed-assets/${O1.id}/dispose`, { date: today })
+      const dO = (await json(r))?.data
+      const dis1 = (await entriesFor(O1.id)).find((e) => e.sourceType === 'ASSET_DISPOSAL')
+      check('dispose O1: written off 600; Dr Accum 600 (300 opening + 300 posted) + Dr Other 600 / Cr FA 1200, balanced',
+        r.status === 200 && dO.writtenOff === 600 && !!dis1 && balanced(dis1) && dis1.lines.some((l) => l.accountId === accumId0 && paisa(l.debit) === 60000) &&
+        dis1.lines.some((l) => l.accountId === expense.id && paisa(l.debit) === 60000) && dis1.lines.some((l) => l.accountId === faId0 && paisa(l.credit) === 120000), JSON.stringify(dO))
+      const accumNetO1 = (await prisma.journalLine.findMany({ where: { accountId: accumId0, entry: { OR: [{ sourceId: `opening:${O1.id}` }, { sourceId: O1.id }, { sourceId: { startsWith: `${O1.id}:` } }] } } })).reduce((s2, l) => s2 + paisa(l.credit) - paisa(l.debit), 0)
+      check('O1 accumulated depreciation fully cleared in the ledger', accumNetO1 === 0)
+      const tbO = await prisma.journalLine.aggregate({ _sum: { debit: true, credit: true } })
+      check('opening assets: trial balance still balances', paisa(tbO._sum.debit) === paisa(tbO._sum.credit))
+    }
 
     // ---- sync/rebuild must not touch asset entries ----
     const snap = async () => JSON.stringify((await prisma.journalEntry.findMany({ where: { sourceType: { in: ASSET_TYPES } }, include: { lines: { orderBy: { id: 'asc' } } }, orderBy: { id: 'asc' } })).map((e) => ({ id: e.id, n: e.entryNumber, d: e.date, l: e.lines.map((l) => [l.id, l.accountId, String(l.debit), String(l.credit)]) })))

@@ -87,3 +87,52 @@ test('catchUpMonths: purchase month through requested, never before go-live, cap
   assert.deepEqual(catchUpMonths({ purchaseMonth: '2026-01', usefulLifeMonths: 3 }, '2026-01', '2026-12'), ['2026-01', '2026-02', '2026-03'])
   assert.deepEqual(catchUpMonths({ purchaseMonth: '2026-09', usefulLifeMonths: 3 }, '2026-01', '2026-08'), [])
 })
+
+// ---- opening assets (bought before go-live) ----
+import { remainingDepreciablePaisa } from '../../lib/accounting/depreciation'
+
+/** Simulates the route: each catch-up month posts depreciationPaisa(asset, m, postedSoFar). */
+function runCatchUp(a: DepreciableAsset, goLive: string, through: string): number[] {
+  const out: number[] = []
+  let posted = 0
+  for (const m of catchUpMonths(a, goLive, through)) {
+    const p = depreciationPaisa(a, m, posted)
+    if (p > 0) { out.push(p); posted += p }
+  }
+  return out
+}
+
+test('opening asset mid-life: schedule unchanged, starts at go-live month', () => {
+  // 12000 over 12 months from 2026-01 = 1000/month; 5 months (Jan-May) booked before a June go-live.
+  const a: DepreciableAsset = { cost: 12000, salvageValue: 0, usefulLifeMonths: 12, purchaseMonth: '2026-01', openingAccumulated: 5000 }
+  assert.deepEqual(catchUpMonths(a, '2026-06', '2026-08'), ['2026-06', '2026-07', '2026-08'])
+  const posted = runCatchUp(a, '2026-06', '2027-06')
+  assert.deepEqual(posted, Array(7).fill(100000))
+  assert.equal(5000 * 100 + posted.reduce((s, x) => s + x, 0), 12000 * 100)
+})
+
+test('opening asset already fully depreciated by openingAccumulated: nothing due', () => {
+  const a: DepreciableAsset = { cost: 10000, salvageValue: 1000, usefulLifeMonths: 24, purchaseMonth: '2025-01', openingAccumulated: 9000 }
+  assert.equal(remainingDepreciablePaisa(a), 0)
+  assert.deepEqual(catchUpMonths(a, '2026-01', '2026-06'), [])
+  assert.equal(depreciationPaisa(a, '2026-01'), 0)
+  assert.deepEqual(runCatchUp(a, '2026-01', '2026-12'), [])
+})
+
+test('opening asset: over-stated opening accumulation caps the last month(s)', () => {
+  // 1000/month regular; opening says 6500 booked although the schedule implies 6000 by go-live (2026-07).
+  const a: DepreciableAsset = { cost: 12000, salvageValue: 0, usefulLifeMonths: 12, purchaseMonth: '2026-01', openingAccumulated: 6500 }
+  const posted = runCatchUp(a, '2026-07', '2027-03')
+  assert.deepEqual(posted, [100000, 100000, 100000, 100000, 100000, 50000])
+  assert.equal(650000 + posted.reduce((s, x) => s + x, 0), 1200000) // never exceeds cost - salvage
+  // postedPaisa caps a single month directly as well
+  assert.equal(depreciationPaisa(a, '2026-12', 500000), 50000)
+  assert.equal(depreciationPaisa(a, '2026-12', 550000), 0)
+})
+
+test('openingAccumulated 0 / absent leaves the plain schedule (backwards compatible)', () => {
+  const a: DepreciableAsset = { cost: 1000, salvageValue: 0, usefulLifeMonths: 3, purchaseMonth: '2026-01' }
+  assert.deepEqual(['2026-01', '2026-02', '2026-03'].map((m) => depreciationPaisa(a, m)), [33333, 33333, 33334])
+  assert.deepEqual(['2026-01', '2026-02', '2026-03'].map((m) => depreciationPaisa({ ...a, openingAccumulated: 0 }, m, 0)), [33333, 33333, 33334])
+  assert.deepEqual(catchUpMonths({ ...a, openingAccumulated: 0 }, '2026-01', '2026-12'), ['2026-01', '2026-02', '2026-03'])
+})

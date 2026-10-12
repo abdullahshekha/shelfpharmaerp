@@ -17,7 +17,7 @@ interface Asset {
   id: string; name: string; category: string | null; notes: string | null; purchaseDate: string
   cost: number; salvageValue: number; usefulLifeMonths: number; status: 'ACTIVE' | 'DISPOSED'; disposedAt: string | null
   paidFromAccountId: string | null; monthlyDepreciation: number; accumulatedDepreciation: number; bookValue: number
-  depreciationEntries: number
+  depreciationEntries: number; isOpening: boolean; openingAccumulated: number
 }
 interface Meta { count: number; totalCost: number; totalAccumulated: number; totalBookValue: number }
 interface RunRow { assetId: string; name: string; month: string; amount?: number; entryNumber?: string; reason?: string }
@@ -37,8 +37,8 @@ const isFunding = (a: Account) =>
   a.isActive && a.systemKey !== 'AR' && a.systemKey !== 'AP' && a.subType !== 'RECEIVABLE' && a.subType !== 'PAYABLE' &&
   ((a.type === 'ASSET' && (a.subType === 'CASH' || a.subType === 'BANK')) || a.type === 'LIABILITY' || a.type === 'EQUITY')
 
-interface FormState { name: string; category: string; notes: string; purchaseDate: string; cost: string; salvage: string; life: string; fundingId: string }
-const emptyForm = (): FormState => ({ name: '', category: '', notes: '', purchaseDate: todayKarachi(), cost: '', salvage: '0', life: '60', fundingId: '' })
+interface FormState { name: string; category: string; notes: string; purchaseDate: string; cost: string; salvage: string; life: string; fundingId: string; isOpening: boolean; openingAccumulated: string }
+const emptyForm = (): FormState => ({ name: '', category: '', notes: '', purchaseDate: todayKarachi(), cost: '', salvage: '0', life: '60', fundingId: '', isOpening: false, openingAccumulated: '0' })
 
 export function FixedAssets() {
   const [assets, setAssets] = useState<Asset[]>([])
@@ -89,12 +89,14 @@ export function FixedAssets() {
   const openAdd = () => { setEditing(null); setForm(emptyForm()); requestId.current = newRequestId(); setFormOpen(true) }
   const openEdit = (a: Asset) => {
     setEditing(a)
-    setForm({ name: a.name, category: a.category ?? '', notes: a.notes ?? '', purchaseDate: toDateInput(a.purchaseDate), cost: String(a.cost), salvage: String(a.salvageValue), life: String(a.usefulLifeMonths), fundingId: a.paidFromAccountId ?? '' })
+    setForm({ name: a.name, category: a.category ?? '', notes: a.notes ?? '', purchaseDate: toDateInput(a.purchaseDate), cost: String(a.cost), salvage: String(a.salvageValue), life: String(a.usefulLifeMonths), fundingId: a.paidFromAccountId ?? '', isOpening: a.isOpening, openingAccumulated: String(a.openingAccumulated ?? 0) })
     setFormOpen(true)
   }
-  // Cost / life / salvage / date / funding are frozen once depreciation exists (or after disposal).
-  const frozen = !!editing && (editing.depreciationEntries > 0 || editing.status === 'DISPOSED')
+  // Cost / life / salvage / date / funding are frozen once depreciation exists (or after disposal). Existing
+  // (opening) assets are frozen from the start: delete and re-add them to change their figures.
+  const frozen = !!editing && (editing.isOpening || editing.depreciationEntries > 0 || editing.status === 'DISPOSED')
   const set = (k: keyof FormState, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const opening = editing ? editing.isOpening : form.isOpening
 
   const save = async () => {
     if (saveLock.current) return
@@ -106,14 +108,22 @@ export function FixedAssets() {
     if (!Number.isFinite(cost) || cost <= 0) return toast.error('Enter a cost greater than zero')
     if (!Number.isFinite(salvage) || salvage < 0) return toast.error('Salvage value cannot be negative')
     if (!Number.isInteger(life) || life < 1) return toast.error('Useful life must be a whole number of months')
-    if (!form.fundingId) return toast.error('Choose the account the asset was paid from')
+    const openingAcc = parseFloat(form.openingAccumulated || '0')
+    if (!opening && !form.fundingId) return toast.error('Choose the account the asset was paid from')
+    if (opening && !editing) {
+      if (!Number.isFinite(openingAcc) || openingAcc < 0) return toast.error('Accumulated depreciation cannot be negative')
+      if (Math.round(openingAcc * 100) > Math.round(cost * 100) - Math.round(salvage * 100)) return toast.error('Accumulated depreciation cannot exceed cost minus salvage value')
+    }
     saveLock.current = true
     setSaving(true)
     try {
       const common = { name: form.name.trim(), category: form.category.trim() || null, notes: form.notes.trim() || null }
+      const financial = { purchaseDate: form.purchaseDate, cost: Math.round(cost * 100) / 100, salvageValue: Math.round(salvage * 100) / 100, usefulLifeMonths: life }
       const body = frozen
         ? common
-        : { ...common, purchaseDate: form.purchaseDate, cost: Math.round(cost * 100) / 100, salvageValue: Math.round(salvage * 100) / 100, usefulLifeMonths: life, paidFromAccountId: form.fundingId }
+        : opening
+          ? { ...common, ...financial, isOpening: true, openingAccumulated: Math.round(openingAcc * 100) / 100 }
+          : { ...common, ...financial, paidFromAccountId: form.fundingId }
       const res = await fetch(editing ? `/api/accounts/fixed-assets/${editing.id}` : '/api/accounts/fixed-assets', {
         method: editing ? 'PUT' : 'POST',
         headers: { 'content-type': 'application/json' },
@@ -240,7 +250,7 @@ export function FixedAssets() {
                 ) : assets.map(a => (
                   <tr key={a.id} className="border-b">
                     <td className="px-4 py-2">
-                      <p className="font-medium">{a.name}</p>
+                      <p className="font-medium">{a.name}{a.isOpening && <Badge variant="outline" className="ml-2 text-[10px]" title={`Bought before go-live — opening balance (accumulated ${formatPKR(a.openingAccumulated)} at go-live)`}>Opening</Badge>}</p>
                       <p className="text-xs text-slate-500">{[a.category, `${a.usefulLifeMonths} mo life`, a.salvageValue > 0 ? `salvage ${formatPKR(a.salvageValue)}` : null].filter(Boolean).join(' · ')}</p>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">{formatDate(a.purchaseDate)}</td>
@@ -274,11 +284,24 @@ export function FixedAssets() {
             <DialogTitle>{editing ? 'Edit asset' : 'Add fixed asset'}</DialogTitle>
             <DialogDescription>
               {editing
-                ? frozen ? 'Depreciation has been posted (or the asset is disposed), so only name, category and notes can change.' : 'Changing cost, dates or funding re-posts the purchase entry.'
-                : 'Posts Dr Fixed Assets / Cr the account it was paid from.'}
+                ? editing.isOpening && editing.status === 'ACTIVE' && editing.depreciationEntries === 0
+                  ? 'This asset was added as an opening balance (bought before go-live): only name, category and notes can change. To correct its figures, delete it and add it again.'
+                  : frozen ? 'Depreciation has been posted (or the asset is disposed), so only name, category and notes can change.' : 'Changing cost, dates or funding re-posts the purchase entry.'
+                : form.isOpening
+                  ? 'Posts one opening entry on the go-live date: Dr Fixed Assets (cost) / Cr Accumulated Depreciation (depreciation to date) / Cr Opening Balance Equity (the rest).'
+                  : 'Posts Dr Fixed Assets / Cr the account it was paid from.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {!editing && (
+              <label className="flex items-start gap-2 rounded-md border bg-slate-50 p-2 text-sm cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={form.isOpening} onChange={e => setForm(f => ({ ...f, isOpening: e.target.checked }))} />
+                <span>
+                  <span className="font-medium">Bought before go-live — opening balance</span>
+                  <span className="block text-xs text-slate-500">For an asset the business already owned before the Accounts go-live date. No cash/bank payment is recorded; the purchase date must be before go-live.</span>
+                </span>
+              </label>
+            )}
             <div className="flex gap-3">
               <div className="flex-1"><p className="text-xs text-slate-500 mb-1">Name</p><Input className="h-8 text-sm" value={form.name} onChange={e => set('name', e.target.value)} /></div>
               <div className="flex-1"><p className="text-xs text-slate-500 mb-1">Category</p><Input className="h-8 text-sm" value={form.category} onChange={e => set('category', e.target.value)} placeholder="e.g. Vehicle" /></div>
@@ -292,6 +315,13 @@ export function FixedAssets() {
               <div className="flex-1"><p className="text-xs text-slate-500 mb-1">Purchase date</p><Input type="date" className="h-8 text-sm" disabled={frozen} value={form.purchaseDate} onChange={e => set('purchaseDate', e.target.value)} /></div>
             </div>
             <p className="text-xs text-slate-500">Depreciation is straight-line and starts in the purchase month (a full month&apos;s charge, whatever the day).</p>
+            {opening ? (
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Accumulated depreciation to date (Rs.) — booked before go-live</p>
+                <Input type="number" min={0} step="0.01" className="h-8 text-sm text-right" disabled={!!editing} value={form.openingAccumulated} onChange={e => set('openingAccumulated', e.target.value)} />
+                <p className="text-xs text-slate-500 mt-1">Depreciation up to (not including) the go-live month. Run depreciation posts the go-live month onwards on the same schedule, and never lets the total exceed cost minus salvage.</p>
+              </div>
+            ) : (
             <div>
               <p className="text-xs text-slate-500 mb-1">Paid from (cash/bank, or an equity/liability account such as Owner&apos;s Equity)</p>
               {frozen ? (
@@ -300,6 +330,7 @@ export function FixedAssets() {
                 <AccountSelect accounts={funding} value={form.fundingId} onChange={id => set('fundingId', id)} className="w-full h-8 text-sm" />
               )}
             </div>
+            )}
             <div><p className="text-xs text-slate-500 mb-1">Notes</p><Input className="h-8 text-sm" value={form.notes} onChange={e => set('notes', e.target.value)} /></div>
           </div>
           <DialogFooter>

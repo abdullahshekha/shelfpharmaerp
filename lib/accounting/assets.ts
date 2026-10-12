@@ -4,12 +4,14 @@
 // Ledger footprint of an asset (all isManual=false, so neither the manual-journal reversal route nor
 // sync/rebuild touch them — sync and rebuild's orphan cleanup only handle the 7 SOURCE_TYPES in sync.ts):
 //   ASSET_PURCHASE  sourceId = asset id               Dr FIXED_ASSETS / Cr funding account
+//   ASSET_PURCHASE  sourceId = `opening:${assetId}`   opening asset (bought before go-live), dated the go-live date:
+//                   Dr FIXED_ASSETS cost / Cr ACCUM_DEPRECIATION openingAccumulated / Cr OPENING_EQUITY the rest
 //   DEPRECIATION    sourceId = `${assetId}:${YYYY-MM}` Dr DEPRECIATION_EXPENSE / Cr ACCUM_DEPRECIATION
 //   ASSET_DISPOSAL  sourceId = asset id               Dr ACCUM_DEPRECIATION, Dr OTHER_EXPENSES / Cr FIXED_ASSETS
 // Every mutation of one asset (add/edit/delete/dispose/depreciate) takes the same advisory lock.
 import { prisma } from '@/lib/prisma'
 import { ensureChart } from './accounts'
-import { AccountingError, karachiDayKey, postEntry } from './core'
+import { AccountingError, karachiDayKey, postEntry, type LineInput } from './core'
 import { regularMonthlyAmount } from './depreciation'
 import { toPaisa } from './money'
 import { parseDateInput } from './dates'
@@ -47,14 +49,20 @@ export interface AssetFields {
   salvageValue: number
   usefulLifeMonths: number
   paidFromAccountId: string
+  /** opening assets only: depreciation accumulated before go-live (rupees) */
+  openingAccumulated?: number
 }
+
+export const openingSourceId = (assetId: string) => `opening:${assetId}`
+/** Every ASSET_PURCHASE sourceId an asset may have (normal purchase or opening entry). */
+export const purchaseSourceIds = (assetId: string) => [assetId, openingSourceId(assetId)]
 
 function bad(msg: string): never {
   throw new AccountingError(400, msg)
 }
 
 /** Validates a create body (or the financial/descriptive fields of an edit body when `partial`). */
-export function parseAssetBody(body: any, partial: boolean): Partial<AssetFields> {
+export function parseAssetBody(body: any, partial: boolean, opts: { opening?: boolean } = {}): Partial<AssetFields> {
   if (!body || typeof body !== 'object') bad('Invalid JSON')
   const out: Partial<AssetFields> = {}
   const has = (k: string) => body[k] !== undefined
@@ -100,11 +108,21 @@ export function parseAssetBody(body: any, partial: boolean): Partial<AssetFields
     if (typeof l !== 'number' || !Number.isInteger(l) || l < 1 || l > MAX_LIFE_MONTHS) bad(`Useful life must be a whole number of months between 1 and ${MAX_LIFE_MONTHS}`)
     out.usefulLifeMonths = l
   }
-  if (!partial || has('paidFromAccountId')) {
+  if (opts.opening) {
+    // Opening assets have no funding account: the credit goes to Opening Balance Equity.
+    const raw = body.openingAccumulated ?? 0
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) bad('Accumulated depreciation must be a number')
+    if (raw < 0) bad('Accumulated depreciation cannot be negative')
+    if (raw > MAX_COST) bad('Accumulated depreciation is too large')
+    out.openingAccumulated = toPaisa(raw) / 100
+  } else if (!partial || has('paidFromAccountId')) {
     if (typeof body.paidFromAccountId !== 'string' || !body.paidFromAccountId) bad('Funding account is required')
     out.paidFromAccountId = body.paidFromAccountId
   }
   if (out.cost !== undefined && out.salvageValue !== undefined && out.salvageValue >= out.cost) bad('Salvage value must be less than the cost')
+  if (opts.opening && out.cost !== undefined && out.salvageValue !== undefined && out.openingAccumulated !== undefined) {
+    if (toPaisa(out.openingAccumulated) > toPaisa(out.cost) - toPaisa(out.salvageValue)) bad('Accumulated depreciation cannot exceed cost minus salvage value')
+  }
   return out
 }
 
@@ -123,6 +141,28 @@ export async function postAssetPurchase(tx: Tx, asset: { id: string; name: strin
       { accountId: chart.FIXED_ASSETS, debit: cost },
       { accountId: fundingId, credit: cost },
     ],
+  })
+}
+
+/**
+ * Posts the opening entry of an asset bought before go-live (sourceId `opening:<id>`), dated `date` (the go-live
+ * date): Dr FIXED_ASSETS cost / Cr ACCUM_DEPRECIATION openingAccumulated (if > 0) / Cr OPENING_EQUITY the rest (if > 0).
+ */
+export async function postOpeningAsset(tx: Tx, asset: { id: string; name: string; cost: any; openingAccumulated: any }, date: Date, userId?: string) {
+  const chart = await ensureChart(tx)
+  const costP = toPaisa(Number(asset.cost))
+  const accP = toPaisa(Number(asset.openingAccumulated ?? 0))
+  const lines: LineInput[] = [{ accountId: chart.FIXED_ASSETS, debit: costP / 100 }]
+  if (accP > 0) lines.push({ accountId: chart.ACCUM_DEPRECIATION, credit: accP / 100 })
+  if (costP - accP > 0) lines.push({ accountId: chart.OPENING_EQUITY, credit: (costP - accP) / 100 })
+  return postEntry(tx, {
+    date,
+    memo: `Opening fixed asset: ${asset.name}`,
+    sourceType: 'ASSET_PURCHASE',
+    sourceId: openingSourceId(asset.id),
+    isManual: false,
+    createdById: userId,
+    lines,
   })
 }
 
@@ -153,7 +193,10 @@ export async function depreciationSummary(db: Pick<Tx, 'journalEntry' | 'account
 export function assetView(a: any, dep?: { paisa: number; count: number; last: Date | null }) {
   const cost = Number(a.cost)
   const salvage = Number(a.salvageValue)
-  const accumulated = (dep?.paisa ?? 0) / 100
+  // Accumulated = depreciation booked before go-live (opening assets) + depreciation posted in the ledger.
+  const openingP = toPaisa(Number(a.openingAccumulated ?? 0))
+  const accumP = openingP + (dep?.paisa ?? 0)
+  const accumulated = accumP / 100
   const disposed = a.status === 'DISPOSED'
   return {
     id: a.id,
@@ -170,7 +213,9 @@ export function assetView(a: any, dep?: { paisa: number; count: number; last: Da
     monthlyDepreciation: disposed ? 0 : regularMonthlyAmount({ cost, salvageValue: salvage, usefulLifeMonths: a.usefulLifeMonths }),
     accumulatedDepreciation: accumulated,
     // Book value is zero once disposed (the asset left the books).
-    bookValue: disposed ? 0 : Math.round((toPaisa(cost) - (dep?.paisa ?? 0))) / 100,
+    bookValue: disposed ? 0 : (toPaisa(cost) - accumP) / 100,
+    isOpening: !!a.isOpening,
+    openingAccumulated: openingP / 100,
     depreciationEntries: dep?.count ?? 0,
     lastDepreciationDate: dep?.last ?? null,
   }

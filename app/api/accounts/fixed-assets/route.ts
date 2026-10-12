@@ -2,8 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAccountsUser } from '@/lib/accounting/guard'
-import { AccountingError, assertManualPostable, getSettings } from '@/lib/accounting/core'
-import { assetView, depreciationSummary, isValidFundingAccount, lockAsset, parseAssetBody, postAssetPurchase, type AssetFields } from '@/lib/accounting/assets'
+import { AccountingError, assertManualPostable, getSettings, karachiDayKey } from '@/lib/accounting/core'
+import { assetView, depreciationSummary, isValidFundingAccount, lockAsset, parseAssetBody, postAssetPurchase, postOpeningAsset, type AssetFields } from '@/lib/accounting/assets'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
     return fail('Invalid JSON')
   }
   try {
-    const f = parseAssetBody(body, false) as AssetFields
+    if (body?.isOpening !== undefined && typeof body.isOpening !== 'boolean') return fail('isOpening must be true or false')
+    const opening = body?.isOpening === true
+    const f = parseAssetBody(body, false, { opening }) as AssetFields
     let id: string | undefined
     if (body.requestId !== undefined && body.requestId !== null && body.requestId !== '') {
       if (typeof body.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(body.requestId)) return fail('Invalid requestId')
@@ -45,10 +47,32 @@ export async function POST(req: NextRequest) {
     }
     const asset = await prisma.$transaction(
       async (tx) => {
-        assertManualPostable(await getSettings(tx), f.purchaseDate)
+        const settings = await getSettings(tx)
+        if (opening) {
+          // Existing asset bought before go-live: purchase date strictly before the go-live (Karachi) day, one
+          // opening entry dated the go-live date (must itself be postable: go-live set, not locked).
+          if (!settings.goLiveDate) throw new AccountingError(400, 'Set a go-live date in Accounts Settings before adding an existing (opening) asset')
+          if (karachiDayKey(f.purchaseDate) >= karachiDayKey(settings.goLiveDate)) {
+            throw new AccountingError(400, 'An existing (opening) asset must have been bought before the go-live date — add it as a normal asset instead')
+          }
+          assertManualPostable(settings, settings.goLiveDate)
+        } else {
+          assertManualPostable(settings, f.purchaseDate)
+        }
         if (id) {
           await lockAsset(tx, id)
           if (await tx.fixedAsset.findUnique({ where: { id }, select: { id: true } })) throw new AccountingError(409, 'This asset was already submitted')
+        }
+        if (opening) {
+          const created = await tx.fixedAsset.create({
+            data: {
+              ...(id ? { id } : {}), name: f.name, category: f.category, notes: f.notes, purchaseDate: f.purchaseDate, cost: f.cost,
+              salvageValue: f.salvageValue, usefulLifeMonths: f.usefulLifeMonths, paidFromAccountId: null,
+              isOpening: true, openingAccumulated: f.openingAccumulated ?? 0,
+            },
+          })
+          await postOpeningAsset(tx, created, settings.goLiveDate!, auth.user.id)
+          return created
         }
         const acc = await tx.account.findUnique({ where: { id: f.paidFromAccountId } })
         if (!acc) throw new AccountingError(400, 'Unknown funding account')

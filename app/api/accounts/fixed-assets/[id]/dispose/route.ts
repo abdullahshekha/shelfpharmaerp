@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 
 const fail = (error: string, status = 400) => NextResponse.json({ error }, { status })
 
-// Dr ACCUM_DEPRECIATION (accumulated so far) + Dr OTHER_EXPENSES (remaining book value) / Cr FIXED_ASSETS (cost).
+// Dr ACCUM_DEPRECIATION (accumulated so far, incl. an opening asset's openingAccumulated) + Dr OTHER_EXPENSES (remaining book value) / Cr FIXED_ASSETS (cost).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = requireAccountsUser(req)
   if (auth instanceof NextResponse) return auth
@@ -38,7 +38,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (dep?.last && date.getTime() < dep.last.getTime()) throw new AccountingError(400, `Disposal date is before the last depreciation entry (${dep.last.toISOString().slice(0, 10)})`)
         const chart = await ensureChart(tx)
         const costP = Math.round(Number(asset.cost) * 100)
-        const accumP = dep?.paisa ?? 0
+        // Accumulated = pre-go-live depreciation of an opening asset + depreciation posted since.
+        const accumP = Math.round(Number(asset.openingAccumulated) * 100) + (dep?.paisa ?? 0)
         const bookP = costP - accumP
         if (bookP < 0) throw new AccountingError(409, 'Accumulated depreciation exceeds cost — check the ledger')
         const lines: LineInput[] = []

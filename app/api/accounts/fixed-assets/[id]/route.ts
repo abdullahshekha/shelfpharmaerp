@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAccountsUser } from '@/lib/accounting/guard'
 import { AccountingError, assertManualPostable, assertNotLocked, getSettings } from '@/lib/accounting/core'
-import { assetView, depreciationSummary, isValidFundingAccount, lockAsset, parseAssetBody, postAssetPurchase } from '@/lib/accounting/assets'
+import { assetView, depreciationSummary, isValidFundingAccount, lockAsset, parseAssetBody, postAssetPurchase, purchaseSourceIds } from '@/lib/accounting/assets'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +26,13 @@ export async function GET(req: NextRequest, { params }: Ctx) {
   if (!asset) return fail('Asset not found', 404)
   const dep = await depreciationSummary(prisma, [id])
   const entries = await prisma.journalEntry.findMany({
-    where: { OR: [{ sourceType: { in: ['ASSET_PURCHASE', 'ASSET_DISPOSAL'] }, sourceId: id }, { sourceType: 'DEPRECIATION', sourceId: { startsWith: `${id}:` } }] },
+    where: {
+      OR: [
+        { sourceType: 'ASSET_PURCHASE', sourceId: { in: purchaseSourceIds(id) } },
+        { sourceType: 'ASSET_DISPOSAL', sourceId: id },
+        { sourceType: 'DEPRECIATION', sourceId: { startsWith: `${id}:` } },
+      ],
+    },
     orderBy: [{ date: 'asc' }, { entryNumber: 'asc' }],
     include: { lines: { include: { account: { select: { code: true, name: true } } } } },
   })
@@ -56,12 +62,16 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
           (f.cost !== undefined && f.cost !== Number(asset.cost)) ||
           (f.salvageValue !== undefined && f.salvageValue !== Number(asset.salvageValue)) ||
           (f.usefulLifeMonths !== undefined && f.usefulLifeMonths !== asset.usefulLifeMonths) ||
-          (f.paidFromAccountId !== undefined && f.paidFromAccountId !== asset.paidFromAccountId)
+          (f.paidFromAccountId !== undefined && f.paidFromAccountId !== asset.paidFromAccountId) ||
+          (body.openingAccumulated !== undefined && Number(body.openingAccumulated) !== Number(asset.openingAccumulated))
         const descriptive = { ...(f.name !== undefined ? { name: f.name } : {}), ...(f.category !== undefined ? { category: f.category } : {}), ...(f.notes !== undefined ? { notes: f.notes } : {}) }
         if (!financial) {
           return tx.fixedAsset.update({ where: { id }, data: descriptive })
         }
         if (asset.status !== 'ACTIVE') throw new AccountingError(409, 'A disposed asset can only have its name, category and notes edited')
+        // Opening assets are frozen from the start (simpler than re-posting the opening entry): delete and re-add
+        // the asset instead, which is allowed until depreciation has been posted.
+        if (asset.isOpening) throw new AccountingError(409, 'An existing (opening) asset can only have its name, category and notes edited — delete and re-add it to change its figures')
         if (depCount > 0) throw new AccountingError(409, 'Depreciation has already been posted — only name, category and notes can be edited')
         const settings = await getSettings(tx)
         const next = {
@@ -107,9 +117,12 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
         if (asset.status !== 'ACTIVE') throw new AccountingError(409, 'A disposed asset cannot be deleted')
         const depCount = await tx.journalEntry.count({ where: { sourceType: 'DEPRECIATION', sourceId: { startsWith: `${id}:` } } })
         if (depCount > 0) throw new AccountingError(409, 'Depreciation has been posted for this asset — it cannot be deleted (dispose it instead)')
-        const entry = await tx.journalEntry.findFirst({ where: { sourceType: 'ASSET_PURCHASE', sourceId: id }, select: { date: true } })
-        if (entry) notLocked(await getSettings(tx), entry.date)
-        await tx.journalEntry.deleteMany({ where: { sourceType: 'ASSET_PURCHASE', sourceId: id } })
+        const entries = await tx.journalEntry.findMany({ where: { sourceType: 'ASSET_PURCHASE', sourceId: { in: purchaseSourceIds(id) } }, select: { date: true } })
+        if (entries.length) {
+          const settings = await getSettings(tx)
+          for (const e of entries) notLocked(settings, e.date)
+        }
+        await tx.journalEntry.deleteMany({ where: { sourceType: 'ASSET_PURCHASE', sourceId: { in: purchaseSourceIds(id) } } })
         await tx.fixedAsset.delete({ where: { id } })
       },
       { maxWait: 10000, timeout: 15000 },

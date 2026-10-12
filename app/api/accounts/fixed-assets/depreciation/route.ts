@@ -6,7 +6,7 @@ import { ensureChart } from '@/lib/accounting/accounts'
 import { assertNotLocked, getSettings, karachiDayKey, postEntry } from '@/lib/accounting/core'
 import { parseDateInput } from '@/lib/accounting/dates'
 import { catchUpMonths, depreciationPaisa, isValidMonth, lastDayOfMonth, monthDiff } from '@/lib/accounting/depreciation'
-import { karachiMonth, lockAsset } from '@/lib/accounting/assets'
+import { depreciationSummary, karachiMonth, lockAsset } from '@/lib/accounting/assets'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,7 +60,11 @@ export async function POST(req: NextRequest) {
   let incomplete = false
 
   outer: for (const a of assets) {
-    const months = catchUpMonths({ purchaseMonth: karachiMonth(a.purchaseDate), usefulLifeMonths: a.usefulLifeMonths }, goLiveMonth, month)
+    const months = catchUpMonths(
+      { purchaseMonth: karachiMonth(a.purchaseDate), usefulLifeMonths: a.usefulLifeMonths, cost: Number(a.cost), salvageValue: Number(a.salvageValue), openingAccumulated: Number(a.openingAccumulated) },
+      goLiveMonth,
+      month,
+    )
     if (months.length === 0) {
       skipped.push({ assetId: a.id, name: a.name, month, reason: 'Nothing to depreciate this month (not yet in service, fully depreciated, or no depreciable amount)' })
       bucket(month).skipped++
@@ -91,9 +95,18 @@ export async function POST(req: NextRequest) {
             if (!fresh || fresh.status !== 'ACTIVE') return { skip: 'Asset is no longer active' }
             const dup = await tx.journalEntry.findFirst({ where: { sourceType: 'DEPRECIATION', sourceId }, select: { entryNumber: true } })
             if (dup) return { skip: `Already posted (${dup.entryNumber})` }
+            // Cap: opening accumulated + everything already posted + this month <= cost - salvage.
+            const postedPaisa = (await depreciationSummary(tx, [a.id])).get(a.id)?.paisa ?? 0
             const paisa = depreciationPaisa(
-              { cost: Number(fresh.cost), salvageValue: Number(fresh.salvageValue), usefulLifeMonths: fresh.usefulLifeMonths, purchaseMonth: karachiMonth(fresh.purchaseDate) },
+              {
+                cost: Number(fresh.cost),
+                salvageValue: Number(fresh.salvageValue),
+                usefulLifeMonths: fresh.usefulLifeMonths,
+                purchaseMonth: karachiMonth(fresh.purchaseDate),
+                openingAccumulated: Number(fresh.openingAccumulated),
+              },
               m,
+              postedPaisa,
             )
             if (paisa <= 0) return { skip: 'Nothing to depreciate this month (not yet in service, fully depreciated, or no depreciable amount)' }
             const settings = await getSettings(tx)
