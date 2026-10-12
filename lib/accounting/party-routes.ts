@@ -132,7 +132,7 @@ export async function postOpeningBalance(req: NextRequest, kind: PartyKind) {
           const reversed = await tx.journalEntry.findMany({ where: { reversesId: { in: prior.map((p) => p.id) } }, select: { reversesId: true } })
           const done = new Set(reversed.map((r) => r.reversesId))
           if (prior.some((p) => !done.has(p.id))) {
-            throw new AccountingError(409, 'An opening balance already exists for this party. Reverse it in the General Ledger first, then enter the new amount.')
+            throw new AccountingError(409, 'An opening balance already exists for this party. Widen the General Ledger date range back to the go-live date to find the entry, reverse it there, then enter the new amount.')
           }
         }
         return postEntry(tx, {

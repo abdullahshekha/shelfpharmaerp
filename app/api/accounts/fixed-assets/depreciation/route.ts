@@ -16,7 +16,7 @@ type Row = { assetId: string; name: string; month: string; amount?: number; entr
 type MonthSummary = { month: string; date: string; posted: number; skipped: number; failed: number; totalPosted: number }
 
 export const maxDuration = 60
-const TIME_BUDGET_MS = 40_000
+const TIME_BUDGET_MS = 25_000
 
 // Catch-up run: for every ACTIVE asset posts each missing month from its first depreciation month (the purchase
 // month, never before the go-live month) through the requested month. Each asset-month is its own transaction
