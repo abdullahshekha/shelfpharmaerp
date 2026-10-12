@@ -66,6 +66,11 @@ export async function POST(req: NextRequest) {
       bucket(month).skipped++
       continue
     }
+    if (!months.includes(month)) {
+      // Past its useful life: earlier months are caught up below, but say why nothing is posted for the requested month.
+      skipped.push({ assetId: a.id, name: a.name, month, reason: 'Fully depreciated before this month' })
+      bucket(month).skipped++
+    }
     for (const m of months) {
       const row = { assetId: a.id, name: a.name, month: m }
       const sourceId = `${a.id}:${m}`

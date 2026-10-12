@@ -20,18 +20,19 @@ export interface OutstandingInvoice {
 }
 
 /** Paisa still due on one invoice (never negative); 0 for statuses that carry no balance. */
-export function invoiceDuePaisa(inv: OutstandingInvoice): number {
+export function invoiceDuePaisa(inv: OutstandingInvoice, opts: { allowNegative?: boolean } = {}): number {
   if (!(OUTSTANDING_STATUSES as readonly string[]).includes(inv.status)) return 0
   const paid = (inv.payments ?? []).reduce((s, p) => s + paisa(p.amount), 0)
-  return Math.max(0, paisa(inv.totalAmount) - paid)
+  const due = paisa(inv.totalAmount) - paid
+  return opts.allowNegative ? due : Math.max(0, due)
 }
 
 /** Due paisa grouped by retailerId (invoices without a retailerId go under ''). */
-export function dueByRetailer(invoices: OutstandingInvoice[]): Map<string, number> {
+export function dueByRetailer(invoices: OutstandingInvoice[], opts: { allowNegative?: boolean } = {}): Map<string, number> {
   const out = new Map<string, number>()
   for (const inv of invoices) {
     const key = inv.retailerId ?? ''
-    out.set(key, (out.get(key) ?? 0) + invoiceDuePaisa(inv))
+    out.set(key, (out.get(key) ?? 0) + invoiceDuePaisa(inv, opts))
   }
   return out
 }

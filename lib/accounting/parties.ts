@@ -24,6 +24,7 @@ const p2 = (n: unknown) => toPaisa(Number(n ?? 0))
  * Invoice-derived outstanding mirrors the existing screens, except that payments recorded against a
  * part-paid invoice are netted off (the customer page uses the gross invoice total):
  *  - customer: unpaid (UNPAID/PARTIAL/OVERDUE; DRAFT excluded) invoices - payments on them - sales returns
+ *    (an overpaid open invoice counts as a negative balance here so it matches the ledger's credit)
  *  - supplier: non-PAID purchase invoices - payments - supplier returns (computeSupplierOutstanding)
  */
 export async function loadPartyBalances(kind: PartyKind): Promise<{ accountId: string | null; parties: PartyBalance[] }> {
@@ -48,7 +49,7 @@ export async function loadPartyBalances(kind: PartyKind): Promise<{ accountId: s
             where: { status: { in: [...OUTSTANDING_STATUSES] } },
             select: { retailerId: true, status: true, totalAmount: true, payments: { select: { amount: true } } },
           })
-          .then((invs) => Array.from(dueByRetailer(invs).entries()).map(([id, paisa]) => ({ id, amount: paisa / 100 })))
+          .then((invs) => Array.from(dueByRetailer(invs, { allowNegative: true }).entries()).map(([id, paisa]) => ({ id, amount: paisa / 100 })))
       : await prisma.$queryRaw<{ id: string; amount: Prisma.Decimal }[]>`
           SELECT i."supplierId" AS id, SUM(i."totalAmount" - COALESCE(p.paid, 0)) AS amount
           FROM "PurchaseInvoice" i

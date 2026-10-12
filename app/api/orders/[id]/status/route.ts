@@ -77,10 +77,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         }
       }
 
-      await tx.delivery.updateMany({
-        where: { orderId: id },
-        data: { status: 'DELIVERED', deliveredAt: new Date() },
-      })
+      // Keep a deliveredAt the Deliveries page already recorded (it dates the COGS posting).
+      await tx.delivery.updateMany({ where: { orderId: id, deliveredAt: null }, data: { deliveredAt: new Date() } })
+      await tx.delivery.updateMany({ where: { orderId: id }, data: { status: 'DELIVERED' } })
     }
 
     return updated

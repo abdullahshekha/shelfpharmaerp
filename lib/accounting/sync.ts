@@ -273,15 +273,21 @@ export async function syncSource(type: SourceType, id: string, opts: { short?: b
   }
 }
 
+const RETRY_ONLY_IF_FASTER_THAN_MS = 3000
+const HOOK_TOTAL_BUDGET_MS = 9000 // across all pairs of one request; leftovers are healed by Rebuild ledger
+
 /** Never throws. Await it after the business transaction has committed. */
 export async function syncSafe(type: SourceType, id: string | null | undefined, opts: { skipPrecheck?: boolean } = {}): Promise<void> {
   if (!id) return
   try {
     // Hooks run on the request path: short transaction limits so a slow DB cannot stall the business response.
+    const t0 = Date.now()
     let r = await syncSource(type, id, { short: true, skipPrecheck: opts.skipPrecheck })
     // A short transaction can expire while queued behind concurrent syncs (per-day entry-number lock). The work is
     // idempotent, so retry once once the burst has drained; anything still failing is healed by "Rebuild ledger".
-    if (r.reason && /Transaction API error|expired transaction|P2028|Unable to start a transaction/i.test(r.reason)) {
+    // Only when the first attempt failed fast: a slow failure means the DB is struggling and a second wait would
+    // double the time the business request is held (worst case 2 x (maxWait + timeout)).
+    if (Date.now() - t0 < RETRY_ONLY_IF_FASTER_THAN_MS && r.reason && /Transaction API error|expired transaction|P2028|Unable to start a transaction/i.test(r.reason)) {
       r = await syncSource(type, id, { short: true, skipPrecheck: opts.skipPrecheck })
     }
     if (r.reason?.startsWith('error:')) console.error(`[accounting] sync ${type} ${id} failed: ${r.reason}`)
@@ -301,7 +307,14 @@ export async function syncAllSafe(pairs: [SourceType, string | null | undefined]
     console.error('[accounting] sync settings read failed', err)
     return
   }
-  for (const [t, id] of real) await syncSafe(t, id, { skipPrecheck: true })
+  const started = Date.now()
+  for (const [t, id] of real) {
+    if (Date.now() - started > HOOK_TOTAL_BUDGET_MS) {
+      console.error(`[accounting] hook budget exhausted; ${t} ${id} left for "Rebuild ledger"`)
+      continue
+    }
+    await syncSafe(t, id, { skipPrecheck: true })
+  }
 }
 
 // ---------------- Rebuild (chunkable) ----------------
