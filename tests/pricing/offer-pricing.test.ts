@@ -52,7 +52,7 @@ test('NET_PRICE with min/extra discounts from min qty', () => {
 })
 
 test('null fields fall back safely', () => {
-  const n = priceOfferLine(rule({ commentType: 'NET_PRICE' }), 100, 5, noTax)
+  const n = priceOfferLine(rule({ commentType: 'NET_PRICE', offerPercent: 7 }), 100, 5, noTax)
   assert.equal(n.unitPrice, 100)
   assert.equal(n.offerPercent, 0)
   assert.equal(n.lineTotal, 500)

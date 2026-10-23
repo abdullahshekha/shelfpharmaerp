@@ -44,10 +44,8 @@ export function priceOfferLine(
       if (minMet) offerPercent = rule.offerPercent + extra
       break
     case 'NET_PRICE':
-      if (rule.commentNetPrice != null) {
-        unitPrice = rule.commentNetPrice
-        offerPercent = minMet ? extra : 0
-      }
+      if (rule.commentNetPrice != null) unitPrice = rule.commentNetPrice
+      offerPercent = rule.commentNetPrice != null && minMet ? extra : 0
       break
   }
 
