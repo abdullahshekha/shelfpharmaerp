@@ -149,6 +149,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
               purchasePrice: item.purchasePrice,
               tradePrice: item.tradePrice,
               mrp: item.mrp,
+              salesTax: item.salesTax,
               discountPercent: item.discountPercent,
               bonusQuantity: item.bonusQuantity,
             },
