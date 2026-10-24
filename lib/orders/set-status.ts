@@ -1,3 +1,4 @@
+import { AccountingError } from '@/lib/accounting/core'
 import { prisma } from '@/lib/prisma'
 import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
 import { totalUnits } from '@/lib/orders/units'
@@ -8,6 +9,12 @@ import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForAre
 /** Moves an order to `status` with all side effects (stock, invoice/delivery/challan, ledger sync). Throws AccountingError unchanged. */
 export async function setOrderStatus(id: string, status: string) {
   const warnings: string[] = []
+
+  // A draft is not a real order yet: it can only be confirmed into PENDING (or cancelled).
+  const current = await prisma.order.findUnique({ where: { id }, select: { status: true } })
+  if (current?.status === 'DRAFT' && status !== 'PENDING' && status !== 'CANCELLED') {
+    throw new AccountingError(409, 'A draft must be confirmed (set to PENDING) before it can move on')
+  }
 
   const order = await prisma.$transaction(async (tx) => {
     // Re-setting DELIVERED must be a no-op for stock and deliveredAt. The conditional update also serialises

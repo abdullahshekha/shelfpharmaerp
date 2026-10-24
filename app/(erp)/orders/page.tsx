@@ -11,9 +11,10 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { DateRangePicker, type DateRange } from '@/components/shared/DateRangePicker'
 
-const STATUSES = ['PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED', 'DELIVERED', 'CANCELLED']
+const STATUSES = ['DRAFT', 'PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED', 'DELIVERED', 'CANCELLED']
 
 const STATUS_COLORS: Record<string, string> = {
+  DRAFT:      'bg-gray-100 text-gray-500 border border-dashed',
   PENDING:    'bg-slate-100 text-slate-700',
   CONFIRMED:  'bg-blue-100 text-blue-700',
   PICKING:    'bg-yellow-100 text-yellow-700',
@@ -120,7 +121,7 @@ export default function OrdersPage() {
                 ) : (
                   orders.map(o => (
                     <tr key={o.id} className="border-b hover:bg-slate-50 cursor-pointer"
-                      onClick={() => window.location.href = `/orders/${o.id}`}>
+                      onClick={() => window.location.href = o.status === 'DRAFT' ? `/orders/new?draft=${o.id}` : `/orders/${o.id}`}>
                       <td className="px-4 py-3 font-mono text-xs">{o.orderNumber}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium">{o.retailer.name}</div>

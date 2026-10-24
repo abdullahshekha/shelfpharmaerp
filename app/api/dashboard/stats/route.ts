@@ -25,7 +25,7 @@ export async function GET() {
     receivable,
   ] = await Promise.all([
     prisma.order.findMany({
-      where: { orderDate: { gte: startOfDay, lt: tomorrow } },
+      where: { orderDate: { gte: startOfDay, lt: tomorrow }, status: { notIn: ['DRAFT'] } },
       select: { id: true, totalAmount: true, status: true },
     }),
     prisma.whatsappOrder.count({ where: { status: 'AI_PROCESSED' } }),

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -86,6 +86,9 @@ function NewOrderForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const preselectedRetailerId = searchParams.get('retailerId')
+  const draftId = searchParams.get('draft')
+  const draftLoaded = useRef(false)
+  const [offersReady, setOffersReady] = useState(false)
 
   const [customerSearch, setCustomerSearch] = useState('')
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -106,8 +109,33 @@ function NewOrderForm() {
     fetch('/api/offer-list/active').then(r => r.json()).then(j => {
       const items: OfferListItem[] = j.data?.items ?? []
       setOfferItems(new Map(items.map(i => [i.medicineId, i])))
-    })
+    }).finally(() => setOffersReady(true))
   }, [])
+
+  // Reopen a saved draft: restore customer, notes and lines exactly as saved (stored prices stick).
+  useEffect(() => {
+    if (!draftId || !offersReady || draftLoaded.current) return
+    draftLoaded.current = true
+    fetch(`/api/orders/${draftId}`).then(r => r.json()).then(async j => {
+      const o = j.data
+      if (!o || o.status !== 'DRAFT') { toast.error('This draft is no longer editable'); return }
+      const cRes = await fetch(`/api/retailers/${o.retailerId}`).then(r => r.json())
+      setSelectedCustomer({
+        id: cRes.data.id, name: cRes.data.name, creditLimit: cRes.data.creditLimit,
+        outstandingBalance: Number(cRes.data.outstandingBalance ?? 0), creditDays: cRes.data.creditDays,
+      })
+      setNotes(o.notes ?? '')
+      setLines(o.items.map((i: { medicineId: string; medicine: Medicine; quantity: number; mrp: number | string | null; unitPrice: number | string; offerPercent: number | string; salesTax: number | string; bonusQty: number }) => {
+        const offer = offerItems.get(i.medicineId)
+        return {
+          medicine: { ...i.medicine, id: i.medicineId, tradePrice: null, mrp: i.mrp != null ? Number(i.mrp) : null, totalStock: 1 },
+          quantity: i.quantity, mrp: i.mrp != null ? Number(i.mrp) : null,
+          unitPrice: Number(i.unitPrice), offerPercent: Number(i.offerPercent), salesTax: Number(i.salesTax),
+          bonusQty: i.bonusQty, rule: ruleFor(offer), basePrice: Number(offer?.specialPrice ?? i.unitPrice),
+        } as OrderLine
+      }))
+    })
+  }, [draftId, offersReady, offerItems])
 
   // Load preselected customer
   useEffect(() => {
@@ -185,12 +213,12 @@ function NewOrderForm() {
 
   const totalAmount = lines.reduce((sum, l) => sum + l.quantity * lineUnitTotal(l), 0)
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (asDraft = false) => {
     if (!selectedCustomer) { toast.error('Select a customer'); return }
     if (lines.length === 0) { toast.error('Add at least one medicine'); return }
 
-    // Credit limit check
-    if (selectedCustomer.creditLimit > 0 && selectedCustomer.outstandingBalance !== undefined) {
+    // Credit limit check (a draft is not an invoice yet)
+    if (!asDraft && selectedCustomer.creditLimit > 0 && selectedCustomer.outstandingBalance !== undefined) {
       const projected = selectedCustomer.outstandingBalance + totalAmount
       if (projected > selectedCustomer.creditLimit) {
         const proceed = confirm(
@@ -206,30 +234,40 @@ function NewOrderForm() {
     }
 
     setSaving(true)
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        retailerId: selectedCustomer.id,
-        notes,
-        items: lines.map(l => ({
-          medicineId: l.medicine.id,
-          quantity: l.quantity,
-          bonusQty: l.bonusQty,
-          mrp: l.mrp,
-          unitPrice: l.unitPrice,
-          offerPercent: l.offerPercent,
-          salesTax: l.medicine.salesTaxApplicable ? l.salesTax : 0,
-        })),
-      }),
-    })
-
-    if (res.ok) {
-      const j = await res.json()
-      toast.success('Sales invoice created')
-      router.push(`/orders/${j.data.id}`)
+    const payload = {
+      retailerId: selectedCustomer.id,
+      notes,
+      items: lines.map(l => ({
+        medicineId: l.medicine.id,
+        quantity: l.quantity,
+        bonusQty: l.bonusQty,
+        mrp: l.mrp,
+        unitPrice: l.unitPrice,
+        offerPercent: l.offerPercent,
+        salesTax: l.medicine.salesTaxApplicable ? l.salesTax : 0,
+      })),
+    }
+    const json = (body: object) => ({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    let res: Response
+    let id: string | null = draftId
+    if (draftId) {
+      res = await fetch(`/api/orders/${draftId}/draft`, json(payload))
+      if (res.ok && !asDraft) res = await fetch(`/api/orders/${draftId}/status`, json({ status: 'PENDING' }))
     } else {
-      toast.error('Failed to create sales invoice')
+      res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, ...(asDraft ? { status: 'DRAFT' } : {}) }),
+      })
+      if (res.ok) id = (await res.clone().json()).data.id
+    }
+
+    if (res.ok && id) {
+      toast.success(asDraft ? 'Draft saved' : 'Sales invoice created')
+      router.push(asDraft ? '/orders' : `/orders/${id}`)
+    } else {
+      const j = await res.json().catch(() => ({}))
+      toast.error(j.error ?? 'Failed to save sales invoice')
     }
     setSaving(false)
   }
@@ -479,8 +517,11 @@ function NewOrderForm() {
           </div>
           <div className="flex justify-end gap-3">
             <Link href="/orders"><Button variant="outline">Cancel</Button></Link>
-            <Button onClick={handleSubmit} disabled={saving || !selectedCustomer || lines.length === 0}>
-              {saving ? 'Creating...' : 'Create Sales Invoice'}
+            <Button variant="outline" onClick={() => handleSubmit(true)} disabled={saving || !selectedCustomer || lines.length === 0}>
+              Save as draft
+            </Button>
+            <Button onClick={() => handleSubmit(false)} disabled={saving || !selectedCustomer || lines.length === 0}>
+              {saving ? 'Saving...' : draftId ? 'Confirm' : 'Create Sales Invoice'}
             </Button>
           </div>
         </CardContent>
