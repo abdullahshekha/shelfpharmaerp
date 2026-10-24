@@ -7,9 +7,10 @@ import { toast } from 'sonner'
 import { WEEKDAYS } from '@/lib/utils/area-schedule'
 import { formatPKR } from '@/lib/utils/format'
 import { portalGetJson } from '@/components/portal/portalFetch'
+import type { OfferRule } from '@/lib/utils/offer-pricing'
 
 interface Me { name: string; deliveryDays: number[]; nextBooking: { day: number; cutoffHour: number; isToday: boolean } | null }
-interface Item { medicineId: string; code: string; name: string; manufacturer: string; unitPrice: number; offerPercent: number; comment: string }
+interface Item { medicineId: string; code: string; name: string; manufacturer: string; unitPrice: number; offerPercent: number; comment: string; rule: OfferRule; salesTax: number }
 interface OpenOrder { id: string; orderNumber: string; items: { medicineId: string; quantity: number }[] }
 
 const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? 'AM' : 'PM'}`
@@ -182,7 +183,8 @@ export default function PortalOrderPage() {
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm leading-snug">{i.name}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          T.P. {formatPKR(i.unitPrice)}
+                          {i.rule.commentType !== 'NET_PRICE' && <>T.P. {formatPKR(i.unitPrice)}</>}
+                          {i.salesTax > 0 && <span className="text-amber-700 font-medium"> · ST</span>}
                           {i.offerPercent > 0 && <span className="text-green-700 font-medium"> · {i.offerPercent.toFixed(1)}% off</span>}
                           {i.comment && i.comment !== '—' && <span className="text-slate-400"> · {i.comment}</span>}
                         </p>

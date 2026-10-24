@@ -16,6 +16,8 @@ interface SheetItem {
   quantity: number
   offerPercent: number
   specialPrice: number | null
+  commentType?: string
+  fefoSalesTax?: number | null
   comments: string
 }
 
@@ -95,6 +97,7 @@ export default function OfferListCustomerSheetPage() {
                   <th className="text-right px-4 py-3 font-medium text-slate-600">Offer %</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Comments</th>
                   <th className="text-right px-4 py-3 font-medium text-slate-600">T.P</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Sales Tax</th>
                   <th className="text-center px-4 py-3 font-medium text-slate-600 w-24">Qty</th>
                 </tr>
               </thead>
@@ -102,11 +105,17 @@ export default function OfferListCustomerSheetPage() {
                 {sheet.items.map(item => (
                   <tr key={item.id} className="border-b hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.medicine.code}</td>
-                    <td className="px-4 py-3 font-medium">{item.medicine.name}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {item.medicine.name}
+                      {(item.fefoSalesTax ?? 0) > 0 && (
+                        <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-700 align-middle">ST</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-slate-500">{item.medicine.manufacturer.name}</td>
                     <td className="px-4 py-3 text-right">{Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}%` : '—'}</td>
                     <td className="px-4 py-3 text-slate-500">{item.comments}</td>
-                    <td className="px-4 py-3 text-right font-medium">{item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
+                    <td className="px-4 py-3 text-right font-medium">{item.commentType === 'NET_PRICE' ? '' : item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{item.fefoSalesTax != null ? formatPKR(item.fefoSalesTax) : '—'}</td>
                     <td className="px-4 py-3 text-center">
                       <Input
                         type="number"

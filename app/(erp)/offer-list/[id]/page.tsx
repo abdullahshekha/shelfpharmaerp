@@ -30,6 +30,7 @@ interface OfferListItem {
   stock: number
   expiryMMYY: string | null
   purchasePrice: number | null
+  fefoSalesTax: number | null
 }
 
 interface OfferListDetail {
@@ -281,6 +282,7 @@ export default function OfferListDetailPage() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600 w-24">Offer %</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600 w-64">Comments</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">T.P.</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">Sales Tax</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -289,7 +291,12 @@ export default function OfferListDetailPage() {
                     return (
                       <tr key={item.id} className={`border-b hover:bg-slate-50 align-top ${loss ? 'bg-red-50/60' : ''}`}>
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.medicine.code}</td>
-                        <td className="px-4 py-3 font-medium">{item.medicine.name}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {item.medicine.name}
+                          {(item.fefoSalesTax ?? 0) > 0 && (
+                            <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-700 align-middle" title="Sales Tax applies">ST</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{item.medicine.manufacturer.name}</td>
                         <td className="px-4 py-3 text-center">{item.stock}</td>
                         <td className="px-4 py-3 text-center text-slate-500">{item.expiryMMYY ?? '—'}</td>
@@ -326,12 +333,26 @@ export default function OfferListDetailPage() {
                           </div>
 
                           {item.commentType === 'NET_PRICE' && (
-                            <Input
-                              type="number" min="0" step="0.01" placeholder="Net Price"
-                              className="w-28 h-7 text-xs"
-                              value={item.commentNetPrice ?? ''}
-                              onChange={e => updateItem(item.medicineId, { commentNetPrice: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                            />
+                            <div className="flex gap-1">
+                              <Input
+                                type="number" min="0" step="0.01" placeholder="Net Price"
+                                className="w-24 h-7 text-xs"
+                                value={item.commentNetPrice ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentNetPrice: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                              />
+                              <Input
+                                type="number" min="0" placeholder="Min Qty"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentMinOrderQty ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentMinOrderQty: e.target.value === '' ? null : parseInt(e.target.value) })}
+                              />
+                              <Input
+                                type="number" min="0" step="0.5" placeholder="Extra %"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentExtraPercent ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentExtraPercent: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                              />
+                            </div>
                           )}
                           {item.commentType === 'BONUS' && (
                             <div className="flex gap-1">
@@ -369,6 +390,7 @@ export default function OfferListDetailPage() {
                           <p className="text-xs text-slate-400 italic">{formatOfferComment(item, item.expiryMMYY)}</p>
                         </td>
                         <td className="px-4 py-3 text-right font-medium">{item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{item.fefoSalesTax != null ? formatPKR(item.fefoSalesTax) : '—'}</td>
                       </tr>
                     )
                   })}

@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           medicine: {
             include: {
               manufacturer: { select: { name: true } },
-              batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true } },
+              batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, salesTax: true } },
             },
           },
         },
@@ -49,6 +49,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       offerPercent,
       specialPrice: offer?.specialPrice ?? null,
       comments,
+      commentType: offer?.commentType ?? 'NONE',
+      fefoSalesTax: item.medicine.salesTaxApplicable ? Number(fefoBatch?.salesTax ?? offer?.salesTax ?? 0) : null,
     }
   })
 
