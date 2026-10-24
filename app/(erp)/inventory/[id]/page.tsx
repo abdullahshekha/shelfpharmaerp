@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { formatPKR, formatDate } from '@/lib/utils/format'
 import { ArrowLeft, Package, Trash2, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 interface Batch {
   id: string
@@ -44,6 +45,8 @@ interface Medicine {
 
 export default function MedicineDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const { user } = useCurrentUser()
+  const isAdmin = user?.role === 'ADMIN'
   const [medicine, setMedicine] = useState<Medicine | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -110,6 +113,33 @@ export default function MedicineDetailPage() {
   const set = (field: keyof typeof editForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setEditForm(f => ({ ...f, [field]: e.target.value }))
 
+  const router = useRouter()
+  const [blockers, setBlockers] = useState<string[] | null>(null)
+
+  const deleteItem = async () => {
+    if (!confirm(`Permanently delete ${medicine?.name}? This cannot be undone.`)) return
+    const res = await fetch(`/api/inventory/${id}`, { method: 'DELETE' })
+    const j = await res.json().catch(() => ({}))
+    if (res.ok) { toast.success('Item deleted'); router.push('/inventory'); return }
+    if (res.status === 409 && j.blockers) { setBlockers(j.blockers); return }
+    toast.error(j.error ?? 'Failed to delete item')
+  }
+
+  const deactivateItem = async () => {
+    if (!medicine) return
+    const res = await fetch(`/api/inventory/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: medicine.name, genericName: medicine.genericName, manufacturerId: medicine.manufacturerId,
+        category: medicine.category, packSize: medicine.packSize, salesTaxApplicable: medicine.salesTaxApplicable,
+        minStockLevel: medicine.minStockLevel, isActive: false,
+      }),
+    })
+    if (res.ok) { toast.success('Item deactivated'); setBlockers(null); fetchMedicine() }
+    else toast.error('Failed to deactivate')
+  }
+
   const deleteBatch = async (batchId: string) => {
     if (!confirm('Delete this batch? Any remaining stock in it is written off (Accounts: Other Expenses).')) return
     const res = await fetch(`/api/inventory/${id}/batches?batchId=${batchId}`, { method: 'DELETE' })
@@ -143,7 +173,22 @@ export default function MedicineDetailPage() {
         <Button size="sm" variant="outline" className="ml-auto gap-1" onClick={() => setEditing(true)}>
           <Pencil size={14} /> Edit
         </Button>
+        {isAdmin && (
+          <Button size="sm" variant="outline" className="gap-1 text-red-600 border-red-200 hover:bg-red-50" onClick={deleteItem}>
+            <Trash2 size={14} /> Delete item
+          </Button>
+        )}
       </div>
+      {blockers && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm space-y-2">
+          <p className="font-medium text-orange-800">This item cannot be deleted because it has:</p>
+          <ul className="list-disc pl-5 text-orange-700">{blockers.map(b => <li key={b}>{b}</li>)}</ul>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={deactivateItem}>Deactivate instead</Button>
+            <Button size="sm" variant="ghost" onClick={() => setBlockers(null)}>Dismiss</Button>
+          </div>
+        </div>
+      )}
 
       {/* Inline Edit Form */}
       {editing && (

@@ -12,6 +12,7 @@ import { formatDate, formatPKR } from '@/lib/utils/format'
 import { ArrowLeft, Eye, Download, FileText, Zap, RefreshCw, Users, Plus, X, AlertTriangle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
+import { nextGridCell } from '@/lib/ui/grid-enter'
 import { COMMENT_TYPES, formatOfferComment, isOfferAtLoss, type CommentType } from '@/lib/utils/offer-comment'
 
 interface OfferListItem {
@@ -30,6 +31,7 @@ interface OfferListItem {
   stock: number
   expiryMMYY: string | null
   purchasePrice: number | null
+  fefoSalesTax: number | null
 }
 
 interface OfferListDetail {
@@ -95,6 +97,24 @@ export default function OfferListDetailPage() {
     }, 300)
     return () => clearTimeout(t)
   }, [customerSearch, showAddCustomer])
+
+  // Enter moves across a row's editable inputs, then down to the first input of the next row.
+  // Selects (Comments dropdown) are left alone so Enter keeps opening/choosing in them.
+  const handleGridEnter = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
+    const target = e.target as HTMLElement
+    if (target.tagName !== 'INPUT') return
+    const cells = Array.from(e.currentTarget.querySelectorAll('tr')).map(tr =>
+      Array.from(tr.querySelectorAll<HTMLInputElement>('input')).filter(
+        i => !i.disabled && i.tabIndex !== -1 && i.type !== 'hidden' && i.offsetParent !== null && i.getAttribute('aria-hidden') !== 'true'
+      )
+    )
+    const row = cells.findIndex(r => r.includes(target as HTMLInputElement))
+    if (row === -1) return
+    const next = nextGridCell(cells, row, cells[row].indexOf(target as HTMLInputElement))
+    e.preventDefault()
+    if (next) { next.focus(); next.select() }
+  }
 
   const updateItem = (medicineId: string, patch: Partial<OfferListItem>) => {
     setItems(prev => prev.map(it => (it.medicineId === medicineId ? { ...it, ...patch } : it)))
@@ -281,15 +301,21 @@ export default function OfferListDetailPage() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600 w-24">Offer %</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600 w-64">Comments</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">T.P.</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">Sales Tax</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody data-grid-enter onKeyDown={handleGridEnter}>
                   {items.map(item => {
                     const loss = isOfferAtLoss(item, item.specialPrice, item.purchasePrice)
                     return (
                       <tr key={item.id} className={`border-b hover:bg-slate-50 align-top ${loss ? 'bg-red-50/60' : ''}`}>
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.medicine.code}</td>
-                        <td className="px-4 py-3 font-medium">{item.medicine.name}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {item.medicine.name}
+                          {(item.fefoSalesTax ?? 0) > 0 && (
+                            <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-700 align-middle" title="Sales Tax applies">ST</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{item.medicine.manufacturer.name}</td>
                         <td className="px-4 py-3 text-center">{item.stock}</td>
                         <td className="px-4 py-3 text-center text-slate-500">{item.expiryMMYY ?? '—'}</td>
@@ -326,12 +352,26 @@ export default function OfferListDetailPage() {
                           </div>
 
                           {item.commentType === 'NET_PRICE' && (
-                            <Input
-                              type="number" min="0" step="0.01" placeholder="Net Price"
-                              className="w-28 h-7 text-xs"
-                              value={item.commentNetPrice ?? ''}
-                              onChange={e => updateItem(item.medicineId, { commentNetPrice: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                            />
+                            <div className="flex gap-1">
+                              <Input
+                                type="number" min="0" step="0.01" placeholder="Net Price"
+                                className="w-24 h-7 text-xs"
+                                value={item.commentNetPrice ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentNetPrice: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                              />
+                              <Input
+                                type="number" min="0" placeholder="Min Qty"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentMinOrderQty ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentMinOrderQty: e.target.value === '' ? null : parseInt(e.target.value) })}
+                              />
+                              <Input
+                                type="number" min="0" step="0.5" placeholder="Extra %"
+                                className="w-16 h-7 text-xs"
+                                value={item.commentExtraPercent ?? ''}
+                                onChange={e => updateItem(item.medicineId, { commentExtraPercent: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                              />
+                            </div>
                           )}
                           {item.commentType === 'BONUS' && (
                             <div className="flex gap-1">
@@ -369,6 +409,7 @@ export default function OfferListDetailPage() {
                           <p className="text-xs text-slate-400 italic">{formatOfferComment(item, item.expiryMMYY)}</p>
                         </td>
                         <td className="px-4 py-3 text-right font-medium">{item.specialPrice != null ? formatPKR(item.specialPrice) : '—'}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{item.fefoSalesTax != null ? formatPKR(item.fefoSalesTax) : '—'}</td>
                       </tr>
                     )
                   })}

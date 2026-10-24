@@ -7,7 +7,7 @@ export async function loadChallans(orderIds: string[]): Promise<ChallanData[]> {
   if (orderIds.length === 0) return []
 
   const missing = await prisma.order.findMany({
-    where: { id: { in: orderIds }, challan: null, status: { notIn: ['PENDING', 'CANCELLED'] } },
+    where: { id: { in: orderIds }, challan: null, status: { notIn: ['DRAFT', 'PENDING', 'CANCELLED'] } },
     select: { id: true },
   })
   for (const o of missing) {

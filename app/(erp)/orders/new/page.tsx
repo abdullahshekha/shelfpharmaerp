@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { formatPKR } from '@/lib/utils/format'
+import { priceOfferLine, resolveSalesTax, type OfferRule } from '@/lib/utils/offer-pricing'
+import { formatOfferComment } from '@/lib/utils/offer-comment'
 import { ArrowLeft, Search, Trash2, X, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -35,6 +37,31 @@ interface OfferListItem {
   offerPercent: number
   specialPrice: number | null
   salesTax: number
+  commentType?: string
+  commentNetPrice?: number | string | null
+  commentMinOrderQty?: number | null
+  commentQtyFree?: number | null
+  commentExtraPercent?: number | string | null
+  fefoSalesTax?: number | null
+}
+
+const num = (v: number | string | null | undefined) => (v == null ? null : Number(v))
+
+const NO_RULE: OfferRule = {
+  commentType: 'NONE', offerPercent: 0, commentNetPrice: null,
+  commentMinOrderQty: null, commentQtyFree: null, commentExtraPercent: null,
+}
+
+function ruleFor(offer: OfferListItem | undefined): OfferRule {
+  if (!offer) return NO_RULE
+  return {
+    commentType: offer.commentType ?? 'NONE',
+    offerPercent: Number(offer.offerPercent),
+    commentNetPrice: num(offer.commentNetPrice),
+    commentMinOrderQty: offer.commentMinOrderQty ?? null,
+    commentQtyFree: offer.commentQtyFree ?? null,
+    commentExtraPercent: num(offer.commentExtraPercent),
+  }
 }
 
 interface OrderLine {
@@ -44,6 +71,9 @@ interface OrderLine {
   unitPrice: number
   offerPercent: number
   salesTax: number
+  bonusQty: number
+  rule: OfferRule
+  basePrice: number
 }
 
 function lineUnitTotal(l: OrderLine) {
@@ -56,6 +86,9 @@ function NewOrderForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const preselectedRetailerId = searchParams.get('retailerId')
+  const draftId = searchParams.get('draft')
+  const draftLoaded = useRef(false)
+  const [offersReady, setOffersReady] = useState(false)
 
   const [customerSearch, setCustomerSearch] = useState('')
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -76,8 +109,33 @@ function NewOrderForm() {
     fetch('/api/offer-list/active').then(r => r.json()).then(j => {
       const items: OfferListItem[] = j.data?.items ?? []
       setOfferItems(new Map(items.map(i => [i.medicineId, i])))
-    })
+    }).finally(() => setOffersReady(true))
   }, [])
+
+  // Reopen a saved draft: restore customer, notes and lines exactly as saved (stored prices stick).
+  useEffect(() => {
+    if (!draftId || !offersReady || draftLoaded.current) return
+    draftLoaded.current = true
+    fetch(`/api/orders/${draftId}`).then(r => r.json()).then(async j => {
+      const o = j.data
+      if (!o || o.status !== 'DRAFT') { toast.error('This draft is no longer editable'); return }
+      const cRes = await fetch(`/api/retailers/${o.retailerId}`).then(r => r.json())
+      setSelectedCustomer({
+        id: cRes.data.id, name: cRes.data.name, creditLimit: cRes.data.creditLimit,
+        outstandingBalance: Number(cRes.data.outstandingBalance ?? 0), creditDays: cRes.data.creditDays,
+      })
+      setNotes(o.notes ?? '')
+      setLines(o.items.map((i: { medicineId: string; medicine: Medicine; quantity: number; mrp: number | string | null; unitPrice: number | string; offerPercent: number | string; salesTax: number | string; bonusQty: number }) => {
+        const offer = offerItems.get(i.medicineId)
+        return {
+          medicine: { ...i.medicine, id: i.medicineId, tradePrice: null, mrp: i.mrp != null ? Number(i.mrp) : null, totalStock: 1 },
+          quantity: i.quantity, mrp: i.mrp != null ? Number(i.mrp) : null,
+          unitPrice: Number(i.unitPrice), offerPercent: Number(i.offerPercent), salesTax: Number(i.salesTax),
+          bonusQty: i.bonusQty, rule: ruleFor(offer), basePrice: Number(offer?.specialPrice ?? i.unitPrice),
+        } as OrderLine
+      }))
+    })
+  }, [draftId, offersReady, offerItems])
 
   // Load preselected customer
   useEffect(() => {
@@ -124,17 +182,14 @@ function NewOrderForm() {
     }
     const existing = lines.find(l => l.medicine.id === med.id)
     if (existing) {
-      setLines(ls => ls.map(l => l.medicine.id === med.id ? { ...l, quantity: l.quantity + 1 } : l))
+      setLines(ls => ls.map(l => l.medicine.id === med.id ? repriceLine(l, l.quantity + 1) : l))
     } else {
       const offer = offerItems.get(med.id)
-      setLines(ls => [...ls, {
-        medicine: med,
-        quantity: 1,
-        mrp: med.mrp,
-        unitPrice: offer?.specialPrice ?? med.tradePrice ?? 0,
-        offerPercent: offer?.offerPercent ?? 0,
-        salesTax: med.salesTaxApplicable ? (offer?.salesTax ?? 0) : 0,
-      }])
+      const rule = ruleFor(offer)
+      const basePrice = Number(offer?.specialPrice ?? med.tradePrice ?? 0)
+      const salesTax = med.salesTaxApplicable ? resolveSalesTax(offer?.fefoSalesTax ?? null, offer ? Number(offer.salesTax) : null) : 0
+      const base: OrderLine = { medicine: med, quantity: 1, mrp: med.mrp, unitPrice: basePrice, offerPercent: rule.offerPercent, salesTax, bonusQty: 0, rule, basePrice }
+      setLines(ls => [...ls, repriceLine(base, 1)])
     }
     setMedSearch('')
     setShowMedDropdown(false)
@@ -142,18 +197,28 @@ function NewOrderForm() {
 
   const removeLine = (id: string) => setLines(ls => ls.filter(l => l.medicine.id !== id))
 
-  const updateLine = (id: string, field: 'quantity' | 'unitPrice' | 'offerPercent' | 'salesTax', value: number) => {
-    setLines(ls => ls.map(l => l.medicine.id === id ? { ...l, [field]: value } : l))
+  // Quantity changes re-apply the offer rule (Bonus / Extra % / Net Price); a manual edit of any other
+  // field sticks until the quantity next changes. Tax stays whatever is in the line (editable).
+  const repriceLine = (l: OrderLine, quantity: number): OrderLine => {
+    const p = priceOfferLine(l.rule, l.basePrice, quantity, { salesTax: l.salesTax, applicable: l.medicine.salesTaxApplicable })
+    return { ...l, quantity, unitPrice: p.unitPrice, offerPercent: p.offerPercent, bonusQty: p.bonusQty }
+  }
+
+  const updateLine = (id: string, field: 'quantity' | 'unitPrice' | 'offerPercent' | 'salesTax' | 'bonusQty', value: number) => {
+    setLines(ls => ls.map(l => {
+      if (l.medicine.id !== id) return l
+      return field === 'quantity' ? repriceLine(l, value) : { ...l, [field]: value }
+    }))
   }
 
   const totalAmount = lines.reduce((sum, l) => sum + l.quantity * lineUnitTotal(l), 0)
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (asDraft = false) => {
     if (!selectedCustomer) { toast.error('Select a customer'); return }
     if (lines.length === 0) { toast.error('Add at least one medicine'); return }
 
-    // Credit limit check
-    if (selectedCustomer.creditLimit > 0 && selectedCustomer.outstandingBalance !== undefined) {
+    // Credit limit check (a draft is not an invoice yet)
+    if (!asDraft && selectedCustomer.creditLimit > 0 && selectedCustomer.outstandingBalance !== undefined) {
       const projected = selectedCustomer.outstandingBalance + totalAmount
       if (projected > selectedCustomer.creditLimit) {
         const proceed = confirm(
@@ -169,29 +234,40 @@ function NewOrderForm() {
     }
 
     setSaving(true)
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        retailerId: selectedCustomer.id,
-        notes,
-        items: lines.map(l => ({
-          medicineId: l.medicine.id,
-          quantity: l.quantity,
-          mrp: l.mrp,
-          unitPrice: l.unitPrice,
-          offerPercent: l.offerPercent,
-          salesTax: l.medicine.salesTaxApplicable ? l.salesTax : 0,
-        })),
-      }),
-    })
-
-    if (res.ok) {
-      const j = await res.json()
-      toast.success('Sales invoice created')
-      router.push(`/orders/${j.data.id}`)
+    const payload = {
+      retailerId: selectedCustomer.id,
+      notes,
+      items: lines.map(l => ({
+        medicineId: l.medicine.id,
+        quantity: l.quantity,
+        bonusQty: l.bonusQty,
+        mrp: l.mrp,
+        unitPrice: l.unitPrice,
+        offerPercent: l.offerPercent,
+        salesTax: l.medicine.salesTaxApplicable ? l.salesTax : 0,
+      })),
+    }
+    const json = (body: object) => ({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    let res: Response
+    let id: string | null = draftId
+    if (draftId) {
+      res = await fetch(`/api/orders/${draftId}/draft`, json(payload))
+      if (res.ok && !asDraft) res = await fetch(`/api/orders/${draftId}/status`, json({ status: 'PENDING' }))
     } else {
-      toast.error('Failed to create sales invoice')
+      res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, ...(asDraft ? { status: 'DRAFT' } : {}) }),
+      })
+      if (res.ok) id = (await res.clone().json()).data.id
+    }
+
+    if (res.ok && id) {
+      toast.success(asDraft ? 'Draft saved' : 'Sales invoice created')
+      router.push(asDraft ? '/orders' : `/orders/${id}`)
+    } else {
+      const j = await res.json().catch(() => ({}))
+      toast.error(j.error ?? 'Failed to save sales invoice')
     }
     setSaving(false)
   }
@@ -312,6 +388,7 @@ function NewOrderForm() {
                   <tr className="border-b text-slate-600 text-xs">
                     <th className="text-left py-1.5 pr-2">Medicine</th>
                     <th className="text-center py-1.5 px-1 w-16">Qty</th>
+                    <th className="text-center py-1.5 px-1 w-16">Free</th>
                     <th className="text-right py-1.5 px-1 w-20">MRP</th>
                     <th className="text-right py-1.5 px-1 w-24">Trade Price</th>
                     <th className="text-right py-1.5 px-1 w-16">Disc %</th>
@@ -339,6 +416,17 @@ function NewOrderForm() {
                           <Input type="number" min="1" className="w-16 h-7 text-xs text-center"
                             value={l.quantity}
                             onChange={e => updateLine(l.medicine.id, 'quantity', parseInt(e.target.value) || 1)} />
+                          {l.rule.commentType !== 'NONE' && l.rule.commentType !== 'EXPIRY' && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                              {formatOfferComment({ ...l.rule, commentNetPrice: l.rule.commentNetPrice, offerPercent: l.rule.offerPercent }, null)}
+                              {l.bonusQty > 0 ? `: ${l.bonusQty} free` : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-1">
+                          <Input type="number" min="0" step="1" className="w-16 h-7 text-xs text-center"
+                            value={l.bonusQty}
+                            onChange={e => updateLine(l.medicine.id, 'bonusQty', Math.max(0, parseInt(e.target.value) || 0))} />
                         </td>
                         <td className="py-1.5 px-1 text-right whitespace-nowrap">{l.mrp != null ? formatPKR(l.mrp) : '—'}</td>
                         <td className="py-1.5 px-1">
@@ -370,7 +458,7 @@ function NewOrderForm() {
                     )
                   })}
                   <tr>
-                    <td colSpan={6} className="pt-3 text-right font-semibold">Total:</td>
+                    <td colSpan={7} className="pt-3 text-right font-semibold">Total:</td>
                     <td className="pt-3 text-right font-bold text-base whitespace-nowrap">{formatPKR(totalAmount)}</td>
                     <td />
                   </tr>
@@ -429,8 +517,11 @@ function NewOrderForm() {
           </div>
           <div className="flex justify-end gap-3">
             <Link href="/orders"><Button variant="outline">Cancel</Button></Link>
-            <Button onClick={handleSubmit} disabled={saving || !selectedCustomer || lines.length === 0}>
-              {saving ? 'Creating...' : 'Create Sales Invoice'}
+            <Button variant="outline" onClick={() => handleSubmit(true)} disabled={saving || !selectedCustomer || lines.length === 0}>
+              Save as draft
+            </Button>
+            <Button onClick={() => handleSubmit(false)} disabled={saving || !selectedCustomer || lines.length === 0}>
+              {saving ? 'Saving...' : draftId ? 'Confirm' : 'Create Sales Invoice'}
             </Button>
           </div>
         </CardContent>

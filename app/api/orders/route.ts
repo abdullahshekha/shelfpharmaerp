@@ -62,6 +62,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const items: OrderItemInput[] = body.items
 
+  for (const item of items ?? []) {
+    const b = item.bonusQty
+    if (b !== undefined && b !== null && (typeof b !== 'number' || !Number.isInteger(b) || b < 0)) {
+      return NextResponse.json({ error: 'bonusQty must be a whole number, 0 or more' }, { status: 400 })
+    }
+  }
+
   const medicines = await prisma.medicine.findMany({
     where: { id: { in: items.map((i) => i.medicineId) } },
     select: { id: true, salesTaxApplicable: true },
@@ -77,6 +84,7 @@ export async function POST(req: NextRequest) {
         retailerId: body.retailerId,
         salesRepId: body.salesRepId ?? null,
         source: body.source ?? 'MANUAL',
+        ...(body.status === 'DRAFT' ? { status: 'DRAFT' } : {}),
         notes: body.notes ?? null,
         items: {
           create: items.map((item) => {

@@ -19,13 +19,22 @@ interface OfferCommentFields {
   commentExtraPercent: unknown
 }
 
+/** Extra % on a Net Price line, only when a minimum order qty is also set. */
+function netExtra(item: OfferCommentFields): number | null {
+  if (item.commentMinOrderQty == null || item.commentMinOrderQty <= 0 || item.commentExtraPercent == null) return null
+  return Number(item.commentExtraPercent)
+}
+
 /** The exact per-type Comments display string used across the editable list, HTML export, and PDF. */
 export function formatOfferComment(item: OfferCommentFields, expiryMMYY: string | null): string {
   switch (item.commentType) {
     case 'EXPIRY':
       return expiryMMYY ?? '—'
     case 'NET_PRICE':
-      return item.commentNetPrice != null ? `${Number(item.commentNetPrice).toFixed(1)} Net` : '—'
+      if (item.commentNetPrice == null) return '—'
+      return netExtra(item) != null
+        ? `${Number(item.commentNetPrice).toFixed(1)} Net (min ${item.commentMinOrderQty} → extra ${netExtra(item)!.toFixed(1)}%)`
+        : `${Number(item.commentNetPrice).toFixed(1)} Net`
     case 'BONUS':
       return item.commentMinOrderQty != null && item.commentQtyFree != null
         ? `${item.commentMinOrderQty} + ${item.commentQtyFree}`
@@ -52,7 +61,8 @@ export function isOfferAtLoss(item: OfferCommentFields, tradePrice: number | nul
 
   if (item.commentType === 'NET_PRICE') {
     if (item.commentNetPrice == null) return false
-    return Number(item.commentNetPrice) < purchasePrice
+    const extra = netExtra(item) ?? 0
+    return Number(item.commentNetPrice) * (1 - extra / 100) < purchasePrice
   }
 
   let effectivePercent = offerPercent

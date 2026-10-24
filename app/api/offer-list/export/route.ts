@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const medicineInclude = {
     manufacturer: { select: { name: true } },
-    batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true } },
+    batches: { select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, salesTax: true } },
   }
 
   // If no ID, use active list
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   let rowIndex = 0
   let itemRows = ''
   for (const mfg of sortedMfgs) {
-    itemRows += `<tr class="mfg-row"><td colspan="6">${mfg}</td></tr>\n`
+    itemRows += `<tr class="mfg-row"><td colspan="7">${mfg}</td></tr>\n`
     for (const item of byMfg.get(mfg)!) {
       rowIndex++
       const offerDisplay = Number(item.offerPercent) > 0 ? `${Number(item.offerPercent).toFixed(2)}%` : '—'
@@ -51,13 +51,19 @@ export async function GET(req: NextRequest) {
       const comments = formatOfferComment(item, expiryMMYY)
       const effectiveTradePrice = getEffectivePrice(item.medicine.batches).tradePrice
       const price = (item.specialPrice != null ? Number(item.specialPrice) : effectiveTradePrice ?? 0).toFixed(2)
+      // Net Price lines quote the net in Comments, so T.P. is left blank for the customer.
+      const priceCell = item.commentType === 'NET_PRICE' ? '' : `Rs. ${price}`
+      const stRaw = item.medicine.salesTaxApplicable ? Number(fefoBatch?.salesTax ?? item.salesTax ?? 0) : 0
+      const stCell = item.medicine.salesTaxApplicable ? `Rs. ${stRaw.toFixed(2)}` : '—'
+      const stTag = stRaw > 0 ? ' <span class="st-tag">ST</span>' : ''
       itemRows += `<tr class="item">
   <td class="col-code">${item.medicine.code}</td>
-  <td class="col-name">${item.medicine.name}</td>
+  <td class="col-name">${item.medicine.name}${stTag}</td>
   <td class="col-order"><input type="number" min="0" max="1000" placeholder="Qty" id="nameid${rowIndex}"></td>
   <td class="col-num">${offerDisplay}</td>
   <td class="col-num">${comments}</td>
-  <td class="col-num col-price">Rs. ${price}</td>
+  <td class="col-num col-price">${priceCell}</td>
+  <td class="col-num">${stCell}</td>
 </tr>\n`
     }
   }
@@ -246,6 +252,7 @@ $(document).ready(function(){
   .col-code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--slate-500); white-space: nowrap; }
   .col-name { font-weight: 600; color: var(--navy); }
   .col-num { text-align: right; white-space: nowrap; }
+  .st-tag { background:#fef3c7; color:#b45309; font-size:10px; font-weight:700; padding:1px 4px; border-radius:3px; }
   .col-price { font-weight: 700; color: var(--navy); }
   .col-order { text-align: center; width: 90px; }
 
@@ -330,6 +337,7 @@ $(document).ready(function(){
         <th style="text-align:right;">Offer %</th>
         <th style="text-align:right;">Comments</th>
         <th style="text-align:right;">T.P</th>
+        <th style="text-align:right;">Sales Tax</th>
       </tr>
     </thead>
     <tbody id="myTable">

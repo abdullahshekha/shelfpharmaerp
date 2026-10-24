@@ -220,6 +220,7 @@ model MedicineBatch {
   purchasePrice        Decimal               @db.Decimal(10, 2)
   tradePrice           Decimal               @db.Decimal(10, 2)
   mrp                  Decimal?              @db.Decimal(10, 2)
+  salesTax             Decimal?              @db.Decimal(10, 2) // per-unit sales tax paid at purchase; null = unknown/legacy
   discountPercent      Decimal               @default(0) @db.Decimal(5, 2) // snapshot of PurchaseInvoiceItem.discountPercent at creation — drives Offer List "Offer %"
   bonusQuantity        Int                   @default(0) // snapshot of PurchaseInvoiceItem.bonusQuantity at creation — drives Offer List "Bonus"
   returnItems          SupplierReturnItem[]

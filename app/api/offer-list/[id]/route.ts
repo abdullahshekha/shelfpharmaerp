@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           medicine: {
             include: {
               manufacturer: { select: { name: true } },
-              batches: { select: { currentQty: true, expiryDate: true, purchasePrice: true, tradePrice: true, mrp: true } },
+              batches: { select: { currentQty: true, expiryDate: true, purchasePrice: true, tradePrice: true, mrp: true, salesTax: true } },
             },
           },
         },
@@ -39,7 +39,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const purchasePrice = fefoBatch ? Number(fefoBatch.purchasePrice) : null
     const tradePrice = item.specialPrice != null ? Number(item.specialPrice) : null
     const isLoss = isOfferAtLoss(item, tradePrice, purchasePrice)
-    return { ...item, stock, expiryMMYY, purchasePrice, isLoss }
+    // Read-only Sales Tax (Rs/unit) from the FEFO batch; null when the medicine is not Sales Tax Applicable.
+    const fefoSalesTax = item.medicine.salesTaxApplicable ? Number(fefoBatch?.salesTax ?? item.salesTax ?? 0) : null
+    return { ...item, stock, expiryMMYY, purchasePrice, isLoss, fefoSalesTax }
   })
 
   return NextResponse.json({ data: { ...list, items } })

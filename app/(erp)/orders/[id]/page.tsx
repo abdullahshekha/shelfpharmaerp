@@ -304,6 +304,7 @@ export default function OrderDetailPage() {
               <tr className="border-b bg-slate-50">
                 <th className="text-left px-4 py-2 font-medium text-slate-600">Medicine</th>
                 <th className="text-center px-4 py-2 font-medium text-slate-600">Qty</th>
+                <th className="text-center px-4 py-2 font-medium text-slate-600">Free</th>
                 <th className="text-right px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">Unit Price</th>
                 <th className="text-center px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">Offer %</th>
                 {editing && <th className="text-right px-4 py-2 font-medium text-slate-600 hidden sm:table-cell">S. Tax</th>}
@@ -322,6 +323,10 @@ export default function OrderDetailPage() {
                     <td className="px-2 py-2 text-center">
                       <Input type="number" min="1" className="w-16 h-8 text-xs text-center mx-auto" value={item.quantity}
                         onChange={e => updateEditItem(item.id, { quantity: parseInt(e.target.value) || 1 })} />
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <Input type="number" min="0" step="1" className="w-16 h-8 text-xs text-center mx-auto" value={item.bonusQty ?? 0}
+                        onChange={e => updateEditItem(item.id, { bonusQty: Math.max(0, parseInt(e.target.value) || 0) })} />
                     </td>
                     <td className="px-2 py-2 text-right hidden sm:table-cell">
                       <Input type="number" step="0.01" className="w-24 h-8 text-xs text-right ml-auto" value={item.unitPrice}
@@ -347,6 +352,7 @@ export default function OrderDetailPage() {
                     <div className="text-xs text-slate-400 font-mono">{item.medicine.code}</div>
                   </td>
                   <td className="px-4 py-2 text-center">{item.quantity}</td>
+                  <td className="px-4 py-2 text-center">{item.bonusQty > 0 ? item.bonusQty : '—'}</td>
                   <td className="px-4 py-2 text-right hidden sm:table-cell">{formatPKR(item.unitPrice)}</td>
                   <td className="px-4 py-2 text-center hidden sm:table-cell">
                     {Number(item.offerPercent) > 0 ? `${item.offerPercent}%` : '—'}

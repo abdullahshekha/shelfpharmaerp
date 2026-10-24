@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const orders = await prisma.order.findMany({
     where: {
       orderDate: { gte: dateFrom, ...(dateTo && { lt: dateTo }) },
-      status: { not: 'CANCELLED' },
+      status: { notIn: ['CANCELLED', 'DRAFT'] },
     },
     select: { orderDate: true, totalAmount: true, retailerId: true, salesRepId: true },
   })
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
     where: {
       order: {
         orderDate: { gte: rangeStart, ...(dateTo && { lt: dateTo }) },
-        status: { not: 'CANCELLED' },
+        status: { notIn: ['CANCELLED', 'DRAFT'] },
       },
     },
     include: { medicine: { select: { name: true } } },
