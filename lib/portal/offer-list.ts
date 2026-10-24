@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { getFefoBatch } from '@/lib/utils/pricing'
 import { formatOfferComment } from '@/lib/utils/offer-comment'
+import { resolveSalesTax } from '@/lib/utils/offer-pricing'
 import type { ServerOfferItem } from '@/lib/portal/pricing'
 
 /** The active offer list, if this customer is entitled to it (individual sheet, or their Customer Type is assigned). */
@@ -34,7 +35,7 @@ export async function loadOfferItems(listId: string): Promise<ServerOfferItem[]>
         select: {
           code: true, name: true, salesTaxApplicable: true,
           manufacturer: { select: { name: true } },
-          batches: { select: { expiryDate: true, currentQty: true, tradePrice: true, mrp: true } },
+          batches: { select: { expiryDate: true, currentQty: true, tradePrice: true, mrp: true, salesTax: true } },
         },
       },
     },
@@ -53,7 +54,15 @@ export async function loadOfferItems(listId: string): Promise<ServerOfferItem[]>
       unitPrice,
       offerPercent: Number(item.offerPercent),
       comment: formatOfferComment(item, fefo ? expiryToMMYY(new Date(fefo.expiryDate)) : null),
-      salesTax: Number(item.salesTax),
+      salesTax: resolveSalesTax(fefo?.salesTax != null ? Number(fefo.salesTax) : null, Number(item.salesTax)),
+      rule: {
+        commentType: item.commentType,
+        offerPercent: Number(item.offerPercent),
+        commentNetPrice: item.commentNetPrice != null ? Number(item.commentNetPrice) : null,
+        commentMinOrderQty: item.commentMinOrderQty,
+        commentQtyFree: item.commentQtyFree,
+        commentExtraPercent: item.commentExtraPercent != null ? Number(item.commentExtraPercent) : null,
+      },
       salesTaxApplicable: item.medicine.salesTaxApplicable,
       mrp: fefo?.mrp != null ? Number(fefo.mrp) : null,
     })

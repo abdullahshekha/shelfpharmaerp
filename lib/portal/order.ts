@@ -74,7 +74,7 @@ export async function savePortalOrder(params: {
 }): Promise<PortalOrderView | null> {
   const { retailerId, salesRepId, orderId, lines, total } = params
   const lineData = lines.map(l => ({
-    medicineId: l.medicineId, quantity: l.quantity, mrp: l.mrp, unitPrice: l.unitPrice, offerPercent: l.offerPercent,
+    medicineId: l.medicineId, quantity: l.quantity, bonusQty: l.bonusQty, mrp: l.mrp, unitPrice: l.unitPrice, offerPercent: l.offerPercent,
     salesTax: l.salesTax, salesTaxAmount: l.salesTaxAmount, lineTotal: l.lineTotal,
   }))
 

@@ -1,4 +1,5 @@
 // Pure (no DB) so it can be unit-tested. Everything the browser may see or send passes through here.
+import { priceOfferLine, type OfferRule } from '@/lib/utils/offer-pricing'
 
 export interface ServerOfferItem {
   medicineId: string
@@ -8,7 +9,8 @@ export interface ServerOfferItem {
   unitPrice: number          // specialPrice ?? FEFO batch trade price
   offerPercent: number
   comment: string            // formatOfferComment(...)
-  salesTax: number           // flat Rs per unit (only applied if salesTaxApplicable)
+  salesTax: number           // flat Rs per unit, already resolved (FEFO batch -> offer item -> 0); only applied if salesTaxApplicable
+  rule: OfferRule
   salesTaxApplicable: boolean
   mrp: number | null         // FEFO batch MRP snapshot
 }
@@ -21,6 +23,8 @@ export interface PortalOfferItem {
   unitPrice: number
   offerPercent: number
   comment: string
+  rule: OfferRule
+  salesTax: number           // 0 when the medicine is not Sales Tax Applicable
 }
 
 /** Explicit whitelist — never spread the server item (it is the only place cost/stock-derived data could leak). */
@@ -33,12 +37,15 @@ export function toPublicItem(i: ServerOfferItem): PortalOfferItem {
     unitPrice: i.unitPrice,
     offerPercent: i.offerPercent,
     comment: i.comment,
+    rule: { ...i.rule },
+    salesTax: i.salesTaxApplicable ? i.salesTax : 0,
   }
 }
 
 export interface PricedLine {
   medicineId: string
   quantity: number
+  bonusQty: number
   mrp: number | null
   unitPrice: number
   offerPercent: number
@@ -50,16 +57,17 @@ export interface PricedLine {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 export function priceLine(item: ServerOfferItem, quantity: number): PricedLine {
-  const salesTax = item.salesTaxApplicable ? item.salesTax : 0
+  const p = priceOfferLine(item.rule, item.unitPrice, quantity, { salesTax: item.salesTax, applicable: item.salesTaxApplicable })
   return {
     medicineId: item.medicineId,
     quantity,
+    bonusQty: p.bonusQty,
     mrp: item.mrp,
-    unitPrice: item.unitPrice,
-    offerPercent: item.offerPercent,
-    salesTax,
-    salesTaxAmount: round2(salesTax * quantity),
-    lineTotal: round2(quantity * item.unitPrice * (1 - item.offerPercent / 100)),
+    unitPrice: p.unitPrice,
+    offerPercent: p.offerPercent,
+    salesTax: p.salesTax,
+    salesTaxAmount: p.salesTaxAmount,
+    lineTotal: p.lineTotal,
   }
 }
 
