@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { formatPKR } from '@/lib/utils/format'
+import { priceOfferLine, resolveSalesTax, type OfferRule } from '@/lib/utils/offer-pricing'
+import { formatOfferComment } from '@/lib/utils/offer-comment'
 import { ArrowLeft, Search, Trash2, X, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -35,6 +37,31 @@ interface OfferListItem {
   offerPercent: number
   specialPrice: number | null
   salesTax: number
+  commentType?: string
+  commentNetPrice?: number | string | null
+  commentMinOrderQty?: number | null
+  commentQtyFree?: number | null
+  commentExtraPercent?: number | string | null
+  fefoSalesTax?: number | null
+}
+
+const num = (v: number | string | null | undefined) => (v == null ? null : Number(v))
+
+const NO_RULE: OfferRule = {
+  commentType: 'NONE', offerPercent: 0, commentNetPrice: null,
+  commentMinOrderQty: null, commentQtyFree: null, commentExtraPercent: null,
+}
+
+function ruleFor(offer: OfferListItem | undefined): OfferRule {
+  if (!offer) return NO_RULE
+  return {
+    commentType: offer.commentType ?? 'NONE',
+    offerPercent: Number(offer.offerPercent),
+    commentNetPrice: num(offer.commentNetPrice),
+    commentMinOrderQty: offer.commentMinOrderQty ?? null,
+    commentQtyFree: offer.commentQtyFree ?? null,
+    commentExtraPercent: num(offer.commentExtraPercent),
+  }
 }
 
 interface OrderLine {
@@ -44,6 +71,9 @@ interface OrderLine {
   unitPrice: number
   offerPercent: number
   salesTax: number
+  bonusQty: number
+  rule: OfferRule
+  basePrice: number
 }
 
 function lineUnitTotal(l: OrderLine) {
@@ -124,17 +154,14 @@ function NewOrderForm() {
     }
     const existing = lines.find(l => l.medicine.id === med.id)
     if (existing) {
-      setLines(ls => ls.map(l => l.medicine.id === med.id ? { ...l, quantity: l.quantity + 1 } : l))
+      setLines(ls => ls.map(l => l.medicine.id === med.id ? repriceLine(l, l.quantity + 1) : l))
     } else {
       const offer = offerItems.get(med.id)
-      setLines(ls => [...ls, {
-        medicine: med,
-        quantity: 1,
-        mrp: med.mrp,
-        unitPrice: offer?.specialPrice ?? med.tradePrice ?? 0,
-        offerPercent: offer?.offerPercent ?? 0,
-        salesTax: med.salesTaxApplicable ? (offer?.salesTax ?? 0) : 0,
-      }])
+      const rule = ruleFor(offer)
+      const basePrice = Number(offer?.specialPrice ?? med.tradePrice ?? 0)
+      const salesTax = med.salesTaxApplicable ? resolveSalesTax(offer?.fefoSalesTax ?? null, offer ? Number(offer.salesTax) : null) : 0
+      const base: OrderLine = { medicine: med, quantity: 1, mrp: med.mrp, unitPrice: basePrice, offerPercent: rule.offerPercent, salesTax, bonusQty: 0, rule, basePrice }
+      setLines(ls => [...ls, repriceLine(base, 1)])
     }
     setMedSearch('')
     setShowMedDropdown(false)
@@ -142,8 +169,18 @@ function NewOrderForm() {
 
   const removeLine = (id: string) => setLines(ls => ls.filter(l => l.medicine.id !== id))
 
-  const updateLine = (id: string, field: 'quantity' | 'unitPrice' | 'offerPercent' | 'salesTax', value: number) => {
-    setLines(ls => ls.map(l => l.medicine.id === id ? { ...l, [field]: value } : l))
+  // Quantity changes re-apply the offer rule (Bonus / Extra % / Net Price); a manual edit of any other
+  // field sticks until the quantity next changes. Tax stays whatever is in the line (editable).
+  const repriceLine = (l: OrderLine, quantity: number): OrderLine => {
+    const p = priceOfferLine(l.rule, l.basePrice, quantity, { salesTax: l.salesTax, applicable: l.medicine.salesTaxApplicable })
+    return { ...l, quantity, unitPrice: p.unitPrice, offerPercent: p.offerPercent, bonusQty: p.bonusQty }
+  }
+
+  const updateLine = (id: string, field: 'quantity' | 'unitPrice' | 'offerPercent' | 'salesTax' | 'bonusQty', value: number) => {
+    setLines(ls => ls.map(l => {
+      if (l.medicine.id !== id) return l
+      return field === 'quantity' ? repriceLine(l, value) : { ...l, [field]: value }
+    }))
   }
 
   const totalAmount = lines.reduce((sum, l) => sum + l.quantity * lineUnitTotal(l), 0)
@@ -178,6 +215,7 @@ function NewOrderForm() {
         items: lines.map(l => ({
           medicineId: l.medicine.id,
           quantity: l.quantity,
+          bonusQty: l.bonusQty,
           mrp: l.mrp,
           unitPrice: l.unitPrice,
           offerPercent: l.offerPercent,
@@ -312,6 +350,7 @@ function NewOrderForm() {
                   <tr className="border-b text-slate-600 text-xs">
                     <th className="text-left py-1.5 pr-2">Medicine</th>
                     <th className="text-center py-1.5 px-1 w-16">Qty</th>
+                    <th className="text-center py-1.5 px-1 w-16">Free</th>
                     <th className="text-right py-1.5 px-1 w-20">MRP</th>
                     <th className="text-right py-1.5 px-1 w-24">Trade Price</th>
                     <th className="text-right py-1.5 px-1 w-16">Disc %</th>
@@ -339,6 +378,17 @@ function NewOrderForm() {
                           <Input type="number" min="1" className="w-16 h-7 text-xs text-center"
                             value={l.quantity}
                             onChange={e => updateLine(l.medicine.id, 'quantity', parseInt(e.target.value) || 1)} />
+                          {l.rule.commentType !== 'NONE' && l.rule.commentType !== 'EXPIRY' && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                              {formatOfferComment({ ...l.rule, commentNetPrice: l.rule.commentNetPrice, offerPercent: l.rule.offerPercent }, null)}
+                              {l.bonusQty > 0 ? `: ${l.bonusQty} free` : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-1">
+                          <Input type="number" min="0" step="1" className="w-16 h-7 text-xs text-center"
+                            value={l.bonusQty}
+                            onChange={e => updateLine(l.medicine.id, 'bonusQty', Math.max(0, parseInt(e.target.value) || 0))} />
                         </td>
                         <td className="py-1.5 px-1 text-right whitespace-nowrap">{l.mrp != null ? formatPKR(l.mrp) : '—'}</td>
                         <td className="py-1.5 px-1">
@@ -370,7 +420,7 @@ function NewOrderForm() {
                     )
                   })}
                   <tr>
-                    <td colSpan={6} className="pt-3 text-right font-semibold">Total:</td>
+                    <td colSpan={7} className="pt-3 text-right font-semibold">Total:</td>
                     <td className="pt-3 text-right font-bold text-base whitespace-nowrap">{formatPKR(totalAmount)}</td>
                     <td />
                   </tr>
