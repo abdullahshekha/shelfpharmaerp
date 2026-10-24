@@ -41,7 +41,7 @@ export function priceOfferLine(
       }
       break
     case 'EXTRA_PERCENT':
-      if (minMet) offerPercent = rule.offerPercent + extra
+      if (minMet) offerPercent = Math.min(100, rule.offerPercent + extra)
       break
     case 'NET_PRICE':
       if (rule.commentNetPrice != null) unitPrice = rule.commentNetPrice

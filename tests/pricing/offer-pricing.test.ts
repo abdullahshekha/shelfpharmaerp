@@ -83,3 +83,10 @@ test('resolveSalesTax prefers batch tax', () => {
   assert.equal(resolveSalesTax(2, 4), 2)
   assert.equal(resolveSalesTax(null, null), 0)
 })
+
+test('EXTRA_PERCENT never pushes the combined discount above 100%', () => {
+  const rule = { commentType: 'EXTRA_PERCENT', offerPercent: 95, commentNetPrice: null, commentMinOrderQty: 10, commentQtyFree: null, commentExtraPercent: 20 }
+  const p = priceOfferLine(rule, 100, 10, { salesTax: 0, applicable: false })
+  assert.equal(p.offerPercent, 100)
+  assert.equal(p.lineTotal, 0)
+})

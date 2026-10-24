@@ -23,4 +23,6 @@ async function main() {
   }
   console.log(`updated: ${updated}`)
 }
-main().finally(() => prisma.$disconnect())
+main()
+  .catch((e) => { console.error(e); process.exitCode = 1 })
+  .finally(() => prisma.$disconnect())
