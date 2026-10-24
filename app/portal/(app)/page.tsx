@@ -1,20 +1,19 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Search, CalendarDays } from 'lucide-react'
 import { toast } from 'sonner'
 import { WEEKDAYS } from '@/lib/utils/area-schedule'
 import { formatPKR } from '@/lib/utils/format'
 import { portalGetJson } from '@/components/portal/portalFetch'
-import type { OfferRule } from '@/lib/utils/offer-pricing'
+import { priceOfferLine, type OfferRule } from '@/lib/utils/offer-pricing'
 
 interface Me { name: string; deliveryDays: number[]; nextBooking: { day: number; cutoffHour: number; isToday: boolean } | null }
 interface Item { medicineId: string; code: string; name: string; manufacturer: string; unitPrice: number; offerPercent: number; comment: string; rule: OfferRule; salesTax: number }
 interface OpenOrder { id: string; orderNumber: string; items: { medicineId: string; quantity: number }[] }
 
 const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? 'AM' : 'PM'}`
-const unitNet = (i: Item) => i.unitPrice * (1 - i.offerPercent / 100)
 
 export default function PortalOrderPage() {
   const [me, setMe] = useState<Me | null>(null)
@@ -25,6 +24,7 @@ export default function PortalOrderPage() {
   const [saved, setSaved] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
+  const searchRef = useRef<HTMLInputElement | null>(null)
 
   const [loadError, setLoadError] = useState(false)
 
@@ -61,11 +61,20 @@ export default function PortalOrderPage() {
   }
 
   const cart = useMemo(
-    () => (items ?? []).filter(i => quantityOf(i.medicineId) > 0).map(i => ({ item: i, quantity: quantityOf(i.medicineId) })),
+    () => (items ?? []).filter(i => quantityOf(i.medicineId) > 0).map(i => {
+      const quantity = quantityOf(i.medicineId)
+      // Same pricing module the server uses, so this estimate matches what the order will be saved at.
+      const priced = priceOfferLine(i.rule, i.unitPrice, quantity, { salesTax: i.salesTax, applicable: i.salesTax > 0 })
+      return { item: i, quantity, priced }
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, qty]
   )
-  const total = cart.reduce((s, c) => s + c.quantity * unitNet(c.item), 0)
+  const subtotal = cart.reduce((s, c) => s + c.priced.lineTotal, 0)
+  const salesTaxTotal = cart.reduce((s, c) => s + c.priced.salesTaxAmount, 0)
+  const total = subtotal + salesTaxTotal
+
+  const freeFor = (id: string) => cart.find(c => c.item.medicineId === id)?.priced.bonusQty ?? 0
 
   // Lines on the saved order whose item is no longer on the offer list are dropped on the next save
   const droppedCount = Object.keys(saved).filter(id => !onList.has(id)).length
@@ -80,6 +89,22 @@ export default function PortalOrderPage() {
     const q = search.trim().toLowerCase()
     return (items ?? []).filter(i => !q || `${i.name} ${i.code} ${i.manufacturer}`.toLowerCase().includes(q))
   }, [items, search])
+
+  // Enter in search jumps to the quantity of the first match; Enter in a quantity returns to search.
+  const onSearchEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const first = filtered[0]
+    if (!first) return
+    const el = document.querySelector<HTMLInputElement>(`input[data-qty-id="${first.medicineId}"]`)
+    if (el) { el.focus(); el.select() }
+  }
+  const onQtyEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    setSearch('')
+    searchRef.current?.focus()
+  }
 
   const place = async () => {
     if (saving) return
@@ -157,7 +182,7 @@ export default function PortalOrderPage() {
         </div>
       )}
 
-      {!noList && <p className="text-xs text-slate-500">Special offers shown as comments (Net price, Bonus, Extra %) are applied by our team when your order is confirmed.</p>}
+      {!noList && <p className="text-xs text-slate-500">Totals are an estimate including offers (Net price, Bonus, Extra %) and sales tax; our team confirms the final invoice.</p>}
 
       {noList ? (
         <div className="bg-white rounded-xl border p-8 text-center text-slate-500">No offer list is available for you right now.</div>
@@ -165,7 +190,7 @@ export default function PortalOrderPage() {
         <>
           <div className="relative sticky top-[92px] z-10">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input placeholder="Search medicine, code or company…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-white" />
+            <Input ref={searchRef} data-grid-enter placeholder="Search medicine, code or company…" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={onSearchEnter} className="pl-9 bg-white" />
           </div>
 
           {filtered.length === 0 ? (
@@ -187,11 +212,14 @@ export default function PortalOrderPage() {
                           {i.salesTax > 0 && <span className="text-amber-700 font-medium"> · ST</span>}
                           {i.offerPercent > 0 && <span className="text-green-700 font-medium"> · {i.offerPercent.toFixed(1)}% off</span>}
                           {i.comment && i.comment !== '—' && <span className="text-slate-400"> · {i.comment}</span>}
+                          {freeFor(i.medicineId) > 0 && <span className="text-blue-700 font-medium"> · {freeFor(i.medicineId)} free</span>}
                         </p>
                       </div>
                       <Input
                         type="number" inputMode="numeric" min={0} max={9999} placeholder="Qty"
                         aria-label={`Quantity for ${i.name}`}
+                        data-grid-enter data-qty-id={i.medicineId}
+                        onKeyDown={onQtyEnter}
                         className="w-20 h-9 text-center"
                         value={qty[i.medicineId] ?? ''}
                         onChange={e => setQty(p => ({ ...p, [i.medicineId]: e.target.value }))}
@@ -207,7 +235,14 @@ export default function PortalOrderPage() {
 
       {/* Floating action button */}
       {!noList && (cart.length > 0 || (open && dirty)) && (
-        <div className="fixed bottom-4 inset-x-4 z-30 max-w-3xl mx-auto">
+        <div className="fixed bottom-4 inset-x-4 z-30 max-w-3xl mx-auto space-y-2">
+          {cart.length > 0 && (
+            <div className="rounded-xl bg-white border shadow-lg px-4 py-2 text-sm space-y-0.5">
+              <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span>{formatPKR(subtotal)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Sales tax</span><span>{formatPKR(salesTaxTotal)}</span></div>
+              <div className="flex justify-between font-semibold"><span>Estimated total</span><span>{formatPKR(total)}</span></div>
+            </div>
+          )}
           <button
             onClick={place}
             disabled={saving || !dirty}

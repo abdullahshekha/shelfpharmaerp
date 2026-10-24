@@ -12,6 +12,7 @@ import { formatDate, formatPKR } from '@/lib/utils/format'
 import { ArrowLeft, Eye, Download, FileText, Zap, RefreshCw, Users, Plus, X, AlertTriangle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { CUSTOMER_TYPES } from '@/lib/constants'
+import { nextGridCell } from '@/lib/ui/grid-enter'
 import { COMMENT_TYPES, formatOfferComment, isOfferAtLoss, type CommentType } from '@/lib/utils/offer-comment'
 
 interface OfferListItem {
@@ -96,6 +97,24 @@ export default function OfferListDetailPage() {
     }, 300)
     return () => clearTimeout(t)
   }, [customerSearch, showAddCustomer])
+
+  // Enter moves across a row's editable inputs, then down to the first input of the next row.
+  // Selects (Comments dropdown) are left alone so Enter keeps opening/choosing in them.
+  const handleGridEnter = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
+    const target = e.target as HTMLElement
+    if (target.tagName !== 'INPUT') return
+    const cells = Array.from(e.currentTarget.querySelectorAll('tr')).map(tr =>
+      Array.from(tr.querySelectorAll<HTMLInputElement>('input')).filter(
+        i => !i.disabled && i.tabIndex !== -1 && i.type !== 'hidden' && i.offsetParent !== null && i.getAttribute('aria-hidden') !== 'true'
+      )
+    )
+    const row = cells.findIndex(r => r.includes(target as HTMLInputElement))
+    if (row === -1) return
+    const next = nextGridCell(cells, row, cells[row].indexOf(target as HTMLInputElement))
+    e.preventDefault()
+    if (next) { next.focus(); next.select() }
+  }
 
   const updateItem = (medicineId: string, patch: Partial<OfferListItem>) => {
     setItems(prev => prev.map(it => (it.medicineId === medicineId ? { ...it, ...patch } : it)))
@@ -285,7 +304,7 @@ export default function OfferListDetailPage() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">Sales Tax</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody data-grid-enter onKeyDown={handleGridEnter}>
                   {items.map(item => {
                     const loss = isOfferAtLoss(item, item.specialPrice, item.purchasePrice)
                     return (

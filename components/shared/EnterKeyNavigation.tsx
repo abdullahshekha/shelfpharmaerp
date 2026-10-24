@@ -20,6 +20,8 @@ export function EnterKeyNavigation() {
       if (!target || target.tagName !== 'INPUT') return
       const type = (target as HTMLInputElement).type
       if (!NEXT_FIELD_TYPES.has(type)) return
+      // Grids/lists with their own Enter handling (see lib/ui/grid-enter.ts) opt out with data-grid-enter.
+      if (target.closest('[data-grid-enter]')) return
 
       const scope = target.closest('form') ?? document.body
       const fields = Array.from(scope.querySelectorAll<HTMLElement>(FIELD_SELECTOR)).filter(
