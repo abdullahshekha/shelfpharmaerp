@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { handleDelete } from '@/lib/utils/delete-approval'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { totalUnits } from '@/lib/orders/units'
 import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty, restockOnDecrease } from '@/lib/accounting/cost'
 import { AccountingError } from '@/lib/accounting/core'
 import { syncAllSafe } from '@/lib/accounting/sync'
@@ -116,24 +117,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const newDeducted = new Map<string, number>()
     if (liveStatus === 'DELIVERED') {
       for (const item of computed) {
-        const delta = item.quantity - item.existing.quantity
+        // Stock moves by total units (quantity + bonus); unitCost stays per ordered unit (see the status route).
+        const oldUnits = totalUnits(item.existing)
+        const delta = totalUnits(item) - oldUnits
         if (delta === 0) continue
 
         if (delta > 0) {
           const { costSum: extraCostSum, deducted, remaining } = await deductFefo(tx, item.medicineId, delta)
           // Keep the weighted COGS unit cost in step: blend the old cost with the newly deducted units.
           const oldCost = item.existing.unitCost
-          const blended = blendUnitCost(item.existing.quantity, oldCost === null ? null : Number(oldCost), extraCostSum, delta)
+          const blended = blendUnitCost(item.existing.quantity, oldCost === null ? null : Number(oldCost), extraCostSum, item.quantity - item.existing.quantity)
           if (blended !== null) newCosts.set(item.existing.id, blended)
-          newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, item.existing.quantity, { deducted }))
+          newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, oldUnits, { deducted }))
           if (remaining > 0) {
             warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: only partially deducted — not enough stock for the extra ${delta} unit(s)`)
           }
         } else {
           // Never put back more than this line actually took off the shelf.
-          const restockQty = restockOnDecrease(item.existing.deductedQty, item.existing.quantity, delta)
+          const restockQty = restockOnDecrease(item.existing.deductedQty, oldUnits, delta)
           const { restocked, warning } = await restockFefo(tx, item.medicineId, restockQty)
-          newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, item.existing.quantity, { restocked }))
+          newDeducted.set(item.existing.id, adjustDeductedQty(item.existing.deductedQty, oldUnits, { restocked }))
           if (warning) warnings.push(`${medicineMap.get(item.medicineId)?.name ?? item.medicineId}: ${warning}`)
         }
       }

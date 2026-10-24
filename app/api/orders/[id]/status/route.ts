@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
+import { totalUnits } from '@/lib/orders/units'
 import { syncAllSafe } from '@/lib/accounting/sync'
 import { undeliverInTx } from '@/lib/orders/lifecycle'
 import { AccountingError } from '@/lib/accounting/core'
@@ -86,7 +87,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (status === 'DELIVERED' && !alreadyDelivered) {
       for (const item of updated.items) {
-        const { costSum, deducted } = await deductFefo(tx, item.medicineId, item.quantity)
+        const { costSum, deducted } = await deductFefo(tx, item.medicineId, totalUnits(item))
+        // Bonus units come off the shelf too; unitCost stays per ORDERED unit so quantity x unitCost (the COGS posting)
+        // covers the cost of the free units as well.
         // deductedQty records what actually came off the shelf (0 on a full shortfall) so an un-deliver/cancel
         // restocks exactly that.
         await tx.orderItem.update({
