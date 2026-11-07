@@ -3,13 +3,13 @@ import { prisma } from '@/lib/prisma'
 import { hashPassword, createSession } from '@/lib/utils/auth'
 import { logLoginEvent } from '@/lib/audit/log'
 import { actorFromStaffSession } from '@/lib/audit/actor'
+import { boundedUsername } from '@/lib/audit/username'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { username: rawUsername, password } = await req.json()
-  const username = rawUsername
-  const attempted = String(username ?? '').slice(0, 64) // public endpoint: bound what is written to the audit log
+  const { username, password } = await req.json()
+  const attempted = boundedUsername(username) // public endpoint: bound what is written to the audit log
   const secret = process.env.AUTH_SECRET ?? 'shelfpharma-erp-secret-2026'
 
   // Env-based admin fallback (always works)
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   await logLoginEvent({
     action: 'LOGIN', model: 'Employee', recordId: employee.id,
     actor: actorFromStaffSession({ id: employee.id, name: employee.name, role: employee.role }),
-    changes: { username },
+    changes: { username: attempted },
   })
 
   const token = createSession({ id: employee.id, name: employee.name, role: employee.role }, secret)

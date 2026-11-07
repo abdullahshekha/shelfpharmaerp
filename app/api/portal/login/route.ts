@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { logLoginEvent } from '@/lib/audit/log'
+import { boundedUsername } from '@/lib/audit/username'
 import {
   PORTAL_COOKIE, PORTAL_COOKIE_OPTIONS, MAX_FAILED_ATTEMPTS, LOCK_MINUTES,
   hashPortalPassword, verifyPortalPassword, createPortalSession, validatePortalUsername,
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
     : null
 
   // One audit insert per failing branch (known account -> the customer is the actor; unknown -> system). Never the password.
-  const attempted = username ?? (typeof body?.username === 'string' ? body.username.slice(0, 64) : null)
+  const attempted = boundedUsername(username ?? body?.username)
   const failed = (reason: 'invalid' | 'blocked' | 'locked') => logLoginEvent({
     action: 'LOGIN_FAILED', model: 'Retailer', recordId: r?.id ?? null,
     actor: r ? { type: 'CUSTOMER', id: r.id, name: r.name, role: null } : undefined,
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
   await logLoginEvent({
     action: 'LOGIN', model: 'Retailer', recordId: r!.id,
     actor: { type: 'CUSTOMER', id: r!.id, name: r!.name, role: null },
-    changes: { username },
+    changes: { username: attempted },
   })
 
   const res = NextResponse.json({ success: true })
