@@ -3,10 +3,11 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { X, LogOut, Bell, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { useState } from 'react'
+import { X, LogOut, Bell, ChevronsLeft, ChevronsRight, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { roleLabel } from '@/lib/constants'
-import { visibleHubs, isHubActive } from '@/lib/nav'
+import { visibleHubs, visibleTabs, isHubActive, pathMatches } from '@/lib/nav'
 
 interface SidebarProps {
   onClose?: () => void
@@ -20,6 +21,8 @@ interface SidebarProps {
 export function Sidebar({ onClose, role = 'ADMIN', unreadCount = 0, collapsed = false, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
+  // Manual expand/collapse per hub; unset means "expanded only while that hub is active"
+  const [open, setOpen] = useState<Record<string, boolean>>({})
 
   const hubs = visibleHubs(role)
 
@@ -59,33 +62,70 @@ export function Sidebar({ onClose, role = 'ADMIN', unreadCount = 0, collapsed = 
           const Icon = hub.icon
           // Pending delete-approvals live under Settings > Approvals, so the badge sits on Settings
           const badge = hub.key === 'settings' ? unreadCount : 0
+          const active = isHubActive(hub, pathname)
+          const tabs = hub.tabs ? visibleTabs(hub, role) : []
+          // A hub with a single visible tab (e.g. Order Booker -> Customers) needs no submenu
+          const hasSub = tabs.length > 1
+          const expanded = hasSub && !collapsed && (open[hub.key] ?? active)
           return (
-            <Link
-              key={hub.key}
-              href={hub.target}
-              onClick={onClose}
-              title={collapsed ? hub.label : undefined}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                collapsed && 'justify-center',
-                isHubActive(hub, pathname)
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              )}
-            >
-              <div className="relative flex-shrink-0">
-                <Icon size={18} />
-                {badge > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                    {badge > 9 ? '9+' : badge}
-                  </span>
+            <div key={hub.key}>
+              <div className="flex items-center gap-1">
+                <Link
+                  href={hub.target}
+                  onClick={onClose}
+                  title={collapsed ? hub.label : undefined}
+                  className={cn(
+                    'flex-1 min-w-0 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                    collapsed && 'justify-center',
+                    active
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  )}
+                >
+                  <div className="relative flex-shrink-0">
+                    <Icon size={18} />
+                    {badge > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                        {badge > 9 ? '9+' : badge}
+                      </span>
+                    )}
+                  </div>
+                  {!collapsed && <span>{hub.label}</span>}
+                  {!collapsed && badge > 0 && (
+                    <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{badge}</span>
+                  )}
+                </Link>
+                {hasSub && !collapsed && (
+                  <button
+                    onClick={() => setOpen((o) => ({ ...o, [hub.key]: !expanded }))}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${hub.label} menu`}
+                    aria-expanded={expanded}
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex-shrink-0"
+                  >
+                    <ChevronDown size={16} className={cn('transition-transform', expanded && 'rotate-180')} />
+                  </button>
                 )}
               </div>
-              {!collapsed && <span>{hub.label}</span>}
-              {!collapsed && badge > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{badge}</span>
+              {expanded && (
+                <div className="mt-1 ml-5 pl-3 border-l border-slate-700 space-y-0.5">
+                  {tabs.map((tab) => (
+                    <Link
+                      key={tab.href}
+                      href={tab.href}
+                      onClick={onClose}
+                      className={cn(
+                        'block px-3 py-1.5 rounded-md text-sm transition-colors',
+                        pathMatches(pathname, tab.href)
+                          ? 'text-white bg-slate-800 font-medium'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      )}
+                    >
+                      {tab.label}
+                    </Link>
+                  ))}
+                </div>
               )}
-            </Link>
+            </div>
           )
         })}
       </nav>
