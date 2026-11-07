@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { actorFromStaffSession, buildForwardHeaders, type AuditActor } from '@/lib/audit/actor'
 
 const COOKIE = 'sp_session'
 // /api/portal/* is exempt from the staff-cookie check: every portal route authenticates the separate customer
@@ -14,23 +15,55 @@ function b64urlToBytes(s: string): Uint8Array<ArrayBuffer> {
   return out
 }
 
-/** True only for a cookie signed with AUTH_SECRET whose payload looks like a staff session ({ id, role } strings). */
-async function isValidStaffSession(token: string): Promise<boolean> {
+async function hmacVerify(keyBytes: Uint8Array<ArrayBuffer>, payload: string, sigB64: string): Promise<boolean> {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+  return crypto.subtle.verify('HMAC', key, b64urlToBytes(sigB64), new TextEncoder().encode(payload))
+}
+
+/** Verified staff session payload (signed with AUTH_SECRET, { id, role } strings), or null. */
+async function verifyStaffSession(token: string): Promise<{ id: string; name: string; role: string } | null> {
   try {
     const dot = token.lastIndexOf('.')
-    if (dot < 1) return false
+    if (dot < 1) return null
     const payload = token.slice(0, dot)
-    const key = await crypto.subtle.importKey(
-      'raw', new TextEncoder().encode(process.env.AUTH_SECRET ?? FALLBACK_SECRET),
-      { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'],
-    )
-    const ok = await crypto.subtle.verify('HMAC', key, b64urlToBytes(token.slice(dot + 1)), new TextEncoder().encode(payload))
-    if (!ok) return false
+    const secret = new TextEncoder().encode(process.env.AUTH_SECRET ?? FALLBACK_SECRET)
+    if (!(await hmacVerify(new Uint8Array(secret), payload, token.slice(dot + 1)))) return null
     const s = JSON.parse(new TextDecoder().decode(b64urlToBytes(payload)))
-    return typeof s?.id === 'string' && typeof s?.role === 'string'
+    if (typeof s?.id !== 'string' || typeof s?.role !== 'string') return null
+    return { id: s.id, name: typeof s.name === 'string' ? s.name : '', role: s.role }
   } catch {
-    return false
+    return null
   }
+}
+
+const PORTAL_COOKIE = 'sp_customer' // keep in sync with lib/utils/portal-auth.ts
+const PORTAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const PORTAL_SKEW_MS = 5 * 60 * 1000
+
+/** Customer id from a portal cookie signed with the DERIVED key (never the raw secret), or null. */
+async function verifyPortalCookie(token: string): Promise<string | null> {
+  try {
+    const dot = token.lastIndexOf('.')
+    if (dot < 1) return null
+    const payload = token.slice(0, dot)
+    const raw = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(process.env.AUTH_SECRET ?? FALLBACK_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    )
+    const derived = new Uint8Array(await crypto.subtle.sign('HMAC', raw, new TextEncoder().encode('shelfpharma-portal-session-v1')))
+    if (!(await hmacVerify(derived, payload, token.slice(dot + 1)))) return null
+    const s = JSON.parse(new TextDecoder().decode(b64urlToBytes(payload)))
+    if (typeof s?.rid !== 'string' || typeof s?.iat !== 'number') return null
+    const age = Date.now() - s.iat
+    if (age > PORTAL_MAX_AGE_MS || age < -PORTAL_SKEW_MS) return null
+    return s.rid
+  } catch {
+    return null
+  }
+}
+
+function forward(req: NextRequest, actor: AuditActor | null) {
+  return NextResponse.next({ request: { headers: buildForwardHeaders(req.headers, actor) } })
 }
 
 // Page auth is handled by the (erp) server component layout; this guards API routes.
@@ -38,14 +71,21 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   if (!pathname.startsWith('/api/')) return NextResponse.next()
-  if (PUBLIC_API.some(p => pathname.startsWith(p))) return NextResponse.next()
+
+  if (pathname.startsWith('/api/portal/')) {
+    const rid = await verifyPortalCookie(req.cookies.get(PORTAL_COOKIE)?.value ?? '')
+    // Customer name is not in the cookie; the audit layer records the id.
+    return forward(req, rid ? { type: 'CUSTOMER', id: rid, name: 'customer', role: null } : null)
+  }
+  if (PUBLIC_API.some(p => pathname.startsWith(p))) return forward(req, null)
 
   const token = req.cookies.get(COOKIE)?.value
-  if (!token || !(await isValidStaffSession(token))) {
+  const session = token ? await verifyStaffSession(token) : null
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  return NextResponse.next()
+  return forward(req, actorFromStaffSession(session))
 }
 
 export const config = {
