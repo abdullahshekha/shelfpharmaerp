@@ -65,15 +65,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const sheet = await prisma.offerListCustomer.findUnique({ where: { id: customerId } })
   if (!sheet || sheet.offerListId !== id) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  await prisma.$transaction(
-    items.map((item) =>
-      prisma.offerListCustomerItem.upsert({
+  // Interactive (not array) transaction: the audit log refuses writes inside array transactions.
+  // A sheet can hold hundreds of lines, each an audited upsert, so the limits are generous.
+  await prisma.$transaction(async (tx) => {
+    for (const item of items) {
+      await tx.offerListCustomerItem.upsert({
         where: { offerListCustomerId_medicineId: { offerListCustomerId: customerId, medicineId: item.medicineId } },
         update: { quantity: item.quantity },
         create: { offerListCustomerId: customerId, medicineId: item.medicineId, quantity: item.quantity },
       })
-    )
-  )
+    }
+  }, { maxWait: 10000, timeout: 60000 })
 
   return NextResponse.json({ success: true })
 }

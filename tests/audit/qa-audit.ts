@@ -97,6 +97,20 @@ async function main() {
   const od = es.find((e) => e.action === 'DELETE')
   check('order DELETE -> _cascaded holds the 2 items', ((od?.changes as any)?._cascaded?.OrderItem ?? []).length === 2, JSON.stringify((od?.changes as any)?._cascaded))
 
+  // ---- customer quantity sheet PUT (was an array $transaction of upserts; now interactive) ----
+  const ol = track(await prisma.offerList.create({ data: { name: `${P} Offer List`, listNumber: `QA-AUDIT-${Date.now()}`, listDate: new Date() } }))
+  const sheet = track(await prisma.offerListCustomer.create({ data: { offerListId: ol.id, retailerId: ret.id } }))
+  const med2 = track(await prisma.medicine.create({ data: { code: `QAAUE${Date.now() % 100000}`, name: `${P} MED`, manufacturerId: mfr.id } }))
+  const { PUT } = await import('../../app/api/offer-list/[id]/customers/[customerId]/route')
+  const putSheet = (items: unknown[]) => PUT(new Request('http://x/api', { method: 'PUT', body: JSON.stringify({ items }) }) as any, { params: Promise.resolve({ id: ol.id, customerId: sheet.id }) } as any)
+  const r1 = await putSheet([{ medicineId: med.id, quantity: 3 }, { medicineId: med2.id, quantity: 5 }])
+  const r2 = await putSheet([{ medicineId: med.id, quantity: 4 }])
+  const lines = await prisma.offerListCustomerItem.findMany({ where: { offerListCustomerId: sheet.id }, orderBy: { quantity: 'asc' } })
+  lines.forEach(track)
+  check('quantity sheet PUT saves (200, upserts applied)', r1.status === 200 && r2.status === 200 && lines.map((l) => l.quantity).join(',') === '4,5', `${r1.status} ${r2.status} ${lines.map((l) => l.quantity)}`)
+  const lineAudit = await prisma.auditLog.findMany({ where: { model: 'OfferListCustomerItem', recordId: { in: lines.map((l) => l.id) } } })
+  check('quantity sheet upserts are audited (2 CREATE + 1 UPDATE)', lineAudit.map((e) => e.action).sort().join(',') === 'CREATE,CREATE,UPDATE', lineAudit.map((e) => e.action).join(','))
+
   // ---- append-only ----
   const anyEntry = (await entries('Area', area.id))[0]
   check('auditLog.update throws', await throws(() => prisma.auditLog.update({ where: { id: anyEntry.id }, data: { reason: 'x' } })))
@@ -158,6 +172,7 @@ async function cleanup() {
   const areas = await prisma.area.findMany({ where: { name: { startsWith: P } }, select: { id: true } })
   areas.forEach((a) => ids.add(a.id))
   await prisma.order.deleteMany({ where: { retailer: { name: `${P} Customer` } } })
+  await prisma.offerList.deleteMany({ where: { listNumber: { startsWith: 'QA-AUDIT-' } } }) // cascades sheets + lines
   await prisma.medicine.deleteMany({ where: { name: `${P} MED` } })
   await prisma.manufacturer.deleteMany({ where: { name: `${P} Mfr` } })
   await prisma.retailer.deleteMany({ where: { name: `${P} Customer` } })
@@ -178,6 +193,7 @@ async function cleanup() {
     (await prisma.employee.count({ where: { name: { startsWith: P } } })) +
     (await prisma.manufacturer.count({ where: { name: { startsWith: P } } })) +
     (await prisma.medicine.count({ where: { name: { startsWith: P } } })) +
+    (await prisma.offerList.count({ where: { listNumber: { startsWith: 'QA-AUDIT-' } } })) +
     (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))
       .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i))).length
   console.log(`Leftover QA rows: ${left}`)
