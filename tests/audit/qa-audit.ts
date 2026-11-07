@@ -248,6 +248,52 @@ async function main() {
     check('login events block ran', false, String(e))
   }
 
+  // ---- read APIs (Admin only) ----
+  try {
+    const orderNumber = `SP-19990101-${String(Date.now() % 10000).padStart(4, '0')}`
+    const ho = track(await prisma.order.create({
+      data: { retailerId: ret.id, orderNumber, status: 'DRAFT', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 10, lineTotal: 20 }] } },
+      include: { items: true },
+    }))
+    const item = track((ho as any).items[0])
+    await prisma.orderItem.update({ where: { id: item.id }, data: { quantity: 7 } })
+    const get = (path: string, role: 'ADMIN' | 'MANAGER') => fetch(`${BASE}${path}`, { headers: { cookie: staffCookie(role) } })
+    const hPath = `/api/orders/${ho.id}/history`
+    check('MANAGER gets 403 from order history', (await get(hPath, 'MANAGER')).status === 403)
+    check('MANAGER gets 403 from audit log', (await get('/api/audit-log', 'MANAGER')).status === 403)
+    const hr = await get(hPath, 'ADMIN')
+    const hj: any = await hr.json()
+    const hrows: any[] = hj.data ?? []
+    check('ADMIN order history 200 with the order CREATE and the item edit', hr.status === 200 &&
+      hrows.some((e) => e.model === 'Order' && e.recordId === ho.id && e.action === 'CREATE') &&
+      hrows.some((e) => e.model === 'OrderItem' && e.recordId === item.id && e.action === 'UPDATE' && e.changes?.quantity?.to === 7), `${hr.status} ${JSON.stringify(hrows.map((e) => [e.model, e.action]))}`)
+    check('order history is newest first', hrows.every((e, i) => i === 0 || new Date(hrows[i - 1].createdAt) >= new Date(e.createdAt)))
+    check('history rows have ISO createdAt string', typeof hrows[0]?.createdAt === 'string' && !Number.isNaN(Date.parse(hrows[0].createdAt)))
+
+    const q1: any = await (await get(`/api/audit-log?q=${orderNumber}`, 'ADMIN')).json()
+    check('audit-log q=order number finds order + item entries', q1.data?.some((e: any) => e.recordId === ho.id) && q1.data?.some((e: any) => e.recordId === item.id) && q1.meta?.total === q1.data?.length, JSON.stringify(q1.meta))
+    const q2: any = await (await get(`/api/audit-log?q=${item.id}`, 'ADMIN')).json()
+    check('audit-log q=record id is exact', q2.data?.length >= 1 && q2.data.every((e: any) => e.recordId === item.id))
+    const q3: any = await (await get('/api/audit-log?q=SP-19990101-NOPE', 'ADMIN')).json()
+    check('audit-log q=unknown order number -> empty', q3.data?.length === 0 && q3.meta?.total === 0)
+    const f1: any = await (await get(`/api/audit-log?model=OrderItem&action=UPDATE&q=${orderNumber}&pageSize=1`, 'ADMIN')).json()
+    check('audit-log filters + pageSize paginate', f1.data?.length === 1 && f1.meta.pageSize === 1 && f1.meta.total === 1 && f1.data[0].action === 'UPDATE')
+    const big: any = await (await get('/api/audit-log?pageSize=9999', 'ADMIN')).json()
+    check('pageSize capped at 200, default meta', big.meta?.pageSize === 200 && big.meta.page === 1 && big.data.length <= 200)
+    const today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10)
+    const d1: any = await (await get(`/api/audit-log?from=${today}&to=${today}&q=${orderNumber}`, 'ADMIN')).json()
+    check('audit-log date range (Karachi today) includes fresh entries', d1.meta?.total >= 2, JSON.stringify(d1.meta))
+    const d2: any = await (await get(`/api/audit-log?to=2000-01-01&q=${orderNumber}`, 'ADMIN')).json()
+    check('audit-log date range in the past excludes them', d2.meta?.total === 0)
+    check('audit-log bad date -> 400', (await get('/api/audit-log?from=garbage', 'ADMIN')).status === 400)
+
+    await prisma.order.delete({ where: { id: ho.id } })
+    const hr2: any = await (await get(hPath, 'ADMIN')).json()
+    check('history of a deleted order still shows its DELETE entry with cascaded items', hr2.data?.some((e: any) => e.model === 'Order' && e.action === 'DELETE' && e.changes?._cascaded?.OrderItem?.length === 1))
+  } catch (e) {
+    check('read APIs block ran', false, String(e))
+  }
+
   // ---- HTTP: a forged x-sp-actor header is replaced by the real session actor ----
   try {
     const res = await fetch(`${BASE}/api/areas`, {
