@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
-import { getEffectivePrice } from '@/lib/utils/pricing'
+import { getEffectivePrice, getFefoBatch } from '@/lib/utils/pricing'
 import { generateMedicineCode } from '@/lib/utils/generate-code'
 
 export const dynamic = 'force-dynamic'
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     include: {
       manufacturer: { select: { name: true } },
       batches: {
-        select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true },
+        select: { currentQty: true, expiryDate: true, tradePrice: true, mrp: true, purchasePrice: true },
         orderBy: { expiryDate: 'asc' },
       },
     },
@@ -57,7 +57,10 @@ export async function GET(req: NextRequest) {
     const totalStock = m.batches.reduce((sum, b) => sum + b.currentQty, 0)
     const hasNearExpiry = m.batches.some((b) => b.expiryDate <= ninetyDays && b.currentQty > 0)
     const { tradePrice, mrp } = getEffectivePrice(m.batches)
-    return { ...m, totalStock, hasNearExpiry, tradePrice, mrp }
+    // FEFO batch's cost, used by the Sales Invoice page to warn when a line sells below cost
+    const fefo = getFefoBatch(m.batches)
+    const purchasePrice = fefo ? Number(fefo.purchasePrice) : null
+    return { ...m, totalStock, hasNearExpiry, tradePrice, mrp, purchasePrice }
   })
 
   if (lowStock) results = results.filter((m) => m.totalStock <= m.minStockLevel)

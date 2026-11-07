@@ -19,6 +19,8 @@ interface Medicine {
   name: string
   tradePrice: number | null
   mrp: number | null
+  /** FEFO batch cost; null when unknown (no stock, or a reopened draft before costs load) */
+  purchasePrice?: number | null
   salesTaxApplicable: boolean
   category: string | null
   totalStock: number
@@ -82,6 +84,19 @@ function lineUnitTotal(l: OrderLine) {
   return discounted + salesTax
 }
 
+/**
+ * True when the line sells below the FEFO batch's cost. Revenue is spread over every unit that
+ * leaves stock (ordered + bonus), so free bonus units count against the line. Sales tax is a
+ * pass-through and is ignored.
+ */
+function isLineAtLoss(l: OrderLine): boolean {
+  const cost = l.medicine.purchasePrice
+  const units = l.quantity + l.bonusQty
+  if (cost == null || units <= 0) return false
+  const revenuePerUnit = (l.quantity * l.unitPrice * (1 - l.offerPercent / 100)) / units
+  return revenuePerUnit < cost - 0.005
+}
+
 function NewOrderForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -134,6 +149,16 @@ function NewOrderForm() {
           bonusQty: i.bonusQty, rule: ruleFor(offer), basePrice: Number(offer?.specialPrice ?? i.unitPrice),
         } as OrderLine
       }))
+      // Reopened drafts don't carry batch costs; look them up so the below-cost warning works here too
+      const costs = new Map<string, number | null>()
+      await Promise.all(o.items.map(async (i: { medicineId: string; medicine: { code: string } }) => {
+        try {
+          const r = await fetch(`/api/inventory?search=${encodeURIComponent(i.medicine.code)}&pageSize=5`).then(x => x.json())
+          const m = (r.data ?? []).find((x: { id: string }) => x.id === i.medicineId)
+          if (m) costs.set(i.medicineId, m.purchasePrice ?? null)
+        } catch { /* warning simply stays off for this line */ }
+      }))
+      setLines(prev => prev.map(l => costs.has(l.medicine.id) ? { ...l, medicine: { ...l.medicine, purchasePrice: costs.get(l.medicine.id) } } : l))
     })
   }, [draftId, offersReady, offerItems])
 
@@ -400,14 +425,20 @@ function NewOrderForm() {
                 <tbody>
                   {lines.map(l => {
                     const lineTotal = l.quantity * lineUnitTotal(l)
+                    const atLoss = isLineAtLoss(l)
                     return (
-                      <tr key={l.medicine.id} className={`border-b ${l.medicine.totalStock === 0 ? 'bg-red-50' : ''}`}>
+                      <tr key={l.medicine.id} className={`border-b ${l.medicine.totalStock === 0 ? 'bg-red-50' : atLoss ? 'bg-amber-50' : ''}`}>
                         <td className="py-1.5 pr-2">
                           <div className="font-medium flex items-center gap-2 whitespace-nowrap">
                             {l.medicine.name}
                             {l.medicine.totalStock === 0 && (
                               <span className="inline-flex items-center gap-1 text-xs text-red-600 font-normal">
                                 <AlertTriangle size={11} /> No stock
+                              </span>
+                            )}
+                            {atLoss && (
+                              <span className="inline-flex items-center gap-1 text-xs text-amber-700 font-semibold" title="The price after discount and bonus is below this item's purchase cost">
+                                <AlertTriangle size={12} /> Selling at loss
                               </span>
                             )}
                           </div>
@@ -457,6 +488,19 @@ function NewOrderForm() {
                       </tr>
                     )
                   })}
+                  {lines.some(isLineAtLoss) && (
+                    <tr>
+                      <td colSpan={9} className="pt-3">
+                        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+                          <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                          <p className="text-amber-800">
+                            <strong>Selling below cost:</strong> {lines.filter(isLineAtLoss).map(l => l.medicine.name).join(', ')}.
+                            Check the Trade Price, Discount % and Bonus before saving. This is a warning only; you can still save.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   <tr>
                     <td colSpan={7} className="pt-3 text-right font-semibold">Total:</td>
                     <td className="pt-3 text-right font-bold text-base whitespace-nowrap">{formatPKR(totalAmount)}</td>
