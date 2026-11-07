@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
   if ((from && !parseDateInput(from)) || (to && !parseDateInput(to))) {
     return NextResponse.json({ error: 'from/to must be YYYY-MM-DD' }, { status: 400 })
   }
-  const q = sp.get('q')?.trim()
-  const page = Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1)
+  const q = sp.get('q')?.trim().slice(0, 200)
+  const page = Math.min(100000, Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1))
   const pageSize = Math.min(200, Math.max(1, parseInt(sp.get('pageSize') ?? '50', 10) || 50))
   const where = buildAuditWhere({
     actorId: sp.get('actorId') || undefined,

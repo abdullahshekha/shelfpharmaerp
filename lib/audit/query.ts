@@ -26,7 +26,14 @@ export function buildAuditWhere(f: AuditFilter): Prisma.AuditLogWhereInput {
   return where
 }
 
-/** Every record id that belongs to an order: the order, its items, invoice, delivery, challan and the invoice's payments. */
+/** Child models whose rows carry `orderId`; their DELETE entries keep it in `changes.orderId.from`. */
+export const ORDER_CHILD_MODELS = ['Invoice', 'Delivery', 'DeliveryChallan', 'OrderItem']
+
+/**
+ * Every record id that belongs to an order: the order, its items, invoice, delivery, challan and the invoice's
+ * payments — including ones already deleted (found through their DELETE entries), so a hard-deleted order and
+ * its payments still have a history.
+ */
 export async function orderRecordIds(orderId: string): Promise<string[]> {
   const o = await prisma.order.findUnique({
     where: { id: orderId },
@@ -39,12 +46,29 @@ export async function orderRecordIds(orderId: string): Promise<string[]> {
   })
   const ch = await prisma.deliveryChallan.findUnique({ where: { orderId }, select: { id: true } })
   const ids = new Set<string>([orderId])
+  const invoiceIds = new Set<string>()
   if (o) {
     o.items.forEach((i) => ids.add(i.id))
-    if (o.invoice) { ids.add(o.invoice.id); o.invoice.payments.forEach((p) => ids.add(p.id)) }
+    if (o.invoice) { ids.add(o.invoice.id); invoiceIds.add(o.invoice.id); o.invoice.payments.forEach((p) => ids.add(p.id)) }
     if (o.delivery) ids.add(o.delivery.id)
   }
   if (ch) ids.add(ch.id)
+  const deletedChildren = await prisma.auditLog.findMany({
+    where: { model: { in: ORDER_CHILD_MODELS }, action: 'DELETE', changes: { path: ['orderId', 'from'], equals: orderId } },
+    select: { model: true, recordId: true },
+  })
+  for (const e of deletedChildren) {
+    if (!e.recordId) continue
+    ids.add(e.recordId)
+    if (e.model === 'Invoice') invoiceIds.add(e.recordId)
+  }
+  for (const invoiceId of Array.from(invoiceIds)) {
+    const deletedPayments = await prisma.auditLog.findMany({
+      where: { model: 'Payment', action: 'DELETE', changes: { path: ['invoiceId', 'from'], equals: invoiceId } },
+      select: { recordId: true },
+    })
+    deletedPayments.forEach((p) => p.recordId && ids.add(p.recordId))
+  }
   return Array.from(ids)
 }
 
@@ -67,15 +91,16 @@ export async function resolveSearchIds(q: string): Promise<string[]> {
 }
 
 /**
- * Order history filter: entries for any of the order's records, OR entries whose `_cascaded` snapshot
- * (written when a parent delete cascades, see cascade.ts) lists one of the order's OrderItems — chosen as a
- * Prisma JSON `array_contains` on `changes` path ['_cascaded','OrderItem'] matching `{ orderId }`.
+ * Order history filter: entries for any of the order's records (see orderRecordIds), DELETE entries of its child
+ * rows (old values carry the order id), and Order DELETE entries whose `_cascaded` snapshot lists one of its
+ * OrderItems. The JSON branches are scoped by model + action so they can use the (model, recordId) index prefix.
  */
 export function orderHistoryWhere(orderId: string, ids: string[]): Prisma.AuditLogWhereInput {
   return {
     OR: [
       { recordId: { in: ids } },
-      { changes: { path: ['_cascaded', 'OrderItem'], array_contains: [{ orderId }] } },
+      { model: { in: ORDER_CHILD_MODELS }, action: 'DELETE', changes: { path: ['orderId', 'from'], equals: orderId } },
+      { model: 'Order', action: 'DELETE', changes: { path: ['_cascaded', 'OrderItem'], array_contains: [{ orderId }] } },
     ],
   }
 }

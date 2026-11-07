@@ -22,8 +22,6 @@ const QA_LOGIN_NAMES = [LOGIN_USER, PORTAL_USER, UNKNOWN_USER, GHOST_PORTAL]
 
 const entries = (model: string, recordId: string) =>
   prisma.auditLog.findMany({ where: { model, recordId }, orderBy: { createdAt: 'asc' } })
-const bulkSince = async (model: string, action: string, since: Date) =>
-  prisma.auditLog.findMany({ where: { model, action, createdAt: { gte: since } }, orderBy: { createdAt: 'asc' } })
 async function throws(fn: () => Promise<unknown>) { try { await fn(); return false } catch { return true } }
 
 async function main() {
@@ -65,21 +63,38 @@ async function main() {
   const d = es.find((e) => e.action === 'DELETE')
   check('delete -> DELETE entry with old values', !!d && (d.changes as any)?.name?.from === `${P} Del` && (d.changes as any)?.name?.to === null)
 
-  // ---- bulk ----
-  const t0 = new Date()
+  // ---- bulk: <= ROW_CAP rows -> per-row entries; above -> one BULK_* entry with a summary ----
   const cm = await prisma.area.createMany({ data: [1, 2, 3].map((i) => ({ name: `${P} Bulk ${i}` })) })
   const bulkAreas = await prisma.area.findMany({ where: { name: { startsWith: `${P} Bulk` } } })
   bulkAreas.forEach(track)
-  let bulk = (await bulkSince('Area', 'BULK_CREATE', t0)).filter((e) => ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)))
+  const perRow = async (action: string) => (await prisma.auditLog.findMany({ where: { model: 'Area', action, recordId: { in: bulkAreas.map((a) => a.id) } } }))
   check('createMany returns its count', cm.count === 3)
-  check('createMany of 3 -> one BULK_CREATE with count 3 and the ids', bulk.length === 1 && (bulk[0].changes as any).count === 3 && (bulk[0].changes as any).ids.length === 3)
+  check('createMany of 3 -> 3 per-row CREATE entries with values', (await perRow('CREATE')).filter((e) => String((e.changes as any)?.name?.to).startsWith(`${P} Bulk`)).length === 3)
 
   const t1 = new Date()
   const um0 = await prisma.area.updateMany({ where: { name: `${P} Nothing Matches` }, data: { deliveryDays: [2] } })
-  check('updateMany matching nothing -> no entry', um0.count === 0 && (await bulkSince('Area', 'BULK_UPDATE', t1)).length === 0)
+  check('updateMany matching nothing -> no entry', um0.count === 0 && (await prisma.auditLog.count({ where: { model: 'Area', createdAt: { gte: t1 } } })) === 0)
   const um = await prisma.area.updateMany({ where: { name: { startsWith: `${P} Bulk` } }, data: { deliveryDays: [2] } })
-  bulk = (await bulkSince('Area', 'BULK_UPDATE', t1)).filter((e) => ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)))
-  check('updateMany of 3 -> one BULK_UPDATE count 3', um.count === 3 && bulk.length === 1 && (bulk[0].changes as any).count === 3)
+  const ups = await perRow('UPDATE')
+  check('updateMany of 3 -> 3 per-row UPDATE entries diffing deliveryDays', um.count === 3 && ups.length === 3 && ups.every((e) => JSON.stringify(e.changes) === '{"deliveryDays":{"to":[2],"from":[]}}'), JSON.stringify(ups.map((e) => e.changes)))
+  await prisma.area.updateMany({ where: { name: { startsWith: `${P} Bulk` } }, data: { deliveryDays: [2] } })
+  check('no-op updateMany -> no new entries', (await perRow('UPDATE')).length === 3)
+  const dm = await prisma.area.deleteMany({ where: { name: `${P} Bulk 3` } })
+  const dels = await perRow('DELETE')
+  check('deleteMany of 1 -> per-row DELETE with old values', dm.count === 1 && dels.length === 1 && (dels[0].changes as any)?.name?.from === `${P} Bulk 3`)
+
+  const t2 = new Date()
+  const big = await prisma.area.createMany({ data: Array.from({ length: 30 }, (_, i) => ({ name: `${P} Big ${i}` })) })
+  const bigAreas = await prisma.area.findMany({ where: { name: { startsWith: `${P} Big` } } })
+  bigAreas.forEach(track)
+  const bigCreate = await prisma.auditLog.findMany({ where: { model: 'Area', createdAt: { gte: t2 } } })
+  check('createMany of 30 (> 25) -> one BULK_CREATE with count + data sample', big.count === 30 && bigCreate.length === 1 && bigCreate[0].action === 'BULK_CREATE' && (bigCreate[0].changes as any).count === 30 && JSON.stringify((bigCreate[0].changes as any).data?.sample ?? null).includes(`${P} Big`), JSON.stringify(bigCreate.map((e) => [e.action, e.changes])).slice(0, 300))
+  const bigUpd = await prisma.area.updateMany({ where: { name: { startsWith: `${P} Big` } }, data: { deliveryDays: [3] } })
+  const bu = await prisma.auditLog.findMany({ where: { model: 'Area', action: 'BULK_UPDATE', createdAt: { gte: t2 } } })
+  check('updateMany of 30 -> one BULK_UPDATE with count, ids, where and data', bigUpd.count === 30 && bu.length === 1 && (bu[0].changes as any).count === 30 && (bu[0].changes as any).ids.length === 30 && JSON.stringify((bu[0].changes as any).data) === '{"deliveryDays":[3]}')
+  const bigDel = await prisma.area.deleteMany({ where: { name: { startsWith: `${P} Big` } } })
+  const bd = await prisma.auditLog.findMany({ where: { model: 'Area', action: 'BULK_DELETE', createdAt: { gte: t2 } } })
+  check('deleteMany of 30 -> one BULK_DELETE with count + where', bigDel.count === 30 && bd.length === 1 && (bd[0].changes as any).count === 30 && !!(bd[0].changes as any).where)
 
   // ---- redaction ----
   const emp = track(await prisma.employee.create({ data: { name: `${P} Employee`, role: 'WAREHOUSE', passwordHash: 'secret-hash-value' } }))
@@ -105,6 +120,46 @@ async function main() {
   es = await entries('Order', order.id)
   const od = es.find((e) => e.action === 'DELETE')
   check('order DELETE -> _cascaded holds the 2 items', ((od?.changes as any)?._cascaded?.OrderItem ?? []).length === 2, JSON.stringify((od?.changes as any)?._cascaded))
+
+  // ---- real order flows (lib/orders): DELIVERED, cancel, hard delete -> order History ----
+  // Zero prices and a pre-go-live payment date keep the live ledger untouched apart from zero-value postings that
+  // the hard delete's sync removes again (checked in cleanup).
+  const { setOrderStatus } = await import('../../lib/orders/set-status')
+  const { cancelOrder, hardDeleteOrder } = await import('../../lib/orders/lifecycle')
+  const { GET: historyGET } = await import('../../app/api/orders/[id]/history/route')
+  const { NextRequest } = await import('next/server')
+  const history = async (id: string) => {
+    const res = await historyGET(new NextRequest(`http://x/api/orders/${id}/history`, { headers: { cookie: staffCookie('ADMIN') } }), { params: Promise.resolve({ id }) } as any)
+    return ((await res.json()).data ?? []) as any[]
+  }
+  const batch = track(await prisma.medicineBatch.create({ data: { medicineId: med.id, batchNumber: 'QA-AUDIT-B1', expiryDate: new Date('2031-01-01'), quantityIn: 10, currentQty: 10, purchasePrice: 0, tradePrice: 0 } }))
+  const flow = track(await prisma.order.create({
+    data: { retailerId: ret.id, status: 'PENDING', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 0, lineTotal: 0 }] } },
+    include: { items: true },
+  }))
+  flow.items.forEach(track)
+  await setOrderStatus(flow.id, 'CONFIRMED')
+  const inv = track((await prisma.invoice.findUnique({ where: { orderId: flow.id } }))!)
+  track((await prisma.delivery.findUnique({ where: { orderId: flow.id } }))!)
+  track((await prisma.deliveryChallan.findUnique({ where: { orderId: flow.id } }))!)
+  const pay = track(await prisma.payment.create({ data: { retailerId: ret.id, invoiceId: inv.id, amount: 1, paymentDate: new Date('2026-01-01T00:00:00Z'), notes: 'QA Audit payment' } }))
+  await setOrderStatus(flow.id, 'DELIVERED')
+  let h = await history(flow.id)
+  const changed = (model: string, field: string, to: unknown) => h.some((e) => e.model === model && e.action === 'UPDATE' && e.changes?.[field]?.to === to)
+  check('History: Order status -> DELIVERED (updateMany claim)', changed('Order', 'status', 'DELIVERED'), JSON.stringify(h.map((e) => [e.model, e.action, Object.keys(e.changes ?? {})])))
+  check('History: Delivery status -> DELIVERED', changed('Delivery', 'status', 'DELIVERED'))
+  check('History: stock deduction recorded on the order item', h.some((e) => e.model === 'OrderItem' && e.action === 'UPDATE' && e.changes?.deductedQty?.to === 2))
+  check('stock deducted from the QA batch', (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 8)
+  await cancelOrder(flow.id)
+  h = await history(flow.id)
+  check('History: cancel -> Order status DELIVERED -> CANCELLED', h.some((e) => e.model === 'Order' && e.action === 'UPDATE' && e.changes?.status?.from === 'DELIVERED' && e.changes?.status?.to === 'CANCELLED'))
+  await hardDeleteOrder(flow.id)
+  h = await history(flow.id)
+  const del1 = (model: string) => h.find((e) => e.model === model && e.action === 'DELETE')
+  check('History after hard delete: Order DELETE with old values + cascaded items', del1('Order')?.changes?.status?.from === 'CANCELLED' && (del1('Order')?.changes?._cascaded?.OrderItem ?? []).length === 1, JSON.stringify(h.map((e) => [e.model, e.action])))
+  check('History after hard delete: Payment DELETE with old values', del1('Payment')?.recordId === pay.id && del1('Payment')?.changes?.amount?.from === '1')
+  check('History after hard delete: Invoice, Delivery, DeliveryChallan DELETE', !!del1('Invoice') && !!del1('Delivery') && !!del1('DeliveryChallan'))
+  check('History after hard delete still shows the DELIVERED change', changed('Order', 'status', 'DELIVERED'))
 
   // ---- customer quantity sheet PUT (was an array $transaction of upserts; now interactive) ----
   const ol = track(await prisma.offerList.create({ data: { name: `${P} Offer List`, listNumber: `QA-AUDIT-${Date.now()}`, listDate: new Date() } }))
@@ -145,6 +200,23 @@ async function main() {
     throw new Error('business failure')
   }))
   check('business rollback also rolls back its audit entry', (await entries('Area', itx.id)).length === 3)
+  await prisma.$transaction(async (tx) => {
+    await tx.area.update({ where: { id: itx.id }, data: { deliveryDays: [1] } })
+    await tx.$transaction(async (inner) => {
+      await inner.area.update({ where: { id: itx.id }, data: { name: `${P} Itx Savepoint` } })
+      throw new Error('savepoint failure')
+    }).catch(() => null)
+  })
+  es = await entries('Area', itx.id)
+  check('caught savepoint rollback discards its entry; the outer write is logged', es.length === 4 && JSON.stringify(es[3].changes) === '{"deliveryDays":{"to":[1],"from":[4,6]}}' && (await prisma.area.findUnique({ where: { id: itx.id } }))!.name === `${P} Itx`, JSON.stringify(es.map((e) => e.changes)))
+  const many = await prisma.$transaction(async (tx) => {
+    const a = track(await tx.area.create({ data: { name: `${P} Buf A` } }))
+    const b = track(await tx.area.create({ data: { name: `${P} Buf B` } }))
+    // Not visible before the flush at the end of the transaction callback.
+    const inside = await tx.auditLog.count({ where: { recordId: { in: [a.id, b.id] } } })
+    return { a, b, inside }
+  })
+  check('entries are buffered and flushed once at the end of the transaction', many.inside === 0 && (await prisma.auditLog.count({ where: { recordId: { in: [many.a.id, many.b.id] } } })) === 2)
 
   // ---- forced audit failure: the change fails too ----
   process.env.AUDIT_TEST_FAIL = '1'
@@ -280,6 +352,10 @@ async function main() {
     check('audit-log filters + pageSize paginate', f1.data?.length === 1 && f1.meta.pageSize === 1 && f1.meta.total === 1 && f1.data[0].action === 'UPDATE')
     const big: any = await (await get('/api/audit-log?pageSize=9999', 'ADMIN')).json()
     check('pageSize capped at 200, default meta', big.meta?.pageSize === 200 && big.meta.page === 1 && big.data.length <= 200)
+    const far: any = await (await get('/api/audit-log?page=999999999', 'ADMIN')).json()
+    check('page clamped at 100000', far.meta?.page === 100000)
+    const longQ = await get(`/api/audit-log?q=${'x'.repeat(5000)}`, 'ADMIN')
+    check('very long q is accepted (capped), not an error', longQ.status === 200)
     const today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10)
     const d1: any = await (await get(`/api/audit-log?from=${today}&to=${today}&q=${orderNumber}`, 'ADMIN')).json()
     check('audit-log date range (Karachi today) includes fresh entries', d1.meta?.total >= 2, JSON.stringify(d1.meta))
@@ -310,10 +386,29 @@ async function main() {
   }
 }
 
+/** An AuditLog row this run produced: about a record it created, or mentioning one / a QA name in its values. */
+function ours(e: { recordId: string | null; changes: unknown }) {
+  if (e.recordId && ids.has(e.recordId)) return true
+  const text = JSON.stringify(e.changes ?? null)
+  if (text.includes('QA Audit') || text.includes('QA-AUDIT')) return true
+  return Array.from(ids).some((id) => text.includes(id))
+}
+
 async function cleanup() {
   const areas = await prisma.area.findMany({ where: { name: { startsWith: P } }, select: { id: true } })
   areas.forEach((a) => ids.add(a.id))
+  const qaOrders = (await prisma.order.findMany({ where: { retailer: { name: `${P} Customer` } }, select: { id: true } })).map((o) => o.id)
+  qaOrders.forEach((id) => ids.add(id))
+  await prisma.payment.deleteMany({ where: { retailer: { name: `${P} Customer` } } })
+  await prisma.delivery.deleteMany({ where: { orderId: { in: qaOrders } } })
+  await prisma.deliveryChallan.deleteMany({ where: { orderId: { in: qaOrders } } })
+  await prisma.invoice.deleteMany({ where: { orderId: { in: qaOrders } } })
   await prisma.order.deleteMany({ where: { retailer: { name: `${P} Customer` } } })
+  // Ledger: any posting for a QA source (the records are gone now, so a sync removes it).
+  const { syncAllSafe } = await import('../../lib/accounting/sync')
+  const jes = await prisma.journalEntry.findMany({ where: { sourceId: { in: Array.from(ids) } }, select: { sourceType: true, sourceId: true } })
+  if (jes.length) await syncAllSafe(jes.map((e) => [e.sourceType as any, e.sourceId]))
+  await prisma.medicineBatch.deleteMany({ where: { medicine: { name: `${P} MED` } } })
   await prisma.offerList.deleteMany({ where: { listNumber: { startsWith: 'QA-AUDIT-' } } }) // cascades sheets + lines
   await prisma.medicine.deleteMany({ where: { name: `${P} MED` } })
   await prisma.manufacturer.deleteMany({ where: { name: `${P} Mfr` } })
@@ -322,7 +417,7 @@ async function cleanup() {
   await prisma.area.deleteMany({ where: { name: { startsWith: P } } })
   // Our own audit rows: those whose recordId or bulk ids are records this run created.
   const mineOf = async () => (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))
-    .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)) || String((e.changes as any)?.username ?? '').startsWith('qa.audit.'))
+    .filter((e) => ours(e) || String((e.changes as any)?.username ?? '').startsWith('qa.audit.'))
   const mine = await mineOf()
   process.env.AUDIT_ALLOW_PURGE = '1'
   try {
@@ -337,6 +432,7 @@ async function cleanup() {
     (await prisma.manufacturer.count({ where: { name: { startsWith: P } } })) +
     (await prisma.medicine.count({ where: { name: { startsWith: P } } })) +
     (await prisma.offerList.count({ where: { listNumber: { startsWith: 'QA-AUDIT-' } } })) +
+    (await prisma.journalEntry.count({ where: { sourceId: { in: Array.from(ids) } } })) +
     (await mineOf()).length
   console.log(`Leftover QA rows: ${left}`)
   if (left !== 0) process.exitCode = 1
