@@ -678,3 +678,21 @@ model PayrollLine {
   @@index([runId])
   @@index([employeeId])
 }
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  actorType String // EMPLOYEE | CUSTOMER | SYSTEM
+  actorId   String?
+  actorName String
+  actorRole String?
+  model     String
+  recordId  String?
+  action    String // CREATE | UPDATE | DELETE | BULK_CREATE | BULK_UPDATE | BULK_DELETE | LOGIN | LOGIN_FAILED
+  changes   Json?
+  reason    String?
+
+  @@index([model, recordId])
+  @@index([createdAt])
+  @@index([actorId])
+}
