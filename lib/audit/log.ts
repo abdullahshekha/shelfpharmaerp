@@ -21,3 +21,12 @@ export async function logAuditEvent(e: {
     }),
   })
 }
+
+/** Login variant: an audit insert failure is logged and swallowed so it can never block or alter a login response. */
+export async function logLoginEvent(e: Parameters<typeof logAuditEvent>[0]): Promise<void> {
+  try {
+    await logAuditEvent(e)
+  } catch (err) {
+    console.error('[audit] failed to log login event', err)
+  }
+}

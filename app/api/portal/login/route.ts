@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { logLoginEvent } from '@/lib/audit/log'
 import {
   PORTAL_COOKIE, PORTAL_COOKIE_OPTIONS, MAX_FAILED_ATTEMPTS, LOCK_MINUTES,
   hashPortalPassword, verifyPortalPassword, createPortalSession, validatePortalUsername,
@@ -23,14 +24,25 @@ export async function POST(req: NextRequest) {
     ? await prisma.retailer.findUnique({
         where: { portalUsername: username },
         select: {
-          id: true, isActive: true, portalEnabled: true, portalPasswordHash: true,
+          id: true, name: true, isActive: true, portalEnabled: true, portalPasswordHash: true,
           portalSessionVersion: true, portalLockedUntil: true,
         },
       })
     : null
 
+  // One audit insert per failing branch (known account -> the customer is the actor; unknown -> system). Never the password.
+  const attempted = username ?? (typeof body?.username === 'string' ? body.username.slice(0, 64) : null)
+  const failed = (reason: 'invalid' | 'blocked' | 'locked') => logLoginEvent({
+    action: 'LOGIN_FAILED', model: 'Retailer', recordId: r?.id ?? null,
+    actor: r ? { type: 'CUSTOMER', id: r.id, name: r.name, role: null } : undefined,
+    changes: { username: attempted, reason },
+  })
+
   // Cheap early exit; the atomic gate below is what actually enforces the lock under concurrency.
-  if (r?.portalLockedUntil && r.portalLockedUntil > new Date()) return tooMany()
+  if (r?.portalLockedUntil && r.portalLockedUntil > new Date()) {
+    await failed('locked')
+    return tooMany()
+  }
 
   const usable = !!r && r.isActive && r.portalEnabled && !!r.portalPasswordHash
 
@@ -42,6 +54,7 @@ export async function POST(req: NextRequest) {
       data: { portalFailedAttempts: { increment: 1 } },
     })
     verifyPortalPassword(password, DUMMY_HASH)
+    await failed(r ? 'blocked' : 'invalid')
     return invalid()
   }
 
@@ -56,10 +69,16 @@ export async function POST(req: NextRequest) {
       select: { portalFailedAttempts: true },
     })).portalFailedAttempts
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') return tooMany() // locked
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+      await failed('locked')
+      return tooMany() // locked
+    }
     throw e
   }
-  if (k > MAX_FAILED_ATTEMPTS) return tooMany() // burst overflow: never verified
+  if (k > MAX_FAILED_ATTEMPTS) {
+    await failed('locked')
+    return tooMany() // burst overflow: never verified
+  }
 
   const ok = verifyPortalPassword(password, r!.portalPasswordHash!)
 
@@ -69,14 +88,22 @@ export async function POST(req: NextRequest) {
         where: { id: r!.id },
         data: { portalFailedAttempts: 0, portalLockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) },
       })
+      await failed('locked')
       return tooMany()
     }
+    await failed('invalid')
     return invalid()
   }
 
   await prisma.retailer.update({
     where: { id: r!.id },
     data: { portalFailedAttempts: 0, portalLockedUntil: null, portalLastLoginAt: new Date() },
+  })
+
+  await logLoginEvent({
+    action: 'LOGIN', model: 'Retailer', recordId: r!.id,
+    actor: { type: 'CUSTOMER', id: r!.id, name: r!.name, role: null },
+    changes: { username },
   })
 
   const res = NextResponse.json({ success: true })

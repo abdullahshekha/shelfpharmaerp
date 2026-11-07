@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, createSession } from '@/lib/utils/auth'
+import { logLoginEvent } from '@/lib/audit/log'
+import { actorFromStaffSession } from '@/lib/audit/actor'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +14,11 @@ export async function POST(req: NextRequest) {
   const envUser = process.env.AUTH_USERNAME ?? 'admin'
   const envPass = process.env.AUTH_PASSWORD ?? 'shelfpharma123'
   if (username === envUser && password === envPass) {
+    await logLoginEvent({
+      action: 'LOGIN', model: 'Employee',
+      actor: actorFromStaffSession({ id: 'env-admin', name: 'Admin', role: 'ADMIN' }),
+      changes: { username },
+    })
     const token = createSession({ id: 'env-admin', name: 'Admin', role: 'ADMIN' }, secret)
     const res = NextResponse.json({ success: true, role: 'ADMIN' })
     res.cookies.set('sp_session', token, {
@@ -26,18 +33,33 @@ export async function POST(req: NextRequest) {
     select: { id: true, name: true, role: true, passwordHash: true, loginBlocked: true },
   })
 
+  // Audit failures: the actor is the system (nobody is authenticated); the attempted username is recorded, never the password.
+  const failed = (reason: 'invalid' | 'blocked') => logLoginEvent({
+    action: 'LOGIN_FAILED', model: 'Employee', recordId: employee?.id ?? null,
+    changes: { username, reason },
+  })
+
   if (!employee || !employee.passwordHash) {
+    await failed('invalid')
     return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 })
   }
 
   if (employee.loginBlocked) {
+    await failed('blocked')
     return NextResponse.json({ error: 'This account is blocked from logging in' }, { status: 403 })
   }
 
   const hash = hashPassword(password)
   if (hash !== employee.passwordHash) {
+    await failed('invalid')
     return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 })
   }
+
+  await logLoginEvent({
+    action: 'LOGIN', model: 'Employee', recordId: employee.id,
+    actor: actorFromStaffSession({ id: employee.id, name: employee.name, role: employee.role }),
+    changes: { username },
+  })
 
   const token = createSession({ id: employee.id, name: employee.name, role: employee.role }, secret)
   const res = NextResponse.json({ success: true, role: employee.role })

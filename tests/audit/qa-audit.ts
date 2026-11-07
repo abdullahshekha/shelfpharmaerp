@@ -5,11 +5,20 @@
 // Needs a dev server on :3100 for the forged-actor-header check. Run: npx tsx tests/audit/qa-audit.ts
 import { prisma, staffCookie, check, BASE } from '../portal/qa-helpers'
 import { encodeActor, ACTOR_HEADER } from '../../lib/audit/actor'
+import { hashPassword } from '../../lib/utils/auth'
+import { hashPortalPassword } from '../../lib/utils/portal-auth'
 
 const START = new Date(Date.now() - 5000)
 const ids = new Set<string>()
 const track = <T extends { id: string }>(r: T) => { ids.add(r.id); return r }
 const P = 'QA Audit'
+const LOGIN_USER = 'qa.audit.login'
+const LOGIN_PW = 'qa-audit-pw-123'
+const PORTAL_USER = 'qa.audit.portal'
+const PORTAL_PW = 'qa-audit-portal-1'
+const UNKNOWN_USER = 'qa.audit.nobody'
+const GHOST_PORTAL = 'qa.audit.ghost'
+const QA_LOGIN_NAMES = [LOGIN_USER, PORTAL_USER, UNKNOWN_USER, GHOST_PORTAL]
 
 const entries = (model: string, recordId: string) =>
   prisma.auditLog.findMany({ where: { model, recordId }, orderBy: { createdAt: 'asc' } })
@@ -152,6 +161,66 @@ async function main() {
     delete process.env.AUDIT_TEST_FAIL
   }
 
+  // ---- login events ----
+  try {
+    const t = new Date()
+    const post = (path: string, body: unknown) => fetch(`${BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const loginRows = async (model: string, action: string, username: string) =>
+      (await prisma.auditLog.findMany({ where: { model, action, createdAt: { gte: t } }, orderBy: { createdAt: 'asc' } })).filter((e) => (e.changes as any)?.username === username)
+    const lemp = track(await prisma.employee.create({ data: { name: `${P} Login Employee`, role: 'WAREHOUSE', username: LOGIN_USER, passwordHash: hashPassword(LOGIN_PW) } }))
+
+    let r = await post('/api/auth/login', { username: LOGIN_USER, password: 'wrong-password-xyz' })
+    let rows = await loginRows('Employee', 'LOGIN_FAILED', LOGIN_USER)
+    check('staff wrong password -> 401 + LOGIN_FAILED with username, recordId, reason invalid', r.status === 401 && rows.length === 1 && rows[0].recordId === lemp.id && (rows[0].changes as any).reason === 'invalid', `${r.status} ${JSON.stringify(rows.map((e) => e.changes))}`)
+    check('staff failed login never stores the password', !JSON.stringify(rows.map((e) => e.changes)).includes('wrong-password-xyz'))
+
+    r = await post('/api/auth/login', { username: LOGIN_USER, password: LOGIN_PW })
+    const okRows = await prisma.auditLog.findMany({ where: { model: 'Employee', action: 'LOGIN', recordId: lemp.id, createdAt: { gte: t } } })
+    check('staff correct password -> 200 + LOGIN with employee actor', r.status === 200 && okRows.length === 1 && okRows[0].actorType === 'EMPLOYEE' && okRows[0].actorId === lemp.id && okRows[0].actorName === `${P} Login Employee`, `${r.status} ${JSON.stringify(okRows.map((e) => [e.actorType, e.actorId, e.actorName]))}`)
+    check('staff LOGIN entry never stores the password', !JSON.stringify(okRows.map((e) => e.changes)).includes(LOGIN_PW))
+
+    r = await post('/api/auth/login', { username: UNKNOWN_USER, password: 'whatever-pw-1' })
+    rows = await loginRows('Employee', 'LOGIN_FAILED', UNKNOWN_USER)
+    check('staff unknown username -> LOGIN_FAILED with recordId null, SYSTEM actor', r.status === 401 && rows.length === 1 && rows[0].recordId === null && rows[0].actorType === 'SYSTEM' && !JSON.stringify(rows[0].changes).includes('whatever-pw-1'), `${r.status} ${JSON.stringify(rows.map((e) => [e.recordId, e.actorType, e.changes]))}`)
+
+    await prisma.employee.update({ where: { id: lemp.id }, data: { loginBlocked: true } })
+    r = await post('/api/auth/login', { username: LOGIN_USER, password: LOGIN_PW })
+    rows = (await loginRows('Employee', 'LOGIN_FAILED', LOGIN_USER)).filter((e) => (e.changes as any).reason === 'blocked')
+    check('staff blocked account -> 403 + LOGIN_FAILED reason blocked', r.status === 403 && rows.length === 1 && rows[0].recordId === lemp.id, `${r.status} ${rows.length}`)
+
+    const pret = track(await prisma.retailer.create({ data: { name: `${P} Portal Customer`, portalUsername: PORTAL_USER, portalPasswordHash: hashPortalPassword(PORTAL_PW), portalEnabled: true } }))
+    r = await post('/api/portal/login', { username: PORTAL_USER, password: 'bad-portal-pw-9' })
+    rows = await loginRows('Retailer', 'LOGIN_FAILED', PORTAL_USER)
+    check('portal wrong password -> 401 + LOGIN_FAILED invalid, CUSTOMER actor', r.status === 401 && rows.length === 1 && rows[0].recordId === pret.id && rows[0].actorType === 'CUSTOMER' && (rows[0].changes as any).reason === 'invalid' && !JSON.stringify(rows[0].changes).includes('bad-portal-pw-9'), `${r.status} ${JSON.stringify(rows.map((e) => [e.actorType, e.changes]))}`)
+
+    r = await post('/api/portal/login', { username: GHOST_PORTAL, password: 'bad-portal-pw-9' })
+    rows = await loginRows('Retailer', 'LOGIN_FAILED', GHOST_PORTAL)
+    check('portal unknown username -> LOGIN_FAILED invalid, recordId null, SYSTEM actor', r.status === 401 && rows.length === 1 && rows[0].recordId === null && rows[0].actorType === 'SYSTEM' && (rows[0].changes as any).reason === 'invalid', `${r.status} ${JSON.stringify(rows.map((e) => [e.actorType, e.changes]))}`)
+
+    r = await post('/api/portal/login', { username: PORTAL_USER, password: PORTAL_PW })
+    const pok = await prisma.auditLog.findMany({ where: { model: 'Retailer', action: 'LOGIN', recordId: pret.id, createdAt: { gte: t } } })
+    check('portal correct password -> 200 + LOGIN, CUSTOMER actor with retailer name', r.status === 200 && pok.length === 1 && pok[0].actorType === 'CUSTOMER' && pok[0].actorId === pret.id && pok[0].actorName === `${P} Portal Customer`, `${r.status} ${JSON.stringify(pok.map((e) => [e.actorType, e.actorId, e.actorName]))}`)
+
+    // lock: counter is 1 after the wrong attempt above reset to 0 on success; 5 wrong attempts -> 5th locks, 6th hits the early exit
+    let last = 0
+    for (let i = 0; i < 5; i++) last = (await post('/api/portal/login', { username: PORTAL_USER, password: 'bad-portal-pw-9' })).status
+    const r6 = await post('/api/portal/login', { username: PORTAL_USER, password: 'bad-portal-pw-9' })
+    rows = (await loginRows('Retailer', 'LOGIN_FAILED', PORTAL_USER)).filter((e) => (e.changes as any).reason === 'locked')
+    check('portal lock -> 429 on 5th attempt and on the next, each logged reason locked', last === 429 && r6.status === 429 && rows.length === 2, `${last} ${r6.status} ${rows.length}`)
+
+    // a failing audit insert must not alter the login response (route called directly: AUDIT_TEST_FAIL is per-process)
+    process.env.AUDIT_TEST_FAIL = '1'
+    try {
+      const { POST: staffPost } = await import('../../app/api/auth/login/route')
+      const rr = await staffPost(new Request('http://x/api', { method: 'POST', body: JSON.stringify({ username: LOGIN_USER, password: 'nope-nope-1' }) }) as any)
+      check('audit insert failure does not change the login response (staff, direct)', rr.status === 403, String(rr.status))
+    } finally {
+      delete process.env.AUDIT_TEST_FAIL
+    }
+  } catch (e) {
+    check('login events block ran', false, String(e))
+  }
+
   // ---- HTTP: a forged x-sp-actor header is replaced by the real session actor ----
   try {
     const res = await fetch(`${BASE}/api/areas`, {
@@ -175,12 +244,13 @@ async function cleanup() {
   await prisma.offerList.deleteMany({ where: { listNumber: { startsWith: 'QA-AUDIT-' } } }) // cascades sheets + lines
   await prisma.medicine.deleteMany({ where: { name: `${P} MED` } })
   await prisma.manufacturer.deleteMany({ where: { name: `${P} Mfr` } })
-  await prisma.retailer.deleteMany({ where: { name: `${P} Customer` } })
-  await prisma.employee.deleteMany({ where: { name: `${P} Employee` } })
+  await prisma.retailer.deleteMany({ where: { name: { in: [`${P} Customer`, `${P} Portal Customer`] } } })
+  await prisma.employee.deleteMany({ where: { name: { in: [`${P} Employee`, `${P} Login Employee`] } } })
   await prisma.area.deleteMany({ where: { name: { startsWith: P } } })
   // Our own audit rows: those whose recordId or bulk ids are records this run created.
-  const mine = (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))
-    .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)))
+  const mineOf = async () => (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))
+    .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)) || QA_LOGIN_NAMES.includes((e.changes as any)?.username))
+  const mine = await mineOf()
   process.env.AUDIT_ALLOW_PURGE = '1'
   try {
     if (mine.length) await prisma.auditLog.deleteMany({ where: { id: { in: mine.map((e) => e.id) } } })
@@ -194,8 +264,7 @@ async function cleanup() {
     (await prisma.manufacturer.count({ where: { name: { startsWith: P } } })) +
     (await prisma.medicine.count({ where: { name: { startsWith: P } } })) +
     (await prisma.offerList.count({ where: { listNumber: { startsWith: 'QA-AUDIT-' } } })) +
-    (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))
-      .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i))).length
+    (await mineOf()).length
   console.log(`Leftover QA rows: ${left}`)
   if (left !== 0) process.exitCode = 1
 }
