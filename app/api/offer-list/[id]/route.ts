@@ -68,6 +68,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Upsert items if provided — purchasePercent is never accepted here, it's only ever set by /refresh
     if (body.items && Array.isArray(body.items)) {
+      // Lines whose values are unchanged are skipped: each upsert is an audited write (extra round trips), and the
+      // editor sends the whole list (~700 lines) on every save.
+      const existing = new Map(
+        (await tx.offerListItem.findMany({ where: { offerListId: id } })).map((e) => [e.medicineId, e]),
+      )
       for (const item of body.items) {
         const commentType = item.commentType ?? 'NONE'
         const fields = {
@@ -81,6 +86,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           commentQtyFree: item.commentQtyFree ?? null,
           commentExtraPercent: item.commentExtraPercent ?? null,
         }
+        const prev = existing.get(item.medicineId)
+        if (prev && sameOfferFields(prev, fields)) continue
         await tx.offerListItem.upsert({
           where: { offerListId_medicineId: { offerListId: id, medicineId: item.medicineId } },
           update: fields,
@@ -90,7 +97,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     return NextResponse.json({ data: list })
-  })
+  }, { maxWait: 10000, timeout: 60000 })
+}
+
+// Only plain numbers are compared; anything else (strings etc.) always goes through the upsert as before.
+const sameNum = (a: unknown, b: unknown) =>
+  a == null || b == null ? a == null && b == null : typeof b === 'number' && Number(a) === b
+
+/** True when the stored line already holds exactly these values (so the upsert would change nothing). */
+function sameOfferFields(prev: Record<string, unknown>, f: Record<string, unknown>): boolean {
+  if (prev.commentType !== f.commentType) return false
+  return ['offerPercent', 'specialPrice', 'salesTax', 'commentNetPrice', 'commentMinOrderQty', 'commentQtyFree', 'commentExtraPercent']
+    .every((k) => sameNum(prev[k], f[k]))
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
