@@ -7,7 +7,7 @@ const settings = NAV_HUBS.find((h) => h.key === 'settings')!
 
 test('ADMIN sees every hub and all settings tabs', () => {
   assert.deepEqual(hubKeys('ADMIN'), ['dashboard', 'inventory', 'sales', 'purchase', 'accounts', 'reports', 'settings'])
-  assert.equal(visibleTabs(settings, 'ADMIN').length, 6)
+  assert.equal(visibleTabs(settings, 'ADMIN').length, 7)
   assert.ok(tabBarFor('/settings/areas', 'ADMIN'))
 })
 

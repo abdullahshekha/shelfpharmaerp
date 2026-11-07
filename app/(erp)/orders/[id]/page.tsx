@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { ArrowLeft, Trash2, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import OrderHistory from '@/components/audit/OrderHistory'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 const STATUS_FLOW = ['PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED', 'DELIVERED']
@@ -372,6 +373,8 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {isAdmin && <OrderHistory orderId={order.id} />}
     </div>
   )
 }

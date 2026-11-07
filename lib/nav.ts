@@ -80,7 +80,8 @@ export const NAV_HUBS: NavHub[] = [
       { href: '/settings/categories',        label: 'Categories',        roles: ADMIN_MANAGER },
       { href: '/settings/manufacturers',     label: 'Manufacturers',     roles: ADMIN_MANAGER },
       { href: '/settings/chart-of-accounts', label: 'Chart of Accounts', roles: ACCOUNTS },
-      { href: '/hr',                         label: 'HR',                roles: ADMIN_MANAGER },
+      { href: '/settings/audit-log',         label: 'Audit Log',         roles: ['ADMIN'] },
+      { href: '/hr',                         label: 'HR',               roles: ADMIN_MANAGER },
     ],
   },
 ]

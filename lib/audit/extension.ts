@@ -173,6 +173,7 @@ async function auditedWrite(tx: any, model: string, operation: string, args: any
       return { count: rows.length }
     }
     case 'updateMany': {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { select: _s, ...rest } = args ?? {}
       const rows = await d.updateManyAndReturn({ ...rest, select: idSelect(model) })
       return { count: rows.length }
