@@ -68,10 +68,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       return NextResponse.json({ error: `${medicine.name} is in use and cannot be deleted`, blockers }, { status: 409 })
     }
     try {
-      await prisma.$transaction([
-        prisma.medicineBatch.deleteMany({ where: { medicineId: id, currentQty: 0 } }),
-        prisma.medicine.delete({ where: { id } }),
-      ])
+      // Interactive (not array) transaction: the audit log refuses writes inside array transactions.
+      await prisma.$transaction(async (tx) => {
+        await tx.medicineBatch.deleteMany({ where: { medicineId: id, currentQty: 0 } })
+        await tx.medicine.delete({ where: { id } })
+      })
     } catch {
       // A reference appeared between the check and the delete (the FK refused it).
       return NextResponse.json({ error: `${medicine.name} is in use and cannot be deleted`, blockers: ['it was just referenced elsewhere'] }, { status: 409 })

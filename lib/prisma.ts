@@ -1,7 +1,8 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { auditExtension } from './audit/extension'
 
-function createClient() {
+function createBaseClient() {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
   return new PrismaClient({
     adapter,
@@ -12,7 +13,15 @@ function createClient() {
   })
 }
 
-const globalForPrisma = globalThis as unknown as { prisma: ReturnType<typeof createClient> }
+type Client = ReturnType<typeof createBaseClient>
+
+// Every write is audited (lib/audit/extension.ts). The extension adds no new API, so the exported type
+// stays the plain client type that existing code (and `Prisma.TransactionClient` helpers) was written against.
+function createClient(): Client {
+  return createBaseClient().$extends(auditExtension) as unknown as Client
+}
+
+const globalForPrisma = globalThis as unknown as { prisma: Client }
 
 export const prisma = globalForPrisma.prisma ?? createClient()
 
