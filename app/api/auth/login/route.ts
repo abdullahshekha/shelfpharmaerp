@@ -7,7 +7,9 @@ import { actorFromStaffSession } from '@/lib/audit/actor'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { username, password } = await req.json()
+  const { username: rawUsername, password } = await req.json()
+  const username = rawUsername
+  const attempted = String(username ?? '').slice(0, 64) // public endpoint: bound what is written to the audit log
   const secret = process.env.AUTH_SECRET ?? 'shelfpharma-erp-secret-2026'
 
   // Env-based admin fallback (always works)
@@ -17,7 +19,7 @@ export async function POST(req: NextRequest) {
     await logLoginEvent({
       action: 'LOGIN', model: 'Employee',
       actor: actorFromStaffSession({ id: 'env-admin', name: 'Admin', role: 'ADMIN' }),
-      changes: { username },
+      changes: { username: attempted },
     })
     const token = createSession({ id: 'env-admin', name: 'Admin', role: 'ADMIN' }, secret)
     const res = NextResponse.json({ success: true, role: 'ADMIN' })
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
   // Audit failures: the actor is the system (nobody is authenticated); the attempted username is recorded, never the password.
   const failed = (reason: 'invalid' | 'blocked') => logLoginEvent({
     action: 'LOGIN_FAILED', model: 'Employee', recordId: employee?.id ?? null,
-    changes: { username, reason },
+    changes: { username: attempted, reason },
   })
 
   if (!employee || !employee.passwordHash) {

@@ -208,15 +208,42 @@ async function main() {
     rows = (await loginRows('Retailer', 'LOGIN_FAILED', PORTAL_USER)).filter((e) => (e.changes as any).reason === 'locked')
     check('portal lock -> 429 on 5th attempt and on the next, each logged reason locked', last === 429 && r6.status === 429 && rows.length === 2, `${last} ${r6.status} ${rows.length}`)
 
-    // a failing audit insert must not alter the login response (route called directly: AUDIT_TEST_FAIL is per-process)
-    process.env.AUDIT_TEST_FAIL = '1'
+    // attempted username is bounded to 64 chars
+    const longName = 'qa.audit.' + 'x'.repeat(200)
+    await post('/api/auth/login', { username: longName, password: 'whatever-pw-1' })
+    const longRows = (await prisma.auditLog.findMany({ where: { model: 'Employee', action: 'LOGIN_FAILED', createdAt: { gte: t } } })).filter((e) => String((e.changes as any)?.username ?? '').startsWith('qa.audit.xxxx'))
+    check('staff attempted username truncated to 64 chars', longRows.length === 1 && (longRows[0].changes as any).username.length === 64, JSON.stringify(longRows.map((e) => String((e.changes as any).username).length)))
+    longRows.forEach((e) => ids.add(e.id))
+
+    // a failing login-event insert must not alter the login response and must write nothing.
+    // Routes are called in-process with the test-only switch (the dev server's env is not ours to change).
+    const countLogins = (recordId: string) => prisma.auditLog.count({ where: { recordId, action: { in: ['LOGIN', 'LOGIN_FAILED'] }, createdAt: { gte: t } } })
+    await prisma.employee.update({ where: { id: lemp.id }, data: { loginBlocked: false } })
+    await prisma.retailer.update({ where: { id: pret.id }, data: { portalLockedUntil: null, portalFailedAttempts: 0 } })
+    const sBefore = await countLogins(lemp.id)
+    const pBefore = await countLogins(pret.id)
+    process.env.AUDIT_TEST_FAIL_EVENT = '1'
+    const origErr = console.error
+    console.error = () => {}
     try {
       const { POST: staffPost } = await import('../../app/api/auth/login/route')
-      const rr = await staffPost(new Request('http://x/api', { method: 'POST', body: JSON.stringify({ username: LOGIN_USER, password: 'nope-nope-1' }) }) as any)
-      check('audit insert failure does not change the login response (staff, direct)', rr.status === 403, String(rr.status))
+      const { POST: portalPost } = await import('../../app/api/portal/login/route')
+      const mk = (body: unknown) => new Request('http://x/api', { method: 'POST', body: JSON.stringify(body) }) as any
+      const sOk = await staffPost(mk({ username: LOGIN_USER, password: LOGIN_PW }))
+      const sOkBody = await sOk.json()
+      check('audit failure: staff success unchanged (200, success body, session cookie)', sOk.status === 200 && sOkBody.success === true && !!sOk.cookies.get('sp_session')?.value, `${sOk.status} ${JSON.stringify(sOkBody)}`)
+      const sBad = await staffPost(mk({ username: LOGIN_USER, password: 'wrong-pw-zzz' }))
+      check('audit failure: staff wrong password unchanged (401, no cookie)', sBad.status === 401 && (await sBad.json()).error === 'Invalid username or password' && !sBad.cookies.get('sp_session'))
+      const pOk = await portalPost(mk({ username: PORTAL_USER, password: PORTAL_PW }))
+      const pOkBody = await pOk.json()
+      check('audit failure: portal success unchanged (200, success body, session cookie)', pOk.status === 200 && pOkBody.success === true && !!pOk.cookies.get('sp_customer')?.value, `${pOk.status} ${JSON.stringify(pOkBody)}`)
+      const pBad = await portalPost(mk({ username: PORTAL_USER, password: 'wrong-pw-zzz' }))
+      check('audit failure: portal wrong password unchanged (401, no cookie)', pBad.status === 401 && !pBad.cookies.get('sp_customer'))
     } finally {
-      delete process.env.AUDIT_TEST_FAIL
+      console.error = origErr
+      delete process.env.AUDIT_TEST_FAIL_EVENT
     }
+    check('audit failure: no login rows were written', (await countLogins(lemp.id)) === sBefore && (await countLogins(pret.id)) === pBefore)
   } catch (e) {
     check('login events block ran', false, String(e))
   }
@@ -249,7 +276,7 @@ async function cleanup() {
   await prisma.area.deleteMany({ where: { name: { startsWith: P } } })
   // Our own audit rows: those whose recordId or bulk ids are records this run created.
   const mineOf = async () => (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))
-    .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)) || QA_LOGIN_NAMES.includes((e.changes as any)?.username))
+    .filter((e) => (e.recordId && ids.has(e.recordId)) || ((e.changes as any)?.ids ?? []).some((i: string) => ids.has(i)) || String((e.changes as any)?.username ?? '').startsWith('qa.audit.'))
   const mine = await mineOf()
   process.env.AUDIT_ALLOW_PURGE = '1'
   try {

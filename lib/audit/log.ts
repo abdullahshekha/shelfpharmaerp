@@ -11,6 +11,8 @@ export async function logAuditEvent(e: {
   changes?: Record<string, unknown>
   reason?: string
 }): Promise<void> {
+  // Test-only failure switch (never active in production), mirrors AUDIT_TEST_FAIL in extension.ts.
+  if (process.env.NODE_ENV !== 'production' && process.env.AUDIT_TEST_FAIL_EVENT === '1') throw new Error('forced audit event failure')
   await prisma.auditLog.create({
     data: auditRowData(e.actor ?? getCurrentActor(), {
       model: e.model ?? 'Auth',
