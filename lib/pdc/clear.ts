@@ -1,7 +1,7 @@
 // Clearing a PDC cheque: claim it, pay the party's oldest unpaid invoices, post via sync after commit.
 import { prisma } from '@/lib/prisma'
 import { getSettings } from '@/lib/accounting/core'
-import { syncSafe } from '@/lib/accounting/sync'
+import { syncAllSafe, type SourceType } from '@/lib/accounting/sync'
 import { toPaisa } from '@/lib/accounting/money'
 import { invoiceDuePaisa, OUTSTANDING_STATUSES } from '@/lib/utils/outstanding'
 import { allocateOldestFirst, type OpenInvoice } from './rules'
@@ -136,7 +136,9 @@ export async function clearCheque(
     { maxWait: 10000, timeout: 20000 },
   )
 
-  // Post to the ledger after commit (never throws; a missed hook is healed by Rebuild).
-  for (const p of result) await syncSafe(receivable ? 'PAYMENT' : 'SUPPLIER_PAYMENT', p.id)
+  // Post to the ledger after commit: one budgeted call (never throws; anything not synced in the
+  // per-request budget is healed by Rebuild ledger), so many payments cannot time the request out.
+  const sourceType: SourceType = receivable ? 'PAYMENT' : 'SUPPLIER_PAYMENT'
+  await syncAllSafe(result.map((p): [SourceType, string] => [sourceType, p.id]))
   return { payments: result }
 }
