@@ -12,6 +12,9 @@ import {
   acknowledgedCollectionDeleteBlock,
   ORDER_RETURN_BLOCK_MESSAGE,
   ACK_COLLECTION_DELETE_MESSAGE,
+  orderCollectionBlock,
+  COLLECTION_DELETE_MESSAGE,
+  COLLECTION_CANCEL_MESSAGE,
 } from '../../lib/deliveries/acknowledge-rules'
 import { deliveryErrorBody } from '../../lib/deliveries/http'
 
@@ -210,4 +213,26 @@ test('acknowledgedCollectionDeleteBlock', () => {
 test('deliveryErrorBody maps AckError', () => {
   assert.deepEqual(deliveryErrorBody(new AckError(409, 'Already acknowledged')), { status: 409, body: { error: 'Already acknowledged' } })
   assert.deepEqual(deliveryErrorBody(new AckError(403, 'Forbidden')), { status: 403, body: { error: 'Forbidden' } })
+})
+
+// ---- orderCollectionBlock (fix round 1: any collection blocks delete / cancel / un-deliver) ----
+
+test('orderCollectionBlock: no collection -> allowed', () => {
+  assert.equal(orderCollectionBlock([], 'delete'), null)
+  assert.equal(orderCollectionBlock([], 'cancel'), null)
+})
+
+test('orderCollectionBlock: delete with an unacknowledged collection -> refused', () => {
+  assert.equal(orderCollectionBlock([{ acknowledgedAt: null }], 'delete'), COLLECTION_DELETE_MESSAGE)
+  assert.equal(COLLECTION_DELETE_MESSAGE, 'Order has a delivery collection; acknowledge or resolve it first')
+})
+
+test('orderCollectionBlock: delete with an acknowledged collection -> call-9 message', () => {
+  assert.equal(orderCollectionBlock([{ acknowledgedAt: null }, { acknowledgedAt: new Date() }], 'delete'), ACK_COLLECTION_DELETE_MESSAGE)
+})
+
+test('orderCollectionBlock: cancel / un-deliver with any collection -> refused', () => {
+  assert.equal(orderCollectionBlock([{ acknowledgedAt: null }], 'cancel'), COLLECTION_CANCEL_MESSAGE)
+  assert.equal(orderCollectionBlock([{ acknowledgedAt: new Date() }], 'cancel'), COLLECTION_CANCEL_MESSAGE)
+  assert.equal(COLLECTION_CANCEL_MESSAGE, 'Order has a delivery collection; cannot cancel.')
 })

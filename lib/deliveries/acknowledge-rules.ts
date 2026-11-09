@@ -97,3 +97,17 @@ export function orderReturnBlock(deliveryReturnCount: number): string | null {
 export function acknowledgedCollectionDeleteBlock(collections: { acknowledgedAt: Date | null }[]): string | null {
   return collections.some((c) => c.acknowledgedAt) ? ACK_COLLECTION_DELETE_MESSAGE : null
 }
+
+export const COLLECTION_DELETE_MESSAGE = 'Order has a delivery collection; acknowledge or resolve it first'
+export const COLLECTION_CANCEL_MESSAGE = 'Order has a delivery collection; cannot cancel.'
+
+/**
+ * While ANY DeliveryCollection exists for an order (acknowledged or not) it cannot be hard-deleted, cancelled or
+ * un-delivered: an unacknowledged one is the only record of cash a driver is holding, an acknowledged one is a Payment.
+ * 'delete' keeps the spec call-9 message for an acknowledged collection.
+ */
+export function orderCollectionBlock(collections: { acknowledgedAt: Date | null }[], action: 'delete' | 'cancel'): string | null {
+  if (collections.length === 0) return null
+  if (action === 'cancel') return COLLECTION_CANCEL_MESSAGE
+  return acknowledgedCollectionDeleteBlock(collections) ?? COLLECTION_DELETE_MESSAGE
+}
