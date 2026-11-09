@@ -4,12 +4,13 @@ import { AccountingError } from '@/lib/accounting/core'
 import { ChequeError } from '@/lib/pdc/create'
 import { AssignError } from './assign-rules'
 import { OutcomeError } from './outcome-rules'
+import { AckError } from './acknowledge-rules'
 
 /** Pure: the status/body for a known error, or null for an unexpected one (a 500). */
 export function deliveryErrorBody(e: unknown): { status: number; body: Record<string, unknown> } | null {
   if (e instanceof OutcomeError) return { status: e.status, body: { error: e.message, ...e.extra } }
   if (e instanceof ChequeError) return { status: e.status, body: { error: e.message, ...e.extra } }
-  if (e instanceof AssignError || e instanceof AccountingError) return { status: e.status, body: { error: e.message } }
+  if (e instanceof AssignError || e instanceof AccountingError || e instanceof AckError) return { status: e.status, body: { error: e.message } }
   const err = e as { code?: string; message?: string; meta?: { code?: string } } | null
   const code = err?.code
   const msg = typeof err?.message === 'string' ? err.message : ''

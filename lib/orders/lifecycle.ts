@@ -18,6 +18,7 @@ import { clearedChequeDeleteBlock } from '@/lib/pdc/rules'
 import { STOCK_OUT_STATUSES } from '@/lib/orders/status'
 import { stillDeductedQty } from '@/lib/deliveries/assign-rules'
 import { syncAfterCommit } from '@/lib/deliveries/sync'
+import { acknowledgedCollectionDeleteBlock, orderReturnBlock } from '@/lib/deliveries/acknowledge-rules'
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
 
@@ -72,12 +73,33 @@ export async function undeliverInTx(tx: Tx, orderId: string, status: string): Pr
   // Lock the row so the status read here is the one the claim below sees (a concurrent assign/cancel waits).
   const locked = await tx.$queryRaw<{ status: string }[]>`SELECT "status" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`
   const from = locked[0]?.status
-  if (!from || !isStockOutStatus(from)) return null
+  if (!from) return null
+  // Under the row lock: an order with a delivery-linked return is never cancelled / un-delivered / deleted.
+  await assertNoDeliveryReturn(tx, orderId)
+  if (!isStockOutStatus(from)) return null
   const claim = await tx.order.updateMany({ where: { id: orderId, status: from }, data: { status } })
   if (claim.count === 0) return null
   // Throwing rolls the claim back: nothing changes.
   await assertCogsRemovable(tx, orderId)
   return restockOrderItems(tx, orderId, from)
+}
+
+/**
+ * Refuses (AccountingError 409, so a MANAGER approval stays PENDING) when the order has any delivery-linked sales
+ * return, acknowledged or not: unacknowledged returned stock would be restocked twice (here and at acknowledgement),
+ * and an acknowledged one would leave its restock ledger entry orphaned. Call with the Order row locked.
+ */
+export async function assertNoDeliveryReturn(tx: Tx, orderId: string): Promise<void> {
+  const n = await tx.salesReturn.count({ where: { orderId } })
+  const block = orderReturnBlock(n)
+  if (block) throw new AccountingError(409, block)
+}
+
+/** Spec call 9: refuses (AccountingError 409) once a delivery collection on this order became a Payment. */
+async function assertNoAcknowledgedCollection(db: Tx | typeof prisma, orderId: string): Promise<void> {
+  const cols = await db.deliveryCollection.findMany({ where: { orderId }, select: { acknowledgedAt: true } })
+  const block = acknowledgedCollectionDeleteBlock(cols)
+  if (block) throw new AccountingError(409, block)
 }
 
 export const COGS_LOCKED_MESSAGE = 'Cannot cancel or un-deliver: the delivery cost was posted in a locked accounting period'
@@ -105,8 +127,9 @@ async function assertNoChequePayments(db: Tx | typeof prisma, invoiceId: string)
 }
 
 /**
- * Hard delete: order, items, delivery, challan, invoice and its payments. Refused when any of those payments came
- * from a cleared cheque (deleting it would silently drop bank money while the cheque stays CLEARED). An order in a stock-out
+ * Hard delete: order, items, unacknowledged delivery collections, delivery, challan, invoice and its payments. Refused
+ * when a collection on the order was acknowledged (it is a Payment now), when the order has a delivery-linked sales
+ * return, or when any of those payments came from a cleared cheque (deleting it would silently drop bank money while the cheque stays CLEARED). An order in a stock-out
  * status has what is still out restocked inside the same transaction; any other status (including an already
  * CANCELLED one, restocked at cancel time) is not.
  */
@@ -117,12 +140,19 @@ export async function hardDeleteOrder(orderId: string): Promise<{ warnings: stri
     ? await prisma.payment.findMany({ where: { invoiceId: doomedInvoice.id }, select: { id: true } })
     : []
   if (doomedInvoice) await assertNoChequePayments(prisma, doomedInvoice.id)
+  await assertNoAcknowledgedCollection(prisma, orderId)
 
   const warnings = await prisma.$transaction(async (tx) => {
-    // Re-check inside the transaction: a cheque may have cleared against this invoice meanwhile.
+    // Lock the order row first (same order as assign/outcome/acknowledge), then re-check inside the transaction:
+    // a cheque may have cleared, or a collection been acknowledged, against this invoice meanwhile.
+    await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`
     const inv = await tx.invoice.findUnique({ where: { orderId }, select: { id: true } })
     if (inv) await assertNoChequePayments(tx, inv.id)
+    await assertNoAcknowledgedCollection(tx, orderId)
+    // undeliverInTx also refuses an order with a delivery-linked return (assertNoDeliveryReturn).
     const w = (await undeliverInTx(tx, orderId, 'CANCELLED')) ?? []
+    // Unacknowledged collections go with the order (they reference the Delivery, so before it).
+    await tx.deliveryCollection.deleteMany({ where: { orderId } })
     await tx.delivery.deleteMany({ where: { orderId } })
     await tx.deliveryChallan.deleteMany({ where: { orderId } })
     const invoice = await tx.invoice.findUnique({ where: { orderId } })
