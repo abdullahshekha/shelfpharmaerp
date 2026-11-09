@@ -46,12 +46,15 @@ export const NAV_HUBS: NavHub[] = [
     ],
   },
   {
+    // Hub roles are only the default for tabs without their own: PDC Management also lets MANAGER in, so a MANAGER
+    // sees an Accounts hub holding just that tab (the other /api/accounts/* routes keep their own ADMIN+ACCOUNTANT guard).
     key: 'accounts', label: 'Accounts', icon: Wallet, roles: ACCOUNTS,
     tabs: [
       { href: '/accounts/general-ledger',       label: 'General Ledgers' },
       { href: '/accounts/receivable',           label: 'Accounts Receivable' },
       { href: '/accounts/payable',              label: 'Accounts Payable' },
       { href: '/accounts/cash-bank',            label: 'Cash & Bank Management' },
+      { href: '/accounts/pdc',                  label: 'PDC Management', roles: ['ADMIN', 'MANAGER', 'ACCOUNTANT'] },
       { href: '/accounts/fixed-assets',         label: 'Fixed Assets Management' },
       { href: '/accounts/payroll',              label: 'Payroll Module' },
       { href: '/accounts/tax',                  label: 'Tax Management' },

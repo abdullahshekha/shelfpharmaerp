@@ -138,6 +138,10 @@ export async function clearCheque(
 
   // Post to the ledger after commit: one budgeted call (never throws; anything not synced in the
   // per-request budget is healed by Rebuild ledger), so many payments cannot time the request out.
+  // Test-only switch (ignored when NODE_ENV=production): PDC_TEST_SKIP_SYNC=1 skips the ledger posting so
+  // tests/pdc/qa-pdc.ts can clear QA cheques against the live DB (go-live is set there) without creating real
+  // journal entries or consuming entry numbers. The QA script deletes the payments it created afterwards.
+  if (process.env.NODE_ENV !== 'production' && process.env.PDC_TEST_SKIP_SYNC === '1') return { payments: result }
   const sourceType: SourceType = receivable ? 'PAYMENT' : 'SUPPLIER_PAYMENT'
   await syncAllSafe(result.map((p): [SourceType, string] => [sourceType, p.id]))
   return { payments: result }
