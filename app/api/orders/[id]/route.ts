@@ -6,12 +6,15 @@ import { totalUnits } from '@/lib/orders/units'
 import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty, restockOnDecrease } from '@/lib/accounting/cost'
 import { AccountingError } from '@/lib/accounting/core'
 import { syncAllSafe } from '@/lib/accounting/sync'
+import { canViewOrder } from '@/lib/orders/access'
 import { cancelOrder, hardDeleteOrder, isStockOutStatus } from '@/lib/orders/lifecycle'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const user = getUserFromRequest(req)
+  if (!user.id) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
 
   const order = await prisma.order.findUnique({
     where: { id },
@@ -26,6 +29,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   })
 
   if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!canViewOrder(user.role, user.id, order.delivery?.driverId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   // Returns recorded at delivery (whole or partial) for this order, with their lines and whether the stock is acknowledged.
   const salesReturns = await prisma.salesReturn.findMany({
     where: { orderId: id, deliveryId: { not: null } },

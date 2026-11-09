@@ -42,6 +42,11 @@ export function getUserFromRequest(req: NextRequest): SessionUser {
   return decodeSession(cookie, secret) ?? { id: '', role: 'UNKNOWN', name: '' }
 }
 
+// For server components (no NextRequest): verified session from a raw cookie value, or null.
+export function getUserFromCookie(cookie: string | undefined): SessionUser | null {
+  return decodeSession(cookie ?? '', process.env.AUTH_SECRET ?? FALLBACK_SECRET)
+}
+
 export function requireRole(req: NextRequest, ...roles: string[]): boolean {
   return roles.includes(getUserFromRequest(req).role)
 }

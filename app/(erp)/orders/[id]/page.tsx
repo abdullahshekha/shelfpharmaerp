@@ -264,7 +264,7 @@ export default function OrderDetailPage() {
                 {order.delivery.driver && <p className="text-slate-500">Driver: {order.delivery.driver.name}</p>}
               </div>
             )}
-            {order.delivery?.outcome && (
+            {order.delivery?.outcome && (order.delivery.outcome !== 'ON_HOLD' || order.status === 'ON_HOLD') && (
               <div className="border-t pt-2 space-y-1">
                 <p className="font-medium">Outcome: {OUTCOME_LABEL[order.delivery.outcome] ?? order.delivery.outcome}</p>
                 {order.delivery.outcomeReason && <p className="text-slate-500">Reason: {order.delivery.outcomeReason}</p>}

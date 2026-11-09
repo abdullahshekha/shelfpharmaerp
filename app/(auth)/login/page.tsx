@@ -13,7 +13,9 @@ import { Eye, EyeOff, Lock } from 'lucide-react'
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const from = searchParams.get('from')
+  const rawFrom = searchParams.get('from')
+  // Only same-site paths (not //host) are accepted as a return page.
+  const from = rawFrom && rawFrom.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : null
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')

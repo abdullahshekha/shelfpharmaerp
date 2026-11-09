@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import { generateOrderNumber } from '@/lib/utils/format'
+import { getUserFromRequest } from '@/lib/utils/auth'
+import { canListOrders } from '@/lib/orders/access'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req)
+  if (!user.id) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+  if (!canListOrders(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { searchParams } = new URL(req.url)
   const page = parseInt(searchParams.get('page') ?? '1')
   const pageSize = parseInt(searchParams.get('pageSize') ?? '20')

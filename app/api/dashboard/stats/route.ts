@@ -1,10 +1,15 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { getUserFromRequest } from '@/lib/utils/auth'
+import { canViewDashboard } from '@/lib/nav'
 import { prisma } from '@/lib/prisma'
 import { loadReceivableOutstanding } from '@/lib/utils/outstanding'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req)
+  if (!user.id) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+  if (!canViewDashboard(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const now = new Date()
   const startOfDay = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Karachi' }))
   startOfDay.setHours(0, 0, 0, 0)

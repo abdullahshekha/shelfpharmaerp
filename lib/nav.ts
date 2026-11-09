@@ -134,3 +134,14 @@ export function tabBarFor(pathname: string, role: string): { hub: NavHub; tabs: 
   }
   return null
 }
+
+/** Roles that see the Dashboard hub (derived from NAV_HUBS, no second list). */
+export function canViewDashboard(role: string): boolean {
+  const hub = NAV_HUBS.find((h) => h.key === 'dashboard')
+  return !!hub && allowed(hub.roles, role)
+}
+
+/** The first screen a role can open, or null when it has no nav at all. */
+export function landingFor(role: string): string | null {
+  return visibleHubs(role)[0]?.target ?? null
+}
