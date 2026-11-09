@@ -334,7 +334,7 @@ model Order {
   salesRep        Employee?        @relation(fields: [salesRepId], references: [id])
   orderDate       DateTime         @default(now())
   deliveryDate    DateTime?
-  status          String           @default("PENDING")
+  status          String           @default("RECEIVED") // RECEIVED | INVOICED | OUT_FOR_DELIVERY | DELIVERED | ON_HOLD | RETURNED | CANCELLED
   source          String           @default("MANUAL")
   whatsappOrderId String?
   whatsappOrder   WhatsappOrder?   @relation(fields: [whatsappOrderId], references: [id])
