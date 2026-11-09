@@ -9,7 +9,9 @@ export function safeFromPath(raw: string | null | undefined, fallback: string): 
   try {
     const u = new URL(raw, DUMMY)
     if (u.origin !== DUMMY) return fallback
-    return u.pathname + u.search + u.hash
+    const out = u.pathname + u.search + u.hash
+    // Dot-segments can collapse into a protocol-relative path ("/..//evil.com" -> "//evil.com"): refuse those.
+    return out.startsWith('//') ? fallback : out
   } catch {
     return fallback
   }

@@ -15,3 +15,25 @@ test('rejects off-site and malformed values', () => {
   // what searchParams produces for %09
   assert.equal(safeFromPath(new URLSearchParams('from=/%09/evil.com').get('from'), FB), FB)
 })
+
+test('dot-segment normalisation cannot produce a protocol-relative result', () => {
+  for (const bad of ['/..//evil.com', '/.//evil.com', '/a/..//evil.com', '/%2e%2e//evil.com', '/.///evil.com', '/%2E%2E//evil.com', '/a/%2e%2e//evil.com']) {
+    assert.equal(safeFromPath(bad, FB), FB, bad)
+  }
+})
+
+test('legit paths still pass', () => {
+  assert.equal(safeFromPath('/orders/abc?x=1#y', FB), '/orders/abc?x=1#y')
+  assert.equal(safeFromPath('/orders', FB), '/orders')
+})
+
+test('property: output never starts with // and never contains a backslash', () => {
+  const bs = String.fromCharCode(92)
+  const inputs = ['/orders', '//evil.com', '/' + bs + 'evil.com', '/\t/evil.com', '/..//evil.com', '/.//evil.com', '/a/..//evil.com', '/%2e%2e//evil.com',
+    '/.///evil.com', '/%2E%2E//evil.com', '/a/%2e%2e//evil.com', '/%2F/evil.com', 'https://evil.com', 'javascript:alert(1)', '', null, '/a?b=//c#//d', '/x/../y']
+  for (const i of inputs) {
+    const out = safeFromPath(i, FB)
+    assert.ok(!out.startsWith('//'), String(i))
+    assert.ok(!out.includes(bs), String(i))
+  }
+})
