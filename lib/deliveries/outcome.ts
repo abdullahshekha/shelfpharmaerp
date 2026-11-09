@@ -12,17 +12,20 @@
 // manager/admin acknowledges the returned goods (Task 5). The ledger is synced after commit (syncAfterCommit).
 import { prisma } from '@/lib/prisma'
 import { assertNotLocked, getSettings } from '@/lib/accounting/core'
-import { fromPaisa } from '@/lib/accounting/money'
+import { fromPaisa, toPaisa } from '@/lib/accounting/money'
 import { parseDateInput } from '@/lib/accounting/dates'
-import { assertBankAccount, createChequeRecord } from '@/lib/pdc/create'
+import { assertBankAccount, createChequeRecord, parseChequeAmount } from '@/lib/pdc/create'
 import { generateSalesReturnNumber } from '@/lib/utils/format'
 import { hasCurrentOutcome } from './assign-rules'
 import { syncAfterCommit } from './sync'
+import { isDeliveryPictureUrl } from './picture'
 import {
   OutcomeError,
   amountDueFromStored,
   buildSalesReturnLines,
   canRecordOutcome,
+  chequeAmountMismatch,
+  outcomeBodyError,
   outcomeOrderStatus,
   validateOutcomeInput,
   type Outcome,
@@ -44,9 +47,29 @@ function toDateInput(v: string | Date | undefined): string | undefined {
   return v
 }
 
+/**
+ * Request checks that need no database: body shape, the picture is one our upload route stored, and a door cheque's
+ * entered amount is a valid positive amount (returned in paisa; compared with the amount due in the transaction).
+ */
+function precheck(input: unknown): { chequePaisa: number | null } {
+  const shape = outcomeBodyError(input)
+  if (shape) throw new OutcomeError(400, shape)
+  const i = input as RecordOutcomeInput
+  const pic = i.pictureUrl?.trim()
+  if (pic && !isDeliveryPictureUrl(pic, process.env.NEXT_PUBLIC_SUPABASE_URL)) {
+    throw new OutcomeError(400, 'The picture must be uploaded through the delivery picture upload')
+  }
+  let chequePaisa: number | null = null
+  if (PAYMENT_OUTCOMES.includes(i.outcome as Outcome) && i.method === 'CHEQUE') {
+    if (i.chequeAmount === undefined || i.chequeAmount === null || i.chequeAmount === '') throw new OutcomeError(400, 'Cheque amount is required')
+    chequePaisa = toPaisa(parseChequeAmount(i.chequeAmount)) // ChequeError 400 when not a positive 2-decimal amount
+  }
+  return { chequePaisa }
+}
+
 export async function recordOutcome(deliveryId: string, actor: Actor, input: RecordOutcomeInput): Promise<RecordOutcomeResult> {
   if (!actor?.id) throw new OutcomeError(401, 'Not signed in')
-  if (!input || typeof input !== 'object') throw new OutcomeError(400, 'Invalid request')
+  const { chequePaisa } = precheck(input)
   const now = new Date()
 
   const { out: result, orderId } = await prisma.$transaction(async (tx) => {
@@ -67,7 +90,10 @@ export async function recordOutcome(deliveryId: string, actor: Actor, input: Rec
 
     const order = await tx.order.findUnique({
       where: { id: found.orderId },
-      include: { items: { orderBy: { id: 'asc' } }, invoice: { include: { payments: { select: { amount: true } } } } },
+      include: {
+        items: { orderBy: { id: 'asc' } },
+        invoice: { include: { payments: { select: { amount: true } } } },
+      },
     })
     if (!order) throw new OutcomeError(404, 'Order not found')
     if (!order.invoice) throw new OutcomeError(409, 'This order has no invoice')
@@ -88,12 +114,18 @@ export async function recordOutcome(deliveryId: string, actor: Actor, input: Rec
     if (!v.ok) throw new OutcomeError(400, v.error)
     const outcome = input.outcome as Outcome
 
-    // Returned lines -> Sales Return (credit computed exactly as the invoice was built).
+    // Returned lines -> Sales Return (credit computed exactly as the invoice was built). A whole-order return credits
+    // exactly the STORED invoice total; no return can credit more than the invoice total less earlier credits against
+    // this order.
+    const invoiceTotalPaisa = toPaisa(Number(invoice.totalAmount))
+    const earlier = await tx.salesReturn.findMany({ where: { orderId: order.id }, select: { totalAmount: true } })
+    const earlierCredits = earlier.reduce((s, r) => s + toPaisa(Number(r.totalAmount)), 0)
+    const returnOpts = { invoiceTotalPaisa, capPaisa: Math.max(0, invoiceTotalPaisa - earlierCredits) }
     const returned =
       outcome === 'PAID_WITH_RETURN'
-        ? buildSalesReturnLines(outcomeOrder, v.returnedLines)
+        ? buildSalesReturnLines(outcomeOrder, v.returnedLines, returnOpts)
         : outcome === 'RETURNED'
-          ? buildSalesReturnLines(outcomeOrder, items.map((i) => ({ orderItemId: i.id, quantity: i.quantity, reason: input.reason })))
+          ? buildSalesReturnLines(outcomeOrder, items.map((i) => ({ orderItemId: i.id, quantity: i.quantity, reason: input.reason })), returnOpts)
           : null
 
     // Amount to collect: the STORED invoice total, less payments already on it and the return credit.
@@ -102,6 +134,10 @@ export async function recordOutcome(deliveryId: string, actor: Actor, input: Rec
       const paid = invoice.payments.reduce((s, p) => s + Number(p.amount), 0)
       duePaisa = amountDueFromStored({ invoiceTotal: Number(invoice.totalAmount), paid, creditPaisa: returned?.totalPaisa ?? 0 })
       if (duePaisa <= 0) throw new OutcomeError(409, 'Nothing is left to collect on this invoice; record it as Delivered, Pay Later')
+      if (chequePaisa !== null) {
+        const mismatch = chequeAmountMismatch(chequePaisa, duePaisa)
+        if (mismatch) throw new OutcomeError(400, mismatch, { amountDue: fromPaisa(duePaisa) })
+      }
     }
 
     // A return credits AR today: refuse rather than post into a locked accounting period.
@@ -157,11 +193,12 @@ export async function recordOutcome(deliveryId: string, actor: Actor, input: Rec
           {
             direction: 'RECEIVABLE',
             chequeNumber: input.chequeNumber,
-            amount: fromPaisa(duePaisa).toFixed(2),
+            amount: fromPaisa(chequePaisa!).toFixed(2), // the collector-entered amount (checked equal to the amount due)
             chequeDate: toDateInput(input.chequeDate),
             retailerId: order.retailerId,
             bankAccountId: input.bankAccountId,
             pictureUrl: input.pictureUrl,
+            drawerBank: input.drawerBank,
             notes: `Collected at delivery of order ${order.orderNumber}`,
             allowDuplicate: input.allowDuplicate === true,
           },

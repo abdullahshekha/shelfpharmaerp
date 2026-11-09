@@ -7,11 +7,14 @@ import {
   amountDueFromStored,
   outcomeOrderStatus,
   OutcomeError,
+  chequeAmountMismatch,
+  outcomeBodyError,
 } from '../../lib/deliveries/outcome-rules'
+import { isDeliveryPictureUrl, deliveryPicturePrefix } from '../../lib/deliveries/picture'
 import { deliveryErrorBody } from '../../lib/deliveries/http'
 import { AssignError } from '../../lib/deliveries/assign-rules'
 import { AccountingError } from '../../lib/accounting/core'
-import { ChequeError } from '../../lib/pdc/create'
+import { ChequeError, parseChequeAmount } from '../../lib/pdc/create'
 
 // ---- canRecordOutcome ----
 
@@ -151,4 +154,96 @@ test('deliveryErrorBody maps domain errors, retries and busy', () => {
   assert.equal(deliveryErrorBody({ code: 'P2028', message: 'Transaction API error' })?.status, 503)
   assert.equal(deliveryErrorBody({ code: 'P2002', message: 'Unique constraint' })?.status, 409)
   assert.equal(deliveryErrorBody(new Error('boom')), null)
+})
+
+// ---- fix round 1: credit tied to the stored invoice total, cap ----
+
+const all = order.items.map((i) => ({ orderItemId: i.id, quantity: i.quantity }))
+const sumLines = (r: { lines: { lineTotal: number }[] }) => r.lines.reduce((s, l) => s + Math.round(l.lineTotal * 100), 0)
+
+test('whole order: credit equals the STORED invoice total when it is a few paisa below the item sums', () => {
+  const r = buildSalesReturnLines(order, all, { invoiceTotalPaisa: 121996 })
+  assert.equal(r.totalPaisa, 121996)
+  assert.equal(sumLines(r), 121996)
+})
+
+test('whole order: stored total a few paisa above the item sums puts the difference on the largest line', () => {
+  const noDisc = { ...order, discountAmount: 0 } // item sums 123999
+  const r = buildSalesReturnLines(noDisc, all, { invoiceTotalPaisa: 124002 })
+  assert.equal(r.totalPaisa, 124002)
+  assert.deepEqual(r.lines.map((l) => Math.round(l.lineTotal * 100)), [95003, 20000, 8999])
+})
+
+test('whole order with the stored total equal to the formula keeps the discount split', () => {
+  const r = buildSalesReturnLines(order, all, { invoiceTotalPaisa: 121999, capPaisa: 121999 })
+  assert.deepEqual(r.lines.map((l) => Math.round(l.lineTotal * 100)), [95000 - 1532, 20000 - 323, 8999 - 145])
+})
+
+test('credit never exceeds the cap (invoice total less earlier credits), partial or whole', () => {
+  // partial return worth 285.00 against a cap of 200.00
+  const p = buildSalesReturnLines(order, [{ orderItemId: 'a', quantity: 3 }], { invoiceTotalPaisa: 121999, capPaisa: 20000 })
+  assert.equal(p.totalPaisa, 20000)
+  assert.equal(sumLines(p), 20000)
+  // partial lines whose sums exceed a (corrupt) stored invoice total of 1000.00
+  const q = buildSalesReturnLines(order, [{ orderItemId: 'a', quantity: 9 }, { orderItemId: 'b', quantity: 4 }], { invoiceTotalPaisa: 100000, capPaisa: 100000 })
+  assert.ok(q.totalPaisa <= 100000)
+  assert.equal(q.totalPaisa, sumLines(q))
+  // whole order after an earlier 300.00 credit
+  const w = buildSalesReturnLines(order, all, { invoiceTotalPaisa: 121999, capPaisa: 121999 - 30000 })
+  assert.equal(w.totalPaisa, 91999)
+  assert.ok(w.lines.every((l) => l.lineTotal >= 0))
+  // nothing left to credit
+  assert.equal(buildSalesReturnLines(order, all, { invoiceTotalPaisa: 121999, capPaisa: 0 }).totalPaisa, 0)
+})
+
+// ---- door cheque amount ----
+
+test('door cheque amount must equal the amount due; zero/negative/garbage refused', () => {
+  assert.equal(chequeAmountMismatch(toPaisaT(parseChequeAmount('934.99')), 93499), null)
+  assert.equal(chequeAmountMismatch(toPaisaT(parseChequeAmount(934.99)), 93499), null)
+  const m = chequeAmountMismatch(toPaisaT(parseChequeAmount('900')), 93499)
+  assert.match(m!, /934\.99/)
+  assert.match(m!, /Pay Later/)
+  assert.match(m!, /PDC/)
+  for (const bad of ['0', 0, '-5', -5, 'abc', '1.234']) {
+    assert.throws(() => parseChequeAmount(bad), (e: unknown) => e instanceof ChequeError && e.status === 400)
+  }
+})
+function toPaisaT(n: number) { return Math.round(n * 100) }
+
+// ---- body shape guard ----
+
+test('outcomeBodyError rejects malformed types (400, not a 500)', () => {
+  assert.equal(outcomeBodyError({ outcome: 'PAID_FULL', method: 'CASH', pictureUrl: 'u' }), null)
+  assert.equal(outcomeBodyError({ outcome: 'PAID_WITH_RETURN', returnedLines: [{ orderItemId: 'a', quantity: 1, reason: 'late' }], chequeAmount: 5, allowDuplicate: true }), null)
+  assert.match(outcomeBodyError(null)!, /Invalid/)
+  assert.match(outcomeBodyError([])!, /Invalid/)
+  assert.match(outcomeBodyError({})!, /outcome/)
+  assert.match(outcomeBodyError({ outcome: 1 })!, /outcome/)
+  assert.match(outcomeBodyError({ outcome: 'X', pictureUrl: 5 })!, /pictureUrl/)
+  assert.match(outcomeBodyError({ outcome: 'X', reason: {} })!, /reason/)
+  assert.match(outcomeBodyError({ outcome: 'X', holdUntil: 5 })!, /holdUntil/)
+  assert.match(outcomeBodyError({ outcome: 'X', chequeAmount: {} })!, /chequeAmount/)
+  assert.match(outcomeBodyError({ outcome: 'X', drawerBank: 1 })!, /drawerBank/)
+  assert.match(outcomeBodyError({ outcome: 'X', allowDuplicate: 'yes' })!, /allowDuplicate/)
+  assert.match(outcomeBodyError({ outcome: 'X', returnedLines: 'a' })!, /list/)
+  assert.match(outcomeBodyError({ outcome: 'X', returnedLines: [null] })!, /returned line/)
+  assert.match(outcomeBodyError({ outcome: 'X', returnedLines: [{ orderItemId: 1, quantity: 1 }] })!, /orderItemId/)
+  assert.match(outcomeBodyError({ outcome: 'X', returnedLines: [{ orderItemId: 'a', quantity: '1' }] })!, /quantity/)
+  assert.match(outcomeBodyError({ outcome: 'X', returnedLines: [{ orderItemId: 'a', quantity: 1, reason: 3 }] })!, /reason/)
+})
+
+// ---- picture URL ----
+
+test('isDeliveryPictureUrl accepts only files our upload route stored', () => {
+  const base = 'https://abc.supabase.co'
+  const prefix = deliveryPicturePrefix(base + '/')!
+  assert.equal(prefix, 'https://abc.supabase.co/storage/v1/object/public/retailer-photos/delivery/')
+  assert.equal(isDeliveryPictureUrl(prefix + '1731150000000_a1b2c3d4e5f6.jpg', base), true)
+  assert.equal(isDeliveryPictureUrl('https://evil.example/x.jpg', base), false)
+  assert.equal(isDeliveryPictureUrl('https://abc.supabase.co/storage/v1/object/public/retailer-photos/store_1.jpg', base), false)
+  assert.equal(isDeliveryPictureUrl(prefix + '../store_1.jpg', base), false)
+  assert.equal(isDeliveryPictureUrl(prefix + 'sub/x.jpg', base), false)
+  assert.equal(isDeliveryPictureUrl(prefix, base), false)
+  assert.equal(isDeliveryPictureUrl(prefix + 'x.jpg', undefined), false)
 })

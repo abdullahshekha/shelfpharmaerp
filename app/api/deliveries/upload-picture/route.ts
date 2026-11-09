@@ -3,12 +3,13 @@ import { createClient } from '@supabase/supabase-js'
 import { randomBytes } from 'crypto'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { ASSIGN_ACTOR_ROLES, ASSIGNEE_ROLES } from '@/lib/deliveries/assign-rules'
+import { DELIVERY_PICTURE_FOLDER, PICTURE_BUCKET } from '@/lib/deliveries/picture'
 
 export const dynamic = 'force-dynamic'
 
 // Proof-of-payment / cheque pictures for delivery outcomes. Same Supabase Storage pattern as
 // app/api/retailers/upload-photo (Vercel's filesystem is read-only), stored under delivery/ in the public bucket.
-const BUCKET = 'retailer-photos'
+const BUCKET = PICTURE_BUCKET
 // Vercel rejects request bodies above ~4.5 MB before they reach the function; keep under it with a clear message.
 const MAX_BYTES = 4 * 1024 * 1024
 const EXT_BY_TYPE: Record<string, string> = {
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'The picture is larger than 4 MB' }, { status: 413 })
 
   try {
-    const filename = `delivery/${Date.now()}_${randomBytes(6).toString('hex')}.${ext}`
+    const filename = `${DELIVERY_PICTURE_FOLDER}/${Date.now()}_${randomBytes(6).toString('hex')}.${ext}`
     const buffer = Buffer.from(await file.arrayBuffer())
     const supabase = createClient(supabaseUrl, serviceKey)
     const { error } = await supabase.storage.from(BUCKET).upload(filename, buffer, { contentType: file.type })

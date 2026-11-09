@@ -16,6 +16,8 @@ export type OutcomeInput = {
   bankAccountId?: string
   chequeNumber?: string
   chequeDate?: string | Date
+  chequeAmount?: string | number // collector-entered; must equal the amount due
+  drawerBank?: string
   returnedLines?: { orderItemId: string; quantity: number; reason?: string }[]
   reason?: string
   holdUntil?: string | Date
@@ -161,60 +163,98 @@ export type SalesReturnLine = {
   reason: string | null
 }
 
+/** Takes `cut` paisa off `rows` in proportion to their credit (largest remainder, ties to the earlier row). */
+function allocateCut(rows: { credit: number }[], cut: number): void {
+  const sum = rows.reduce((s, r) => s + r.credit, 0)
+  if (sum <= 0 || cut <= 0) return
+  const take = Math.min(cut, sum)
+  const shares = rows.map((r, idx) => {
+    const exact = (r.credit * take) / sum
+    return { idx, floor: Math.floor(exact), rem: exact - Math.floor(exact) }
+  })
+  let left = take - shares.reduce((s, x) => s + x.floor, 0)
+  for (const s of [...shares].sort((x, y) => y.rem - x.rem || x.idx - y.idx)) {
+    if (left <= 0) break
+    s.floor += 1
+    left -= 1
+  }
+  for (const s of shares) rows[s.idx].credit -= s.floor
+}
+
+/** Index of the row with the largest credit (first one on a tie), or -1 for no rows. */
+function largestIdx(rows: { credit: number }[]): number {
+  let best = -1
+  rows.forEach((r, i) => {
+    if (best < 0 || r.credit > rows[best].credit) best = i
+  })
+  return best
+}
+
+export type SalesReturnOptions = {
+  /**
+   * The STORED invoice total in paisa. When every line is returned in full, the credit is made to equal it exactly
+   * (the stored total can differ from the line sums by a few paisa, e.g. after an admin edit).
+   */
+  invoiceTotalPaisa?: number
+  /** Upper bound for the total credit in paisa (invoice total less credits already issued against this order). */
+  capPaisa?: number
+}
+
 /**
  * Builds the Sales Return lines for returned order lines, with the credit computed the way the invoice was built
  * (see returnCreditPaisa: stored lineTotal + salesTaxAmount, pro rata, rounded in paisa).
  * - A partial line returns only the paid units it names.
  * - A fully returned line returns every unit that was shipped (deductedQty, else quantity + bonus).
- * - When EVERY line is returned in full (the Returned outcome) the order-level discount is allocated across the lines
- *   (by credit, largest remainder in paisa), so the total credit equals the invoice total exactly.
+ * - When EVERY line is returned in full (the Returned outcome) the total credit is brought to the invoice total:
+ *   `opts.invoiceTotalPaisa` when given, else line sums less the order discount. A shortfall is taken off the lines
+ *   in proportion to their credit (largest remainder in paisa); an excess (stored total above the line sums) is added
+ *   to the largest line.
+ * - The total credit never exceeds `opts.capPaisa` (any excess is taken off the largest lines first).
  * Lines are returned in `returned` order; a line of 0 units is left out. Throws on a line not in the order.
  */
 export function buildSalesReturnLines(
   order: { items: ReturnSourceItem[]; discountAmount?: number },
   returned: { orderItemId: string; quantity: number; reason?: string | null }[],
+  opts: SalesReturnOptions = {},
 ): { lines: SalesReturnLine[]; totalPaisa: number } {
-  const rows = returned.map((r) => {
+  const all = returned.map((r) => {
     const item = order.items.find((i) => i.id === r.orderItemId)
     if (!item) throw new Error('Returned line does not belong to this order')
     const full = r.quantity >= item.quantity
     const units = full ? (item.deductedQty ? item.deductedQty : totalUnits(item)) : r.quantity
     return { item, full, units, credit: returnCreditPaisa(item, r.quantity), reason: r.reason?.trim() || null }
   })
+  const rows = all.filter((r) => r.units > 0)
 
-  const fullIds = new Set(rows.filter((r) => r.full).map((r) => r.item.id))
+  const fullIds = new Set(all.filter((r) => r.full).map((r) => r.item.id))
   const wholeOrder = order.items.length > 0 && order.items.every((i) => fullIds.has(i.id))
-  const discount = toPaisa(order.discountAmount ?? 0)
-  if (wholeOrder && discount > 0) {
+  if (wholeOrder) {
     const sum = rows.reduce((s, r) => s + r.credit, 0)
-    const cut = Math.min(discount, sum)
-    if (sum > 0 && cut > 0) {
-      const shares = rows.map((r, idx) => {
-        const exact = (r.credit * cut) / sum
-        return { idx, floor: Math.floor(exact), rem: exact - Math.floor(exact) }
-      })
-      let left = cut - shares.reduce((s, x) => s + x.floor, 0)
-      const byRem = [...shares].sort((a, b) => b.rem - a.rem || a.idx - b.idx)
-      for (const s of byRem) {
-        if (left <= 0) break
-        s.floor += 1
-        left -= 1
-      }
-      for (const s of shares) rows[s.idx].credit -= s.floor
+    const target = Math.max(0, opts.invoiceTotalPaisa ?? sum - toPaisa(order.discountAmount ?? 0))
+    if (target < sum) allocateCut(rows, sum - target)
+    else if (target > sum && rows.length > 0) rows[largestIdx(rows)].credit += target - sum
+  }
+
+  if (opts.capPaisa !== undefined) {
+    let excess = rows.reduce((s, r) => s + r.credit, 0) - Math.max(0, opts.capPaisa)
+    while (excess > 0) {
+      const i = largestIdx(rows)
+      if (i < 0 || rows[i].credit <= 0) break
+      const take = Math.min(excess, rows[i].credit)
+      rows[i].credit -= take
+      excess -= take
     }
   }
 
-  const lines: SalesReturnLine[] = rows
-    .filter((r) => r.units > 0)
-    .map((r) => ({
-      orderItemId: r.item.id,
-      medicineId: r.item.medicineId,
-      quantity: r.units,
-      unitPrice: Math.round(r.credit / r.units) / 100,
-      lineTotal: r.credit / 100,
-      reason: r.reason,
-    }))
-  return { lines, totalPaisa: rows.filter((r) => r.units > 0).reduce((s, r) => s + r.credit, 0) }
+  const lines: SalesReturnLine[] = rows.map((r) => ({
+    orderItemId: r.item.id,
+    medicineId: r.item.medicineId,
+    quantity: r.units,
+    unitPrice: Math.round(r.credit / r.units) / 100,
+    lineTotal: r.credit / 100,
+    reason: r.reason,
+  }))
+  return { lines, totalPaisa: rows.reduce((s, r) => s + r.credit, 0) }
 }
 
 /** A domain error from recording an outcome; the route turns it into `status` + `{ error, ...extra }`. */
@@ -222,4 +262,45 @@ export class OutcomeError extends Error {
   constructor(public status: number, message: string, public extra: Record<string, unknown> = {}) {
     super(message)
   }
+}
+
+/** 400 message when a door cheque's entered amount (paisa) is not the amount due, else null. */
+export function chequeAmountMismatch(enteredPaisa: number, duePaisa: number): string | null {
+  if (enteredPaisa === duePaisa) return null
+  return `The cheque amount must equal the amount due (Rs. ${(duePaisa / 100).toFixed(2)}). For a cheque for a different amount, record the delivery as Delivered, Pay Later and record the cheque in PDC`
+}
+
+const OPT_STRING_FIELDS = ['method', 'pictureUrl', 'bankAccountId', 'chequeNumber', 'reason', 'drawerBank'] as const
+const OPT_DATE_FIELDS = ['chequeDate', 'holdUntil'] as const
+
+/**
+ * Shape guard for an outcome request body (types only; the business rules are validateOutcomeInput's).
+ * Returns an error message, or null when the body has the expected shape.
+ */
+export function outcomeBodyError(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'Invalid request body'
+  const b = body as Record<string, unknown>
+  if (typeof b.outcome !== 'string') return 'outcome is required'
+  for (const f of OPT_STRING_FIELDS) {
+    if (b[f] !== undefined && b[f] !== null && typeof b[f] !== 'string') return `${f} must be text`
+  }
+  for (const f of OPT_DATE_FIELDS) {
+    const v = b[f]
+    if (v !== undefined && v !== null && typeof v !== 'string' && !(v instanceof Date)) return `${f} must be a date`
+  }
+  if (b.chequeAmount !== undefined && b.chequeAmount !== null && typeof b.chequeAmount !== 'string' && typeof b.chequeAmount !== 'number') {
+    return 'chequeAmount must be a number'
+  }
+  if (b.allowDuplicate !== undefined && typeof b.allowDuplicate !== 'boolean') return 'allowDuplicate must be true or false'
+  if (b.returnedLines !== undefined && b.returnedLines !== null) {
+    if (!Array.isArray(b.returnedLines)) return 'returnedLines must be a list'
+    for (const l of b.returnedLines) {
+      if (!l || typeof l !== 'object' || Array.isArray(l)) return 'Invalid returned line'
+      const r = l as Record<string, unknown>
+      if (typeof r.orderItemId !== 'string') return 'Each returned line needs an orderItemId'
+      if (typeof r.quantity !== 'number') return 'Each returned line needs a numeric quantity'
+      if (r.reason !== undefined && r.reason !== null && typeof r.reason !== 'string') return 'A returned line reason must be text'
+    }
+  }
+  return null
 }
