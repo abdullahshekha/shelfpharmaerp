@@ -552,6 +552,35 @@ model Delivery {
   status        String    @default("SCHEDULED")
   notes         String?
   createdAt     DateTime  @default(now())
+  assignedAt       DateTime?
+  outcome          String? // PAID_FULL | PAID_WITH_RETURN | RETURNED | ON_HOLD | PAY_LATER
+  outcomeReason    String?
+  outcomeAt        DateTime?
+  outcomeById      String?
+  outcomePictureUrl String?
+  collections      DeliveryCollection[]
+}
+
+// Cash/bank money a driver collected on delivery; becomes a Payment once accounts acknowledges it.
+model DeliveryCollection {
+  id             String    @id @default(cuid())
+  deliveryId     String
+  delivery       Delivery  @relation(fields: [deliveryId], references: [id])
+  orderId        String
+  invoiceId      String
+  retailerId     String
+  method         String // CASH | BANK
+  amount         Decimal   @db.Decimal(12, 2)
+  bankAccountId  String?
+  pictureUrl     String
+  collectedById  String
+  collectedAt    DateTime  @default(now())
+  acknowledgedById String?
+  acknowledgedAt DateTime?
+  paymentId      String?   @unique
+
+  @@index([deliveryId])
+  @@index([acknowledgedAt])
 }
 
 // Price-less delivery document, auto-created when an order is CONFIRMED. Items are read through order.items.
@@ -575,9 +604,14 @@ model SalesReturn {
   notes        String?
   items        SalesReturnItem[]
   createdAt    DateTime          @default(now())
+  orderId      String?
+  deliveryId   String?
+  stockAcknowledgedAt   DateTime?
+  stockAcknowledgedById String?
 
   @@index([retailerId])
   @@index([returnDate])
+  @@index([orderId])
 }
 
 model SalesReturnItem {
