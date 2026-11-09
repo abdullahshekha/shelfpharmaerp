@@ -68,7 +68,19 @@ export async function GET(req: NextRequest) {
               area: { select: { name: true } },
             },
           },
-          invoice: { select: { id: true, invoiceNumber: true, totalAmount: true, status: true } },
+          invoice: {
+            select: {
+              id: true, invoiceNumber: true, totalAmount: true, status: true,
+              payments: { select: { amount: true } }, // for the outcome dialog's amount-due preview
+            },
+          },
+          // Stored line values the outcome dialog needs for the same arithmetic as the server (which stays authoritative).
+          items: {
+            select: {
+              id: true, quantity: true, bonusQty: true, lineTotal: true, salesTaxAmount: true, deductedQty: true,
+              medicine: { select: { name: true } },
+            },
+          },
         },
       },
       driver: { select: { name: true } },

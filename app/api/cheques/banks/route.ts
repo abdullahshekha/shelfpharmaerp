@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { canManageCheques } from '@/lib/pdc/guard'
+import { ASSIGNEE_ROLES } from '@/lib/deliveries/assign-rules'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic'
 // active BANK accounts. `?includeInactive=1` adds inactive ones (flagged) so the PDC list can still name them.
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req)
-  if (!user.id || !canManageCheques(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user.id || !(canManageCheques(user.role) || (ASSIGNEE_ROLES as readonly string[]).includes(user.role))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const data = await prisma.account.findMany({
     where: { type: 'ASSET', subType: 'BANK', ...(req.nextUrl.searchParams.get('includeInactive') === '1' ? {} : { isActive: true }) },
     select: { id: true, code: true, name: true, isActive: true },

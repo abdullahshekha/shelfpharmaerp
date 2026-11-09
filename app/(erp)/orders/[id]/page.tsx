@@ -169,6 +169,11 @@ export default function OrderDetailPage() {
   if (!order) return <div className="p-8 text-slate-400">Order not found.</div>
 
   const currentIdx = FLOW_INDEX[order.status] ?? -1
+  // On Hold and Returned are not the Delivered step: relabel the step they sit on instead.
+  const stepLabel = (s: (typeof STATUS_FLOW)[number]) =>
+    (s === 'OUT_FOR_DELIVERY' && order.status === 'ON_HOLD') ? ORDER_STATUS_LABEL.ON_HOLD
+    : (s === 'DELIVERED' && order.status === 'RETURNED') ? ORDER_STATUS_LABEL.RETURNED
+    : ORDER_STATUS_LABEL[s]
   const canConfirm = order.status === 'RECEIVED' && (isAdmin || user?.role === 'MANAGER')
 
   return (
@@ -218,7 +223,7 @@ export default function OrderDetailPage() {
                   <div className={`flex flex-col items-center flex-1 ${i === 0 ? '' : ''}`}>
                     <div className={`h-2 w-full ${i === 0 ? 'rounded-l-full' : i === STATUS_FLOW.length - 1 ? 'rounded-r-full' : ''} ${done ? 'bg-blue-500' : 'bg-slate-200'}`} />
                     <span className={`text-xs mt-1 ${active ? 'font-bold text-blue-600' : done ? 'text-blue-500' : 'text-slate-400'}`}>
-                      {ORDER_STATUS_LABEL[s]}
+                      {stepLabel(s)}
                     </span>
                   </div>
                 </div>
