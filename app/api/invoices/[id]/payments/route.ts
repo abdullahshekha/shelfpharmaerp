@@ -3,13 +3,14 @@ import { prisma } from '@/lib/prisma'
 import { syncSafe } from '@/lib/accounting/sync'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { createChequeRecord, ChequeError } from '@/lib/pdc/create'
-import { chequeInputFromPayment, PaymentChequeError } from '@/lib/pdc/from-payment'
+import { chequeInputFromPayment, normalizePaymentMethod, PaymentChequeError } from '@/lib/pdc/from-payment'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await req.json()
+  const method = normalizePaymentMethod(body.method)
 
   if (!body.amount || Number(body.amount) <= 0) {
     return NextResponse.json({ error: 'Valid amount is required' }, { status: 400 })
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
 
   // A cheque is recorded as Pending (no payment, no status change) and applied when cleared.
-  if (body.method === 'CHEQUE') {
+  if (method === 'CHEQUE') {
     const user = getUserFromRequest(req)
     try {
       const cheque = await createChequeRecord(user, chequeInputFromPayment(body, invoice, 'RECEIVABLE'))
@@ -35,7 +36,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  let result
+  try {
+  result = await prisma.$transaction(async (tx) => {
     // Same per-party lock as cheque clearing, so a manual payment and a clearing cannot over-pay.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'PDC_PARTY:' + invoice.retailerId}))`
 
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         retailerId: invoice.retailerId,
         invoiceId: id,
         amount: Number(body.amount),
-        method: body.method ?? 'CASH',
+        method,
         reference: body.reference ?? null,
         notes: body.notes ?? null,
         paymentDate: body.paymentDate ? new Date(body.paymentDate) : new Date(),
@@ -63,7 +66,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await tx.invoice.update({ where: { id }, data: { status: newStatus } })
 
     return { payment, newStatus, totalPaid }
-  })
+  }, { maxWait: 10000, timeout: 15000 })
+  } catch (e) {
+    if ((e as { code?: string })?.code === 'P2028') {
+      return NextResponse.json({ error: 'The server is busy, please retry' }, { status: 503 })
+    }
+    throw e
+  }
 
   await syncSafe('PAYMENT', result.payment.id)
 

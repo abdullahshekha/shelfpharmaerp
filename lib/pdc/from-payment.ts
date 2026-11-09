@@ -29,3 +29,8 @@ export function chequeInputFromPayment(
     notes: body.notes,
   }
 }
+
+/** Upper-cased payment method, defaulting to CASH, so 'cheque' cannot bypass the pending-cheque path. */
+export function normalizePaymentMethod(v: unknown): string {
+  return String(v ?? 'CASH').toUpperCase()
+}

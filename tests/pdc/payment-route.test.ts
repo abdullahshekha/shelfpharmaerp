@@ -37,3 +37,11 @@ test('purchase invoice maps to a PAYABLE cheque for the supplier', () => {
   assert.equal(r.retailerId, null)
   assert.equal(r.bankAccountId, null)
 })
+
+test('payment method is normalised (case-insensitive, default CASH)', async () => {
+  const { normalizePaymentMethod } = await import('../../lib/pdc/from-payment')
+  assert.equal(normalizePaymentMethod('cheque'), 'CHEQUE')
+  assert.equal(normalizePaymentMethod('Bank_Transfer'), 'BANK_TRANSFER')
+  assert.equal(normalizePaymentMethod(undefined), 'CASH')
+  assert.equal(normalizePaymentMethod(null), 'CASH')
+})
