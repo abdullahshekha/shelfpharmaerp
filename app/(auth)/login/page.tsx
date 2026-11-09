@@ -8,14 +8,13 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { visibleHubs } from '@/lib/nav'
+import { safeFromPath } from '@/lib/utils/safe-redirect'
 import { Eye, EyeOff, Lock } from 'lucide-react'
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const rawFrom = searchParams.get('from')
-  // Only same-site paths (not //host) are accepted as a return page.
-  const from = rawFrom && rawFrom.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : null
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -38,7 +37,7 @@ function LoginForm() {
       // No explicit return page: open the first screen this role can actually see (a Driver has no Dashboard).
       const j = await res.json().catch(() => ({}))
       const home = typeof j.role === 'string' ? visibleHubs(j.role)[0]?.target : undefined
-      router.push(from ?? home ?? '/dashboard')
+      router.push(safeFromPath(rawFrom, home ?? '/dashboard'))
       router.refresh()
     } else {
       const j = await res.json()
