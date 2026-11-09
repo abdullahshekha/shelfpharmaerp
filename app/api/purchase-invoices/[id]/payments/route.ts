@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { syncSafe } from '@/lib/accounting/sync'
+import { getUserFromRequest } from '@/lib/utils/auth'
+import { createChequeRecord, ChequeError } from '@/lib/pdc/create'
+import { chequeInputFromPayment, PaymentChequeError } from '@/lib/pdc/from-payment'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,25 +17,48 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   })
   if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const payment = await prisma.supplierPayment.create({
-    data: {
-      purchaseInvoiceId: id,
-      supplierId: invoice.supplierId,
-      amount: body.amount,
-      paymentDate: new Date(body.paymentDate ?? new Date()),
-      method: body.method ?? 'CASH',
-      reference: body.reference ?? null,
-      notes: body.notes ?? null,
+  // A cheque is recorded as Pending (no payment, no status change) and applied when cleared.
+  if (body.method === 'CHEQUE') {
+    const user = getUserFromRequest(req)
+    try {
+      const cheque = await createChequeRecord(user, chequeInputFromPayment(body, invoice, 'PAYABLE'))
+      return NextResponse.json({ data: { cheque }, pending: true }, { status: 201 })
+    } catch (e) {
+      if (e instanceof ChequeError || e instanceof PaymentChequeError) {
+        return NextResponse.json({ error: e.message }, { status: e.status })
+      }
+      throw e
+    }
+  }
+
+  const { payment, newStatus } = await prisma.$transaction(
+    async (tx) => {
+      // Same per-party lock as cheque clearing, so a manual payment and a clearing cannot over-pay.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'PDC_PARTY:' + invoice.supplierId}))`
+
+      const payment = await tx.supplierPayment.create({
+        data: {
+          purchaseInvoiceId: id,
+          supplierId: invoice.supplierId,
+          amount: body.amount,
+          paymentDate: new Date(body.paymentDate ?? new Date()),
+          method: body.method ?? 'CASH',
+          reference: body.reference ?? null,
+          notes: body.notes ?? null,
+        },
+      })
+
+      // Recalculate status from payments read inside the lock (includes the new one)
+      const allPayments = await tx.supplierPayment.findMany({ where: { purchaseInvoiceId: id }, select: { amount: true } })
+      const totalPaid = allPayments.reduce((s, p) => s + Number(p.amount), 0)
+      const total = Number(invoice.totalAmount)
+      const newStatus = totalPaid >= total ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
+
+      await tx.purchaseInvoice.update({ where: { id }, data: { status: newStatus } })
+      return { payment, newStatus }
     },
-  })
-
-  // Recalculate status
-  const allPayments = [...invoice.payments, payment]
-  const totalPaid = allPayments.reduce((s, p) => s + Number(p.amount), 0)
-  const total = Number(invoice.totalAmount)
-  const newStatus = totalPaid >= total ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
-
-  await prisma.purchaseInvoice.update({ where: { id }, data: { status: newStatus } })
+    { maxWait: 10000, timeout: 15000 },
+  )
 
   await syncSafe('SUPPLIER_PAYMENT', payment.id)
 

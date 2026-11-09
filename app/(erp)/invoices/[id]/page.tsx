@@ -12,6 +12,7 @@ import { formatPKR, formatDate } from '@/lib/utils/format'
 import { ArrowLeft, Printer, Trash2, Plus, X, Download } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-slate-100 text-slate-700',
@@ -40,11 +41,12 @@ interface Invoice {
   payments: Payment[]
 }
 
-const emptyPayment = { amount: '', method: 'CASH', reference: '', paymentDate: new Date().toISOString().slice(0, 10) }
+const emptyPayment = { amount: '', method: 'CASH', reference: '', chequeDate: '', bankAccountId: '', paymentDate: new Date().toISOString().slice(0, 10) }
 
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const { user } = useCurrentUser()
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [loading, setLoading] = useState(true)
   const [showPaymentForm, setShowPaymentForm] = useState(false)
@@ -59,6 +61,18 @@ export default function InvoiceDetailPage() {
   }, [id])
 
   useEffect(() => { fetchInvoice() }, [fetchInvoice])
+
+  // Bank accounts for the optional cheque bank selector (the accounts API is ADMIN/ACCOUNTANT only).
+  const canPickBank = user?.role === 'ADMIN' || user?.role === 'ACCOUNTANT'
+  const [banks, setBanks] = useState<{ id: string; name: string }[]>([])
+  useEffect(() => {
+    if (!canPickBank) return
+    fetch('/api/accounts/accounts?type=ASSET')
+      .then(r => r.json())
+      .then(j => setBanks((j.data ?? []).filter((a: { subType?: string | null }) => a.subType === 'BANK')))
+      .catch(() => setBanks([]))
+  }, [canPickBank])
+  const isCheque = paymentForm.method === 'CHEQUE'
 
   const voidInvoice = async () => {
     if (!confirm('Void this invoice?')) return
@@ -76,6 +90,10 @@ export default function InvoiceDetailPage() {
       toast.error('Enter a valid amount')
       return
     }
+    if (paymentForm.method === 'CHEQUE' && !paymentForm.reference.trim()) {
+      toast.error('Enter the cheque number')
+      return
+    }
     setSavingPayment(true)
     const res = await fetch(`/api/invoices/${id}/payments`, {
       method: 'POST',
@@ -84,7 +102,8 @@ export default function InvoiceDetailPage() {
     })
     if (res.ok) {
       const j = await res.json()
-      toast.success(`Payment recorded · Invoice now ${j.data.newStatus}`)
+      if (j.pending) toast.success('Cheque recorded as Pending — it will be applied when cleared')
+      else toast.success(`Payment recorded · Invoice now ${j.data.newStatus}`)
       setShowPaymentForm(false)
       setPaymentForm(emptyPayment)
       fetchInvoice()
@@ -179,14 +198,34 @@ export default function InvoiceDetailPage() {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Reference / Cheque #</Label>
+                <Label className="text-xs">{isCheque ? 'Cheque # *' : 'Reference'}</Label>
                 <Input
-                  placeholder="Optional"
+                  placeholder={isCheque ? 'Required' : 'Optional'}
                   className="h-8 text-sm"
                   value={paymentForm.reference}
                   onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
                 />
               </div>
+              {isCheque && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Cheque date</Label>
+                  <Input type="date" className="h-8 text-sm"
+                    value={paymentForm.chequeDate || paymentForm.paymentDate}
+                    onChange={e => setPaymentForm(f => ({ ...f, chequeDate: e.target.value }))} />
+                </div>
+              )}
+              {isCheque && canPickBank && banks.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Bank (optional)</Label>
+                  <Select value={paymentForm.bankAccountId || 'none'} onValueChange={v => setPaymentForm(f => ({ ...f, bankAccountId: !v || v === 'none' ? '' : v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not set</SelectItem>
+                      {banks.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" onClick={() => { setShowPaymentForm(false); setPaymentForm(emptyPayment) }}>Cancel</Button>

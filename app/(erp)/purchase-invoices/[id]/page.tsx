@@ -58,7 +58,7 @@ const STATUS_COLORS: Record<string, string> = {
   PAID:    'bg-green-100 text-green-700',
 }
 
-const emptyPayment = { amount: '', method: 'CASH', reference: '', paymentDate: new Date().toISOString().slice(0, 10) }
+const emptyPayment = { amount: '', method: 'CASH', reference: '', chequeDate: '', bankAccountId: '', paymentDate: new Date().toISOString().slice(0, 10) }
 
 type EditableItem = PurchaseInvoice['items'][number] & { mrpInput: string }
 
@@ -84,6 +84,18 @@ export default function PurchaseInvoiceDetailPage() {
   }, [id])
 
   useEffect(() => { fetchInvoice() }, [fetchInvoice])
+
+  // Bank accounts for the optional cheque bank selector (the accounts API is ADMIN/ACCOUNTANT only).
+  const canPickBank = user?.role === 'ADMIN' || user?.role === 'ACCOUNTANT'
+  const [banks, setBanks] = useState<{ id: string; name: string }[]>([])
+  useEffect(() => {
+    if (!canPickBank) return
+    fetch('/api/accounts/accounts?type=ASSET')
+      .then(r => r.json())
+      .then(j => setBanks((j.data ?? []).filter((a: { subType?: string | null }) => a.subType === 'BANK')))
+      .catch(() => setBanks([]))
+  }, [canPickBank])
+  const isCheque = paymentForm.method === 'CHEQUE'
 
   const startEdit = () => {
     if (!invoice) return
@@ -135,6 +147,10 @@ export default function PurchaseInvoiceDetailPage() {
       toast.error('Enter a valid amount')
       return
     }
+    if (paymentForm.method === 'CHEQUE' && !paymentForm.reference.trim()) {
+      toast.error('Enter the cheque number')
+      return
+    }
     setSavingPayment(true)
     const res = await fetch(`/api/purchase-invoices/${id}/payments`, {
       method: 'POST',
@@ -143,12 +159,14 @@ export default function PurchaseInvoiceDetailPage() {
     })
     if (res.ok) {
       const j = await res.json()
-      toast.success(`Payment recorded · Invoice now ${j.newStatus}`)
+      if (j.pending) toast.success('Cheque recorded as Pending — it will be applied when cleared')
+      else toast.success(`Payment recorded · Invoice now ${j.newStatus}`)
       setShowPaymentForm(false)
       setPaymentForm(emptyPayment)
       fetchInvoice()
     } else {
-      toast.error('Failed to record payment')
+      const j = await res.json().catch(() => ({}))
+      toast.error(j.error ?? 'Failed to record payment')
     }
     setSavingPayment(false)
   }
@@ -299,11 +317,31 @@ export default function PurchaseInvoiceDetailPage() {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Reference / Cheque #</Label>
-                <Input className="h-8 text-sm" placeholder="Optional"
+                <Label className="text-xs">{isCheque ? 'Cheque # *' : 'Reference'}</Label>
+                <Input className="h-8 text-sm" placeholder={isCheque ? 'Required' : 'Optional'}
                   value={paymentForm.reference}
                   onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))} />
               </div>
+              {isCheque && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Cheque date</Label>
+                  <Input type="date" className="h-8 text-sm"
+                    value={paymentForm.chequeDate || paymentForm.paymentDate}
+                    onChange={e => setPaymentForm(f => ({ ...f, chequeDate: e.target.value }))} />
+                </div>
+              )}
+              {isCheque && canPickBank && banks.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Bank (optional)</Label>
+                  <Select value={paymentForm.bankAccountId || 'none'} onValueChange={v => setPaymentForm(f => ({ ...f, bankAccountId: !v || v === 'none' ? '' : v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not set</SelectItem>
+                      {banks.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <div className="flex gap-2 justify-end">
               <Button size="sm" variant="outline"
