@@ -45,6 +45,18 @@ const SUMMARY_DISTINCT_CAP = 50
 // the serverless function's own limit bounds it in practice.
 const WRAP_TX_OPTS = { maxWait: 10000, timeout: 300000 }
 
+/**
+ * Re-entrancy guard for the plain-write re-issue. Prisma queries are lazy: `tx.model.op(args)` only runs this hook
+ * when it is awaited, so the callback must be awaited INSIDE `run` for the flag to be visible to the hook.
+ */
+export function reissueGuard() {
+  const als = new AsyncLocalStorage<true>()
+  return {
+    active: () => als.getStore() === true,
+    run: <T>(fn: () => PromiseLike<T> | T): Promise<T> => als.run(true, async () => await fn()),
+  }
+}
+
 const delegateKey = (model: string) => model.charAt(0).toLowerCase() + model.slice(1)
 const txIdOf = (tx: any): string | undefined => tx?.[SCOPE]?.txId
 const scopeDepth = (tx: any): number => tx?.[SCOPE]?.scopeState?.stack?.length ?? 1
@@ -237,6 +249,10 @@ async function auditedWrite(tx: any, log: Log, model: string, operation: string,
       if (before.length <= ROW_CAP) {
         const { args: a, added } = operation === 'updateManyAndReturn' ? withSelected(args, ['id']) : { args, added: [] as string[] }
         const result = await query(a)
+        // A request that lost a concurrent claim (its WHERE matched nothing after the row lock released) changed
+        // nothing and must not log an entry under its own name.
+        const updated = Array.isArray(result) ? result.length : result.count
+        if (updated === 0) return strip(result, added)
         const afterRows: any[] = operation === 'updateManyAndReturn' && !needsReread(args)
           ? result
           : await d.findMany({ where: { id: { in: before.map((r) => r.id) } } })
@@ -262,7 +278,13 @@ async function auditedWrite(tx: any, log: Log, model: string, operation: string,
         for (const r of audited) snaps.set(r.id, await cascadeSnapshot(tx, model, r.id))
         const result = await query(args)
         if (result.count > 0) {
-          for (const r of audited) {
+          // Partial claim: log only rows that are actually gone now.
+          let gone = audited
+          if (result.count < audited.length) {
+            const left = new Set((await d.findMany({ where: { id: { in: audited.map((r) => r.id) } }, select: { id: true } })).map((r: any) => r.id))
+            gone = audited.filter((r) => !left.has(r.id))
+          }
+          for (const r of gone) {
             await log({ model, recordId: r.id, action: 'DELETE', changes: { ...diffRecords(model, r, null), ...((snaps.get(r.id) as object) ?? {}) } })
           }
         }
@@ -286,7 +308,7 @@ export const auditExtension = Prisma.defineExtension((client) => {
   /** Audit rows waiting to be flushed, per transaction id (only for transactions this extension opened/registered). */
   const buffers = new Map<string, any[]>()
   /** Set while our wrapper re-issues a plain write inside its transaction (re-entrancy guard). */
-  const reissuing = new AsyncLocalStorage<true>()
+  const reissuing = reissueGuard()
 
   const runInTx = (target: any, fn: (tx: any) => Promise<any>, opts?: any) =>
     target.$transaction(async (tx: any) => {
@@ -327,13 +349,13 @@ export const auditExtension = Prisma.defineExtension((client) => {
 
           const t = params.__internalParams?.transaction
           if (!t) {
-            if (reissuing.getStore()) {
+            if (reissuing.active()) {
               // Our own re-issued write arrived without a transaction: Prisma internals changed. Refuse instead of
               // opening another transaction (which would recurse until the pool is exhausted).
               throw new Error(`Audit: ${model}.${operation} lost its transaction context (Prisma internals changed?); refusing to write unaudited`)
             }
             if (model === 'JournalEntry' && operation === 'create' && args?.data?.isManual !== true) return query(args)
-            return runInTx(inner, (tx) => reissuing.run(true, () => tx[delegateKey(model)][operation](args)), WRAP_TX_OPTS)
+            return runInTx(inner, (tx) => reissuing.run(() => tx[delegateKey(model)][operation](args)), WRAP_TX_OPTS)
           }
           if (t.kind !== 'itx') {
             throw new Error(`Audited write ${model}.${operation} cannot run inside an array $transaction; use an interactive transaction`)
