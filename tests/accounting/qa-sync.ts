@@ -1,12 +1,19 @@
 // Integration QA for the accounts sync engine, hooks and APIs. PRODUCTION DB — QA-prefixed records only.
-// Needs a dev server on :3100 (npx next dev -p 3100). Run: npx tsx tests/accounting/qa-sync.ts
+// Needs a dev server on :3100 (npx next dev -p 3100) started WITHOUT DELIVERY_TEST_SKIP_SYNC (the confirm/assign/
+// cancel hooks must post; the script refuses otherwise). Run: npx tsx tests/accounting/qa-sync.ts
+// Phase 18 flow: COGS posts when a delivery is ASSIGNED (stock leaves), dated Delivery.assignedAt; an outcome
+// (Pay Later here) does not move it; un-assign / cancel removes it on the next sync.
+// Rewritten 2026-11-10 for the new order/delivery flow; NOT YET RUN against it.
 import { prisma, BASE, staffCookie, api, check } from '../portal/qa-helpers'
 import { syncSource } from '../../lib/accounting/sync'
+import { cogsQualifyingWhere } from '../../lib/orders/cogs-source'
+import { assignOrder, unassignOrder, payLater, createQaAssignee, requireLedgerSyncOn, call } from '../deliveries/qa-flow-helpers'
 
 const ADMIN = staffCookie('ADMIN')
 const ACCT = staffCookie('ACCOUNTANT')
 const QA_CUSTOMER = 'QA Ledger Customer'
 const QA_SUPPLIER = 'QA Ledger Supplier'
+const QA_DRIVER = 'QA Ledger Driver'
 
 const ids = {
   retailer: '', supplier: '', medicine: '', batch: '',
@@ -72,9 +79,11 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
   await prisma.medicine.deleteMany({ where: { code: { startsWith: 'QAL' } } })
   await prisma.retailer.deleteMany({ where: { id: { in: rid } } })
   await prisma.supplier.deleteMany({ where: { id: { in: sid } } })
+  await prisma.employee.deleteMany({ where: { name: QA_DRIVER } }) // after the deliveries that reference it
   const n1 = await prisma.journalEntry.count()
   check('cleanup: journal entry count restored', n1 === n0, `(${n1} vs ${n0})`)
-  const left = await prisma.retailer.count({ where: { name: QA_CUSTOMER } }) + await prisma.supplier.count({ where: { name: QA_SUPPLIER } }) + await prisma.medicine.count({ where: { code: { startsWith: 'QAL' } } })
+  const left = await prisma.retailer.count({ where: { name: QA_CUSTOMER } }) + await prisma.supplier.count({ where: { name: QA_SUPPLIER } }) + await prisma.medicine.count({ where: { code: { startsWith: 'QAL' } } }) +
+    await prisma.employee.count({ where: { name: QA_DRIVER } })
   check('cleanup: no QA residue', left === 0)
   {
     const s = await prisma.accountingSettings.findFirst()
@@ -85,8 +94,9 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
 async function main() {
   const n0 = await prisma.journalEntry.count()
   if (n0 !== 0) throw new Error(`Refusing to run: ${n0} journal entries already exist (expected none before go-live)`)
-  const leftover = await prisma.retailer.count({ where: { name: QA_CUSTOMER } })
+  const leftover = await prisma.retailer.count({ where: { name: QA_CUSTOMER } }) + await prisma.employee.count({ where: { name: QA_DRIVER } })
   if (leftover) throw new Error('QA residue from a previous run exists')
+  await requireLedgerSyncOn(ADMIN)
 
   const settings0 = await prisma.accountingSettings.findFirst()
   const orig = settings0 ? { goLiveDate: settings0.goLiveDate, lockedThrough: settings0.lockedThrough, defaultBankAccountId: settings0.defaultBankAccountId } : null
@@ -121,6 +131,7 @@ async function main() {
     const batch = await prisma.medicineBatch.create({
       data: { medicineId: med.id, batchNumber: 'QAL-B1', expiryDate: new Date('2030-06-01'), quantityIn: 1000, currentQty: 1000, purchasePrice: 60, tradePrice: 100, mrp: 130 },
     })
+    const drv = await createQaAssignee(QA_DRIVER, 'DRIVER')
     ids.retailer = retailer.id; ids.supplier = supplier.id; ids.medicine = med.id; ids.batch = batch.id
 
     // Real records dated from today would be picked up while go-live is set; count them to know if rebuild is safe to run.
@@ -134,7 +145,7 @@ async function main() {
       (await prisma.purchaseInvoice.count({ where: { invoiceDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
       (await prisma.supplierPayment.count({ where: { paymentDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
       (await prisma.supplierReturn.count({ where: { returnDate: { gte: goLive }, supplierId: { not: supplier.id } } })) +
-      (await prisma.order.count({ where: { status: 'DELIVERED', retailerId: { not: retailer.id }, OR: [{ delivery: { is: { deliveredAt: { gte: goLive } } } }, { invoice: { is: { invoiceDate: { gte: goLive } } } }, { orderDate: { gte: goLive } }] } }))
+      (await prisma.order.count({ where: { ...cogsQualifyingWhere(goLive), retailerId: { not: retailer.id } } }))
 
     // ---- settings API ----
     let r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ goLiveDate: 'garbage' }) })
@@ -192,7 +203,7 @@ async function main() {
       return o
     }
     const order = await mkOrder(10) // 10 x 100 x 0.9 = 900
-    let st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
+    const st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     check('hook: confirm without go-live succeeds and posts nothing', st.status === 200 && (await prisma.journalEntry.count()) === 0)
     const inv0 = await prisma.invoice.findUnique({ where: { orderId: order.id } })
     ids.invoices.push(inv0!.id)
@@ -238,26 +249,37 @@ async function main() {
     check('hard delete of extra orders removes their invoice entries', (await Promise.all(extraInv.map((i) => entryCount('INVOICE', i.id)))).every((c) => c === 0))
     check('AR[party] still == invoice total after extras deleted', (await partyBalance('AR', { retailerId: retailer.id })) === invTotal)
 
-    // ---- deliver: COGS ----
-    st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'PICKING' }) })
-    st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
-    check('hook: deliver ok', st.status === 200)
-    let cogs = await acctSum('COGS', [order.id])
-    check('COGS == qty x batch purchase price (10 x 60)', cogs.debit === 600 && cogs.credit === 0, JSON.stringify(cogs))
+    // ---- assign: COGS (stock leaves at assignment, entry dated Delivery.assignedAt) ----
+    const old1 = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'PICKING' }) })
+    const old2 = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
+    check('status route refuses the removed PICKING and DELIVERED moves (400), nothing posted', old1.status === 400 && old2.status === 400 && (await entryCount('DELIVERY_COGS', order.id)) === 0)
+    const as1 = await assignOrder(order.id, drv.id, ADMIN)
+    check('hook: assign ok (order OUT_FOR_DELIVERY)', as1.status === 200 && (await prisma.order.findUnique({ where: { id: order.id } }))?.status === 'OUT_FOR_DELIVERY', `${as1.status} ${JSON.stringify(as1.json)}`)
+    const cogs = await acctSum('COGS', [order.id])
+    check('COGS == qty x batch purchase price (10 x 60), posted at assignment', cogs.debit === 600 && cogs.credit === 0, JSON.stringify(cogs))
     const invCogs = await acctSum('INVENTORY', [order.id])
     check('COGS: Cr Inventory 600', invCogs.credit === 600)
+    const assignedAt1 = (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.assignedAt
+    const cogsE1 = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: order.id } })
+    check('COGS entry dated Delivery.assignedAt', !!assignedAt1 && cogsE1?.date.getTime() === assignedAt1.getTime(), JSON.stringify({ e: cogsE1?.date, a: assignedAt1 }))
     const stockAfterFirst = (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty
-    const deliveredAt1 = (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt
     const unitCost1 = (await prisma.orderItem.findFirst({ where: { orderId: order.id } }))!.unitCost
-    st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
-    check('double DELIVERED PUT: stock deducted once (990), deliveredAt and unitCost unchanged', st.status === 200 && stockAfterFirst === 990 &&
-      (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 990 &&
-      (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt?.getTime() === deliveredAt1?.getTime() && !!deliveredAt1 &&
-      Number((await prisma.orderItem.findFirst({ where: { orderId: order.id } }))!.unitCost) === Number(unitCost1))
+    const as2 = await assignOrder(order.id, drv.id, ADMIN)
+    check('second assign of an OUT_FOR_DELIVERY order -> 409, stock deducted once (990)', as2.status === 409 && stockAfterFirst === 990 &&
+      (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 990, String(as2.status))
+    const pl1 = await payLater(order.id, ADMIN)
     const dRow = await prisma.delivery.findUnique({ where: { orderId: order.id } })
-    const dr1 = await api(`/api/deliveries/${dRow!.id}`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
-    check('deliveries PUT DELIVERED again keeps the original deliveredAt', dr1.status === 200 && (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt?.getTime() === deliveredAt1?.getTime())
-    check('double DELIVERED: still one COGS entry, amount unchanged', (await entryCount('DELIVERY_COGS', order.id)) === 1 && (await acctSum('COGS', [order.id])).debit === 600)
+    const deliveredAt1 = dRow!.deliveredAt
+    check('Pay Later: DELIVERED with deliveredAt; stock, unitCost and assignedAt unchanged', pl1.status === 200 && !!deliveredAt1 &&
+      (await prisma.order.findUnique({ where: { id: order.id } }))?.status === 'DELIVERED' && (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 990 &&
+      Number((await prisma.orderItem.findFirst({ where: { orderId: order.id } }))!.unitCost) === Number(unitCost1) && dRow!.assignedAt?.getTime() === assignedAt1!.getTime(), `${pl1.status} ${JSON.stringify(pl1.json)}`)
+    const pl2 = await payLater(order.id, ADMIN)
+    check('second outcome on a DELIVERED order -> 409, deliveredAt unchanged', pl2.status === 409 && (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt?.getTime() === deliveredAt1?.getTime())
+    const dr1 = await call('PUT', `/api/deliveries/${dRow!.id}`, ADMIN, { status: 'DELIVERED' })
+    check('deliveries PUT with a status -> 400 (status is never written there), deliveredAt unchanged', dr1.status === 400 && (await prisma.delivery.findUnique({ where: { orderId: order.id } }))!.deliveredAt?.getTime() === deliveredAt1?.getTime())
+    const cogsE2 = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: order.id } })
+    check('after the outcome: still one COGS entry, amount unchanged, still dated assignedAt (not deliveredAt)',
+      (await entryCount('DELIVERY_COGS', order.id)) === 1 && (await acctSum('COGS', [order.id])).debit === 600 && cogsE2?.date.getTime() === assignedAt1!.getTime())
     check('invoice entry untouched by status changes', (await entryCount('INVOICE', inv0!.id)) === 1)
     // COGS date fallback: no deliveredAt and no invoice -> order date (stable), never updatedAt
     {
@@ -271,8 +293,27 @@ async function main() {
       await prisma.order.update({ where: { id: fo.id }, data: { notes: 'QA touch' } }) // bumps updatedAt
       const f2 = await syncSource('DELIVERY_COGS', fo.id)
       check('COGS date fallback: editing the order does not move the COGS date (unchanged)', f2.status === 'unchanged')
-      const qual = await prisma.order.count({ where: { id: fo.id, status: 'DELIVERED', OR: [{ delivery: { is: { deliveredAt: { gte: goLive } } } }, { AND: [{ OR: [{ delivery: { is: null } }, { delivery: { is: { deliveredAt: null } } }] }, { OR: [{ invoice: { is: { invoiceDate: { gte: goLive } } } }, { AND: [{ invoice: { is: null } }, { orderDate: { gte: goLive } }] }] }] }] } })
-      check('COGS qualifying filter agrees with load()', qual === 1)
+      const qual = await prisma.order.count({ where: { id: fo.id, ...cogsQualifyingWhere(goLive) } })
+      check('COGS qualifying filter (cogsQualifyingWhere) agrees with load()', qual === 1)
+      // A legacy DELIVERED order whose delivery has deliveredAt but no assignedAt keeps deliveredAt as its date.
+      const da = new Date(goLive.getTime() + 2 * 3600_000)
+      await prisma.delivery.create({ data: { orderId: fo.id, scheduledDate: da, deliveredAt: da, status: 'DELIVERED' } })
+      const f4 = await syncSource('DELIVERY_COGS', fo.id)
+      const e4 = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: fo.id } })
+      check('COGS date fallback: no assignedAt -> deliveredAt', f4.status === 'posted' && e4?.date.getTime() === da.getTime(), JSON.stringify({ f4, d: e4?.date }))
+      const aa = new Date(goLive.getTime() + 1800_000)
+      await prisma.delivery.update({ where: { orderId: fo.id }, data: { assignedAt: aa } })
+      const f5 = await syncSource('DELIVERY_COGS', fo.id)
+      const e5 = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: fo.id } })
+      check('COGS date: assignedAt wins over deliveredAt', f5.status === 'posted' && e5?.date.getTime() === aa.getTime(), JSON.stringify({ f5, d: e5?.date }))
+      check('COGS qualifying filter agrees with load() (assignedAt branch)', (await prisma.order.count({ where: { id: fo.id, ...cogsQualifyingWhere(goLive) } })) === 1)
+      await prisma.order.update({ where: { id: fo.id }, data: { status: 'INVOICED' } })
+      const f6 = await syncSource('DELIVERY_COGS', fo.id)
+      check('COGS: an order back in INVOICED (not a stock-out status) is not eligible -> entry removed',
+        f6.status === 'removed' && (await entryCount('DELIVERY_COGS', fo.id)) === 0 && (await prisma.order.count({ where: { id: fo.id, ...cogsQualifyingWhere(goLive) } })) === 0, JSON.stringify(f6))
+      await prisma.order.update({ where: { id: fo.id }, data: { status: 'DELIVERED' } })
+      await syncSource('DELIVERY_COGS', fo.id) // re-posted (DELIVERED again), so the removal below is still exercised
+      await prisma.delivery.deleteMany({ where: { orderId: fo.id } })
       await prisma.orderItem.deleteMany({ where: { orderId: fo.id } })
       await prisma.order.delete({ where: { id: fo.id } })
       ids.orders.pop()
@@ -489,21 +530,28 @@ async function main() {
     const tb = await prisma.journalLine.aggregate({ _sum: { debit: true, credit: true } })
     check('trial balance: total debits == total credits', Math.round(Number(tb._sum.debit) * 100) === Math.round(Number(tb._sum.credit) * 100))
 
-    // ---- delivered order: deliveries PUT hook, soft cancel removes COGS ----
+    // ---- assigned order: COGS follows assignedAt, un-assign removes it, re-assign re-posts, cancel removes it ----
     const o3 = await mkOrder(1)
     await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
-    await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
     const inv3 = await prisma.invoice.findUnique({ where: { orderId: o3.id } })
     ids.invoices.push(inv3!.id)
-    check('order 3 delivered: COGS 60 posted', (await acctSum('COGS', [o3.id])).debit === 60)
+    check('order 3 confirmed (INVOICED): no COGS yet', (await entryCount('DELIVERY_COGS', o3.id)) === 0)
+    const a3 = await assignOrder(o3.id, drv.id, ADMIN)
+    check('order 3 assigned: COGS 60 posted', a3.status === 200 && (await acctSum('COGS', [o3.id])).debit === 60, `${a3.status} ${JSON.stringify(a3.json)}`)
     const del3 = await prisma.delivery.findUnique({ where: { orderId: o3.id } })
-    await prisma.delivery.update({ where: { id: del3!.id }, data: { deliveredAt: new Date(Date.now() - 60000) } })
-    await api(`/api/deliveries/${del3!.id}`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
-    const afterPut = await prisma.delivery.findUnique({ where: { id: del3!.id } })
+    const moved = new Date(del3!.assignedAt!.getTime() - 60000)
+    await prisma.delivery.update({ where: { id: del3!.id }, data: { assignedAt: moved } })
+    const rs3 = await syncSource('DELIVERY_COGS', o3.id)
     const cogsEntry = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: o3.id } })
-    check('deliveries PUT hook: COGS entry follows deliveredAt', !!cogsEntry && cogsEntry.date.getTime() === afterPut!.deliveredAt!.getTime())
+    check('COGS entry follows Delivery.assignedAt on re-sync', rs3.status === 'posted' && !!cogsEntry && cogsEntry.date.getTime() === moved.getTime(), JSON.stringify(rs3))
+    const un3 = await unassignOrder(o3.id, ADMIN)
+    check('un-assign: COGS entry removed by the hook, invoice entry kept', un3.status === 200 && (await entryCount('DELIVERY_COGS', o3.id)) === 0 && (await entryCount('INVOICE', inv3!.id)) === 1, `${un3.status} ${JSON.stringify(un3.json)}`)
+    const a3b = await assignOrder(o3.id, drv.id, ADMIN)
+    const del3b = await prisma.delivery.findUnique({ where: { orderId: o3.id } })
+    const cogsEntryB = await prisma.journalEntry.findFirst({ where: { sourceType: 'DELIVERY_COGS', sourceId: o3.id } })
+    check('re-assign: COGS re-posted, dated the new assignedAt', a3b.status === 200 && !!cogsEntryB && cogsEntryB.date.getTime() === del3b!.assignedAt!.getTime() && (await acctSum('COGS', [o3.id])).debit === 60)
     r = await api(`/api/orders/${o3.id}`, ADMIN, { method: 'DELETE' })
-    check('soft cancel delivered order: COGS entry removed, invoice entry kept', r.status === 200 && (await entryCount('DELIVERY_COGS', o3.id)) === 0 && (await entryCount('INVOICE', inv3!.id)) === 1)
+    check('soft cancel of an OUT_FOR_DELIVERY order: COGS entry removed, invoice entry kept', r.status === 200 && (await entryCount('DELIVERY_COGS', o3.id)) === 0 && (await entryCount('INVOICE', inv3!.id)) === 1)
     r = await api(`/api/orders/${o3.id}?hard=true`, ADMIN, { method: 'DELETE' })
     check('hard delete after soft cancel: invoice entry removed', r.status === 200 && (await entryCount('INVOICE', inv3!.id)) === 0)
   } finally {

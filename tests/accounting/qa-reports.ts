@@ -1,7 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Integration QA for Tax Management + Financial Reporting + P&L. PRODUCTION DB — QA-prefixed records only.
-// Needs a dev server on :3100 (npx next dev -p 3100). Run: npx tsx tests/accounting/qa-reports.ts
+// Needs a dev server on :3100 (npx next dev -p 3100) started WITHOUT DELIVERY_TEST_SKIP_SYNC (the confirm/assign hooks
+// must post; the script refuses otherwise). Run: npx tsx tests/accounting/qa-reports.ts
+// Phase 18 flow: the scenario order is confirmed (INVOICED), assigned to a QA driver (stock + COGS leave at
+// assignment) and delivered Pay Later. Rewritten 2026-11-10 for the new order/delivery flow; NOT YET RUN against it.
 import { prisma, BASE, staffCookie, api, check } from '../portal/qa-helpers'
+import { createQaAssignee, mustAssignAndPayLater, requireLedgerSyncOn } from '../deliveries/qa-flow-helpers'
 
 const ADMIN = staffCookie('ADMIN')
 const ACCT = staffCookie('ACCOUNTANT')
@@ -9,6 +13,7 @@ const MGR = staffCookie('MANAGER')
 const QA_CUSTOMER = 'QA Report Customer'
 const QA_SUPPLIER = 'QA Report Supplier'
 const QA_ASSET = 'QA Report Asset'
+const QA_DRIVER = 'QA Report Driver'
 
 async function json(res: Response) { try { return await res.json() } catch { return null } }
 const post = (path: string, body: any, cookie = ACCT) => api(path, cookie, { method: 'POST', body: JSON.stringify(body) })
@@ -59,10 +64,12 @@ async function cleanup(orig: { goLiveDate: Date | null; lockedThrough: Date | nu
   await prisma.medicine.deleteMany({ where: { code: { startsWith: 'QAR' } } })
   await prisma.retailer.deleteMany({ where: { id: { in: rid } } })
   await prisma.supplier.deleteMany({ where: { id: { in: sid } } })
+  await prisma.employee.deleteMany({ where: { name: QA_DRIVER } }) // after the deliveries that reference it
   const n1 = await prisma.journalEntry.count()
   check('cleanup: journal entry count restored', n1 === n0, `(${n1} vs ${n0})`)
   const left = (await prisma.retailer.count({ where: { name: QA_CUSTOMER } })) + (await prisma.supplier.count({ where: { name: QA_SUPPLIER } })) +
-    (await prisma.medicine.count({ where: { code: { startsWith: 'QAR' } } })) + (await prisma.fixedAsset.count({ where: { name: QA_ASSET } }))
+    (await prisma.medicine.count({ where: { code: { startsWith: 'QAR' } } })) + (await prisma.fixedAsset.count({ where: { name: QA_ASSET } })) +
+    (await prisma.employee.count({ where: { name: QA_DRIVER } }))
   check('cleanup: no QA residue', left === 0)
   const s = await prisma.accountingSettings.findFirst()
   check('cleanup: settings restored', (s?.goLiveDate?.getTime() ?? null) === (orig?.goLiveDate?.getTime() ?? null) && (s?.lockedThrough?.getTime() ?? null) === (orig?.lockedThrough?.getTime() ?? null) && (s?.defaultBankAccountId ?? null) === (orig?.defaultBankAccountId ?? null))
@@ -72,7 +79,8 @@ async function main() {
   const n0 = await prisma.journalEntry.count()
   if (n0 !== 0) throw new Error(`Refusing to run: ${n0} journal entries already exist (expected none before go-live)`)
   if ((await prisma.fixedAsset.count()) !== 0) throw new Error('Refusing to run: fixed assets already exist')
-  if ((await prisma.retailer.count({ where: { name: QA_CUSTOMER } })) || (await prisma.supplier.count({ where: { name: QA_SUPPLIER } }))) throw new Error('QA residue from a previous run exists')
+  if ((await prisma.retailer.count({ where: { name: QA_CUSTOMER } })) || (await prisma.supplier.count({ where: { name: QA_SUPPLIER } })) || (await prisma.employee.count({ where: { name: QA_DRIVER } }))) throw new Error('QA residue from a previous run exists')
+  await requireLedgerSyncOn(ADMIN)
 
   const settings0 = await prisma.accountingSettings.findFirst()
   const orig = settings0 ? { goLiveDate: settings0.goLiveDate, lockedThrough: settings0.lockedThrough, defaultBankAccountId: settings0.defaultBankAccountId } : null
@@ -125,6 +133,7 @@ async function main() {
     const batch = await prisma.medicineBatch.create({
       data: { medicineId: med.id, batchNumber: 'QAR-B1', expiryDate: new Date('2030-06-01'), quantityIn: 1000, currentQty: 1000, purchasePrice: 60, tradePrice: 100, mrp: 130 },
     })
+    const drv = await createQaAssignee(QA_DRIVER, 'DRIVER')
 
     let r = await api('/api/accounts/settings', ADMIN, { method: 'PUT', body: JSON.stringify({ goLiveDate: goLive.toISOString() }) })
     check('settings: go-live = first of this month', r.status === 200)
@@ -133,9 +142,14 @@ async function main() {
     r = await api('/api/orders', ADMIN, { method: 'POST', body: JSON.stringify({ retailerId: retailer.id, items: [{ medicineId: med.id, quantity: 10, unitPrice: 100, offerPercent: 10, salesTax: 5 }] }) })
     const order = (await json(r)).data
     ids.orders.push(order.id)
-    for (const status of ['INVOICED']) await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status }) })
+    r = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     const inv = await prisma.invoice.findUnique({ where: { orderId: order.id } })
     ids.invoices.push(inv!.id)
+    check('scenario: order confirmed (INVOICED)', r.status === 200, String(r.status))
+    // was: status CONFIRMED -> PICKING -> DELIVERED; now stock and COGS leave at assignment, then Delivered, Pay Later
+    await mustAssignAndPayLater(order.id, drv.id, ADMIN)
+    check('scenario: order delivered (assigned + Pay Later), 10 units left the QA batch',
+      (await prisma.order.findUnique({ where: { id: order.id } }))?.status === 'DELIVERED' && (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 990)
     check('scenario: invoice has tax 50 and subtotal 900', Number(inv!.taxAmount) === 50 && Number(inv!.subtotal) === 900, `${inv!.taxAmount}/${inv!.subtotal}`)
     r = await api(`/api/invoices/${inv!.id}/payments`, ADMIN, { method: 'POST', body: JSON.stringify({ amount: 300, method: 'CASH' }) })
     ids.payments.push((await json(r)).data.payment.id)
@@ -180,7 +194,7 @@ async function main() {
     const sales = Number(inv!.subtotal) - Number(inv!.discountAmount)
     const sr = await prisma.salesReturn.findUnique({ where: { id: sret.id } })
     const returns = Number(sr!.totalAmount)
-    const cogs = 10 * Number(batch.purchasePrice) - 2 * Number(batch.purchasePrice) // delivered 10, 2 restocked
+    const cogs = 10 * Number(batch.purchasePrice) - 2 * Number(batch.purchasePrice) // 10 left at assignment (COGS dated assignedAt, this month), 2 restocked by the sales return
     const fa = await prisma.fixedAsset.findUnique({ where: { id: asset.id } })
     const deprec = (Number(fa!.cost) - Number(fa!.salvageValue)) / fa!.usefulLifeMonths
     const expected = Math.round((sales - returns - cogs - 200 - deprec) * 100)

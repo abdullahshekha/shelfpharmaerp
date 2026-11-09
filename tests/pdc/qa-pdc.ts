@@ -99,7 +99,7 @@ async function main() {
   const cust = await prisma.retailer.create({ data: { name: CUST } })
   const mkInv = async (n: number, total: number, date: string) => {
     const order = await prisma.order.create({
-      data: { retailerId: cust.id, orderNumber: `${TAG}-ORD-${Date.now()}-${n}`, status: 'CONFIRMED', totalAmount: total },
+      data: { retailerId: cust.id, orderNumber: `${TAG}-ORD-${Date.now()}-${n}`, status: 'INVOICED', totalAmount: total }, // invoice holder only (was legacy CONFIRMED)
     })
     return prisma.invoice.create({
       data: {

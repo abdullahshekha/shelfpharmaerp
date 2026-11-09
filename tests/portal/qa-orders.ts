@@ -1,8 +1,15 @@
+// Portal ordering QA. PRODUCTION DB (QA-prefixed records, cleanupQa in finally). Needs a dev server on :3100 started
+// with DELIVERY_TEST_SKIP_SYNC=1: staff confirmation (RECEIVED -> INVOICED) syncs the INVOICE ledger entry through
+// lib/deliveries/sync.ts, go-live is set on production and cleanupQa does not remove journal entries, so the script
+// refuses to run otherwise. Phase 18: the open portal order is RECEIVED + OFFER_LIST (+ no invoice); confirm = INVOICED.
+// Updated 2026-11-10 for the new order flow; NOT YET RUN against it.
 import { prisma, check, makeQaCustomer, portalLogin, api, ensureQaOffer, staffCookie, cleanupQa } from './qa-helpers'
+import { requireLedgerSyncOff } from '../deliveries/qa-flow-helpers'
 
 const putOrder = (cookie: string, body: object) => api('/api/portal/order', cookie, { method: 'PUT', body: JSON.stringify(body) })
 
 async function main() {
+  await requireLedgerSyncOff(staffCookie())
   try {
     const offer = await ensureQaOffer()
     const { retailer, username, password } = await makeQaCustomer({ customerType: 'QA-Type-Orders' })
@@ -65,6 +72,8 @@ async function main() {
     // staff confirmed the order after the customer loaded it (sequential, stale orderId) -> 409, edit not applied; next order starts fresh
     const conf = await api(`/api/orders/${orderId}/status`, staffCookie(), { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     check('staff confirm ok', conf.status === 200)
+    const conf2 = await api(`/api/orders/${orderId}/status`, staffCookie(), { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
+    check('confirming it again -> 409 (only a RECEIVED order can be confirmed)', conf2.status === 409, String(conf2.status))
     r = await putOrder(cookie, { orderId, items: [{ medicineId: M, quantity: 99 }] })
     check('edit after confirm -> 409', r.status === 409 && /updated by our team/i.test((await r.json()).error))
     check('confirmed order unchanged (2 x 90 = 180)', Number((await prisma.order.findUnique({ where: { id: orderId } }))?.totalAmount) === 180)
@@ -110,7 +119,7 @@ async function main() {
       ])
       const o = await prisma.order.findUnique({ where: { id: oid }, include: { items: true, invoice: true } })
       const sum = o!.items.reduce((s, it) => s + Number(it.lineTotal), 0)
-      check(`race ${i}: update 200/409 (never 500), staff ${sr.status}, CONFIRMED`, (ur.status === 200 || ur.status === 409) && o?.status === 'INVOICED', `update=${ur.status} staff=${sr.status}`)
+      check(`race ${i}: update 200/409 (never 500), staff ${sr.status}, INVOICED`, (ur.status === 200 || ur.status === 409) && o?.status === 'INVOICED', `update=${ur.status} staff=${sr.status}`)
       check(`race ${i}: invoice subtotal == order total == sum of lines`, !!o?.invoice && Number(o.invoice.subtotal) === Number(o.totalAmount) && Number(o.totalAmount) === sum, `inv=${o?.invoice?.subtotal} total=${o?.totalAmount} sum=${sum}`)
     }
 

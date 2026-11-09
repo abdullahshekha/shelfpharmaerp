@@ -121,11 +121,15 @@ async function main() {
   const od = es.find((e) => e.action === 'DELETE')
   check('order DELETE -> _cascaded holds the 2 items', ((od?.changes as any)?._cascaded?.OrderItem ?? []).length === 2, JSON.stringify((od?.changes as any)?._cascaded))
 
-  // ---- real order flows (lib/orders): DELIVERED, cancel, hard delete -> order History ----
+  // ---- real order flows (lib/orders, lib/deliveries): confirm, assign, Pay Later, cancel, hard delete -> order History ----
   // Zero prices and a pre-go-live payment date keep the live ledger untouched apart from zero-value postings that
-  // the hard delete's sync removes again (checked in cleanup).
+  // the hard delete's sync removes again (checked in cleanup). Phase 18 flow (rewritten 2026-11-10, NOT YET RUN):
+  // stock leaves at ASSIGNMENT (assignDelivery), the outcome (recordOutcome PAY_LATER) only marks the order delivered.
   const { setOrderStatus } = await import('../../lib/orders/set-status')
   const { cancelOrder, hardDeleteOrder } = await import('../../lib/orders/lifecycle')
+  const { assignDelivery } = await import('../../lib/deliveries/assign')
+  const { recordOutcome } = await import('../../lib/deliveries/outcome')
+  const flowActor = { id: 'qa-audit-admin', role: 'ADMIN' }
   const { GET: historyGET } = await import('../../app/api/orders/[id]/history/route')
   const { NextRequest } = await import('next/server')
   const history = async (id: string) => {
@@ -138,21 +142,30 @@ async function main() {
     include: { items: true },
   }))
   flow.items.forEach(track)
+  const driver = track(await prisma.employee.create({ data: { name: `${P} Driver`, role: 'DRIVER', isActive: true } }))
   await setOrderStatus(flow.id, 'INVOICED')
   const inv = track((await prisma.invoice.findUnique({ where: { orderId: flow.id } }))!)
-  track((await prisma.delivery.findUnique({ where: { orderId: flow.id } }))!)
+  const flowDelivery = track((await prisma.delivery.findUnique({ where: { orderId: flow.id } }))!)
   track((await prisma.deliveryChallan.findUnique({ where: { orderId: flow.id } }))!)
   const pay = track(await prisma.payment.create({ data: { retailerId: ret.id, invoiceId: inv.id, amount: 1, paymentDate: new Date('2026-01-01T00:00:00Z'), notes: 'QA Audit payment' } }))
-  await setOrderStatus(flow.id, 'DELIVERED')
+  check('confirm (INVOICED) does not touch stock', (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 10)
+  await assignDelivery(flowDelivery.id, driver.id, flowActor)
   let h = await history(flow.id)
   const changed = (model: string, field: string, to: unknown) => h.some((e) => e.model === model && e.action === 'UPDATE' && e.changes?.[field]?.to === to)
-  check('History: Order status -> DELIVERED (updateMany claim)', changed('Order', 'status', 'DELIVERED'), JSON.stringify(h.map((e) => [e.model, e.action, Object.keys(e.changes ?? {})])))
-  check('History: Delivery status -> DELIVERED', changed('Delivery', 'status', 'DELIVERED'))
-  check('History: stock deduction recorded on the order item', h.some((e) => e.model === 'OrderItem' && e.action === 'UPDATE' && e.changes?.deductedQty?.to === 2))
-  check('stock deducted from the QA batch', (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 8)
+  check('History: Order status -> OUT_FOR_DELIVERY (assignment claim)', changed('Order', 'status', 'OUT_FOR_DELIVERY'), JSON.stringify(h.map((e) => [e.model, e.action, Object.keys(e.changes ?? {})])))
+  check('History: Delivery assigned (driverId + assignedAt)', h.some((e) => e.model === 'Delivery' && e.action === 'UPDATE' && e.changes?.driverId?.to === driver.id && !!e.changes?.assignedAt?.to))
+  check('History: stock deduction recorded on the order item at assignment', h.some((e) => e.model === 'OrderItem' && e.action === 'UPDATE' && e.changes?.deductedQty?.to === 2))
+  check('stock deducted from the QA batch at assignment', (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 8)
+  await recordOutcome(flowDelivery.id, flowActor, { outcome: 'PAY_LATER' })
+  h = await history(flow.id)
+  check('History: Order status -> DELIVERED (outcome claim)', changed('Order', 'status', 'DELIVERED'), JSON.stringify(h.map((e) => [e.model, e.action, Object.keys(e.changes ?? {})])))
+  check('History: Delivery status -> DELIVERED, outcome PAY_LATER', changed('Delivery', 'status', 'DELIVERED') && changed('Delivery', 'outcome', 'PAY_LATER'))
+  check('the outcome does not move stock (still 8)', (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 8)
   await cancelOrder(flow.id)
   h = await history(flow.id)
   check('History: cancel -> Order status DELIVERED -> CANCELLED', h.some((e) => e.model === 'Order' && e.action === 'UPDATE' && e.changes?.status?.from === 'DELIVERED' && e.changes?.status?.to === 'CANCELLED'))
+  check('cancel restocked the QA batch (10) and the History shows deductedQty cleared', (await prisma.medicineBatch.findUnique({ where: { id: batch.id } }))!.currentQty === 10 &&
+    h.some((e) => e.model === 'OrderItem' && e.action === 'UPDATE' && e.changes?.deductedQty?.from === 2 && e.changes?.deductedQty?.to === null))
   await hardDeleteOrder(flow.id)
   h = await history(flow.id)
   const del1 = (model: string) => h.find((e) => e.model === model && e.action === 'DELETE')
@@ -413,7 +426,7 @@ async function cleanup() {
   await prisma.medicine.deleteMany({ where: { name: `${P} MED` } })
   await prisma.manufacturer.deleteMany({ where: { name: `${P} Mfr` } })
   await prisma.retailer.deleteMany({ where: { name: { in: [`${P} Customer`, `${P} Portal Customer`] } } })
-  await prisma.employee.deleteMany({ where: { name: { in: [`${P} Employee`, `${P} Login Employee`] } } })
+  await prisma.employee.deleteMany({ where: { name: { in: [`${P} Employee`, `${P} Login Employee`, `${P} Driver`] } } })
   await prisma.area.deleteMany({ where: { name: { startsWith: P } } })
   // Our own audit rows: those whose recordId or bulk ids are records this run created.
   const mineOf = async () => (await prisma.auditLog.findMany({ where: { createdAt: { gte: START } } }))

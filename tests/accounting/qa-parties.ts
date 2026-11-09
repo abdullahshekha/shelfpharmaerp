@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Integration QA for Accounts Receivable / Payable APIs and pages. PRODUCTION DB — QA-prefixed records only.
-// Needs a dev server on :3100 (npx next dev -p 3100). Run: npx tsx tests/accounting/qa-parties.ts
+// Needs a dev server on :3100 (npx next dev -p 3100) started WITHOUT DELIVERY_TEST_SKIP_SYNC: since Phase 18 the
+// confirm hook (INVOICE posting) goes through lib/deliveries/sync.ts, which that switch turns off, and the statement
+// checks below need the hook-posted invoice (the script refuses otherwise). Run: npx tsx tests/accounting/qa-parties.ts
 import { prisma, BASE, staffCookie, api, check } from '../portal/qa-helpers'
+import { requireLedgerSyncOn } from '../deliveries/qa-flow-helpers'
 
 const ADMIN = staffCookie('ADMIN')
 const ACCT = staffCookie('ACCOUNTANT')
@@ -47,6 +50,7 @@ async function main() {
   const n0 = await prisma.journalEntry.count()
   if (n0 !== 0) throw new Error(`Refusing to run: ${n0} journal entries already exist (expected none before go-live)`)
   if (await prisma.retailer.count({ where: { name: QA_CUSTOMER } })) throw new Error('QA residue from a previous run exists')
+  await requireLedgerSyncOn(ADMIN)
 
   const settings0 = await prisma.accountingSettings.findFirst()
   const orig = settings0 ? { goLiveDate: settings0.goLiveDate, lockedThrough: settings0.lockedThrough, defaultBankAccountId: settings0.defaultBankAccountId } : null
