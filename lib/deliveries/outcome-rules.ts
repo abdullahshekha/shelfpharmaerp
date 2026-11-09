@@ -1,6 +1,7 @@
 // Pure delivery-outcome validation (no Prisma imports). Amounts are computed server-side in paisa.
 import { karachiDayKey } from '@/lib/accounting/core'
 import { toPaisa } from '@/lib/accounting/money'
+import { totalUnits } from '@/lib/orders/units'
 
 export const OUTCOMES = ['PAID_FULL', 'PAID_WITH_RETURN', 'RETURNED', 'ON_HOLD', 'PAY_LATER'] as const
 export type Outcome = (typeof OUTCOMES)[number]
@@ -114,5 +115,111 @@ export function validateOutcomeInput(input: OutcomeInput, order: OutcomeOrder, n
       return { ok: true, amountDuePaisa: total, returnedLines: [] }
     default:
       return fail('Unknown outcome')
+  }
+}
+
+// ---- Who may record an outcome ----
+
+const OUTCOME_MANAGER_ROLES = ['ADMIN', 'MANAGER']
+
+/** ADMIN/MANAGER may record the outcome of any delivery; anyone else only of a delivery assigned to them. */
+export function canRecordOutcome(actor: { id: string; role: string } | null | undefined, delivery: { driverId: string | null }): boolean {
+  if (!actor?.id) return false
+  if (OUTCOME_MANAGER_ROLES.includes(actor.role)) return true
+  return !!delivery.driverId && delivery.driverId === actor.id
+}
+
+/** The order status an outcome moves an OUT_FOR_DELIVERY order to. */
+export function outcomeOrderStatus(outcome: Outcome): 'DELIVERED' | 'RETURNED' | 'ON_HOLD' {
+  if (outcome === 'RETURNED') return 'RETURNED'
+  if (outcome === 'ON_HOLD') return 'ON_HOLD'
+  return 'DELIVERED'
+}
+
+/**
+ * What is still to collect, in paisa: the STORED invoice total, less payments already recorded on the invoice and the
+ * return credit (Paid with Return), never below 0.
+ */
+export function amountDueFromStored(a: { invoiceTotal: number; paid: number; creditPaisa: number }): number {
+  return Math.max(0, toPaisa(a.invoiceTotal) - toPaisa(a.paid) - a.creditPaisa)
+}
+
+// ---- Sales-return lines for a delivery return ----
+
+export type ReturnSourceItem = OutcomeOrder['items'][number] & {
+  medicineId: string
+  bonusQty?: number | null
+  deductedQty?: number | null
+}
+
+export type SalesReturnLine = {
+  orderItemId: string
+  medicineId: string
+  quantity: number // units coming back (a fully returned line brings back its shipped bonus units too)
+  unitPrice: number // rupees, credit per unit (tax-inclusive), rounded to paisa
+  lineTotal: number // rupees, the credit for this line
+  reason: string | null
+}
+
+/**
+ * Builds the Sales Return lines for returned order lines, with the credit computed the way the invoice was built
+ * (see returnCreditPaisa: stored lineTotal + salesTaxAmount, pro rata, rounded in paisa).
+ * - A partial line returns only the paid units it names.
+ * - A fully returned line returns every unit that was shipped (deductedQty, else quantity + bonus).
+ * - When EVERY line is returned in full (the Returned outcome) the order-level discount is allocated across the lines
+ *   (by credit, largest remainder in paisa), so the total credit equals the invoice total exactly.
+ * Lines are returned in `returned` order; a line of 0 units is left out. Throws on a line not in the order.
+ */
+export function buildSalesReturnLines(
+  order: { items: ReturnSourceItem[]; discountAmount?: number },
+  returned: { orderItemId: string; quantity: number; reason?: string | null }[],
+): { lines: SalesReturnLine[]; totalPaisa: number } {
+  const rows = returned.map((r) => {
+    const item = order.items.find((i) => i.id === r.orderItemId)
+    if (!item) throw new Error('Returned line does not belong to this order')
+    const full = r.quantity >= item.quantity
+    const units = full ? (item.deductedQty ? item.deductedQty : totalUnits(item)) : r.quantity
+    return { item, full, units, credit: returnCreditPaisa(item, r.quantity), reason: r.reason?.trim() || null }
+  })
+
+  const fullIds = new Set(rows.filter((r) => r.full).map((r) => r.item.id))
+  const wholeOrder = order.items.length > 0 && order.items.every((i) => fullIds.has(i.id))
+  const discount = toPaisa(order.discountAmount ?? 0)
+  if (wholeOrder && discount > 0) {
+    const sum = rows.reduce((s, r) => s + r.credit, 0)
+    const cut = Math.min(discount, sum)
+    if (sum > 0 && cut > 0) {
+      const shares = rows.map((r, idx) => {
+        const exact = (r.credit * cut) / sum
+        return { idx, floor: Math.floor(exact), rem: exact - Math.floor(exact) }
+      })
+      let left = cut - shares.reduce((s, x) => s + x.floor, 0)
+      const byRem = [...shares].sort((a, b) => b.rem - a.rem || a.idx - b.idx)
+      for (const s of byRem) {
+        if (left <= 0) break
+        s.floor += 1
+        left -= 1
+      }
+      for (const s of shares) rows[s.idx].credit -= s.floor
+    }
+  }
+
+  const lines: SalesReturnLine[] = rows
+    .filter((r) => r.units > 0)
+    .map((r) => ({
+      orderItemId: r.item.id,
+      medicineId: r.item.medicineId,
+      quantity: r.units,
+      unitPrice: Math.round(r.credit / r.units) / 100,
+      lineTotal: r.credit / 100,
+      reason: r.reason,
+    }))
+  return { lines, totalPaisa: rows.filter((r) => r.units > 0).reduce((s, r) => s + r.credit, 0) }
+}
+
+/** A domain error from recording an outcome; the route turns it into `status` + `{ error, ...extra }`. */
+export class OutcomeError extends Error {
+  constructor(public status: number, message: string, public extra: Record<string, unknown> = {}) {
+    super(message)
   }
 }

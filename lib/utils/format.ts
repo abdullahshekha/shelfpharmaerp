@@ -56,6 +56,12 @@ export function getNextDeliveryDate(): Date {
   return delivery
 }
 
+export function generateSalesReturnNumber(): string {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' }))
+  const date = now.toISOString().slice(0, 10).replace(/-/g, '')
+  return `SP-SRET-${date}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`
+}
+
 export function generateChallanNumber(): string {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' }))
   const date = now.toISOString().slice(0, 10).replace(/-/g, '')

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { syncSafe } from '@/lib/accounting/sync'
 import { Prisma } from '@prisma/client'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { generateSalesReturnNumber } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,12 +16,6 @@ interface ReturnItemInput {
   unitPrice?: number
   restocked?: boolean
   reason?: string
-}
-
-function generateReturnNumber() {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' }))
-  const date = now.toISOString().slice(0, 10).replace(/-/g, '')
-  return `SP-SRET-${date}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`
 }
 
 // Cross-customer list of sales returns
@@ -114,7 +109,7 @@ export async function POST(req: NextRequest) {
   const created = await prisma.$transaction(async (tx) => {
     const ret = await tx.salesReturn.create({
       data: {
-        returnNumber: generateReturnNumber(),
+        returnNumber: generateSalesReturnNumber(),
         retailerId: body.retailerId,
         returnDate: body.returnDate ? new Date(body.returnDate) : new Date(),
         totalAmount,

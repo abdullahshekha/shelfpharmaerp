@@ -1,65 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { syncSafe } from '@/lib/accounting/sync'
-import { setOrderStatus } from '@/lib/orders/set-status'
-import { AccountingError } from '@/lib/accounting/core'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { reassignDelivery } from '@/lib/deliveries/assign'
+import { canManageAssignments } from '@/lib/deliveries/assign-rules'
+import { deliveryErrorResponse } from '@/lib/deliveries/http'
 
 export const dynamic = 'force-dynamic'
 
-// body: { action: 'start' | 'deliver' | 'fail' | 'reschedule', scheduledDate?, driverId?, notes? }
-// A plain { driverId } / { notes } body (no action) just updates those fields. Delivery status is never
-// written as DELIVERED directly: 'deliver' goes through setOrderStatus so stock/COGS stay consistent.
+// body: { notes?, driverId? }
+// - notes: ADMIN/MANAGER on any delivery, anyone else only on a delivery assigned to them.
+// - driverId: ADMIN/MANAGER only; hands an assigned delivery (no outcome yet) to someone else (reassignDelivery: no
+//   stock or ledger effect). Assigning / un-assigning is POST /api/deliveries/[id]/assign, outcomes are
+//   POST /api/deliveries/[id]/outcome. Delivery status is never written here.
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const body = await req.json()
-  const action: string | undefined = body.action
-
-  const existing = await prisma.delivery.findUnique({ where: { id }, include: { order: { select: { id: true, status: true } } } })
-  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
   const user = getUserFromRequest(req)
-  // A Salesman only works their own deliveries and cannot reassign drivers.
-  if (user.role === 'SALESMAN' && existing.driverId !== user.id) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user.id) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+  let body: { action?: unknown; status?: unknown; driverId?: unknown; notes?: unknown; scheduledDate?: unknown }
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+  if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  if (body.action !== undefined || body.status !== undefined || body.scheduledDate !== undefined) {
+    return NextResponse.json(
+      { error: 'Use POST /api/deliveries/[id]/assign to assign and POST /api/deliveries/[id]/outcome to record what happened' },
+      { status: 400 },
+    )
+  }
+  if (body.notes !== undefined && body.notes !== null && typeof body.notes !== 'string') {
+    return NextResponse.json({ error: 'notes must be text' }, { status: 400 })
   }
 
-  const fields = {
-    driverId: body.driverId !== undefined && user.role !== 'SALESMAN' ? (body.driverId || null) : undefined,
-    notes: body.notes !== undefined ? body.notes : undefined,
-  }
-  const warnings: string[] = []
+  const existing = await prisma.delivery.findUnique({ where: { id }, select: { id: true, driverId: true } })
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const manager = canManageAssignments(user.role)
+  if (!manager && existing.driverId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    if (action === 'deliver') {
-      const r = await setOrderStatus(existing.orderId, 'DELIVERED')
-      warnings.push(...r.warnings)
-      await prisma.delivery.update({ where: { id }, data: fields })
-    } else if (action === 'start') {
-      // Assignment (stock leaves, order -> OUT_FOR_DELIVERY) is wired in the next task (lib/deliveries/assign.ts).
-      return NextResponse.json({ error: 'Starting a delivery is now done by assigning it; this action is being replaced' }, { status: 400 })
-    } else if (action === 'fail') {
-      await prisma.delivery.update({ where: { id }, data: { ...fields, status: 'FAILED' } })
-    } else if (action === 'reschedule') {
-      const d = new Date(body.scheduledDate)
-      if (!body.scheduledDate || Number.isNaN(d.getTime())) {
-        return NextResponse.json({ error: 'scheduledDate is required to reschedule' }, { status: 400 })
+    if (body.driverId !== undefined) {
+      if (!manager) return NextResponse.json({ error: 'Only an admin or manager can change who a delivery is assigned to' }, { status: 403 })
+      if (typeof body.driverId !== 'string' || !body.driverId) {
+        return NextResponse.json({ error: 'To take a delivery back use POST /api/deliveries/[id]/assign { unassign: true }' }, { status: 400 })
       }
-      await prisma.delivery.update({ where: { id }, data: { ...fields, status: 'RESCHEDULED', scheduledDate: d } })
-    } else if (action === undefined) {
-      if (body.status === 'DELIVERED') {
-        return NextResponse.json({ error: "Use action 'deliver' to mark a delivery delivered" }, { status: 400 })
-      }
-      await prisma.delivery.update({ where: { id }, data: { ...fields, status: body.status ?? undefined } })
-    } else {
-      return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
+      if (body.driverId !== existing.driverId) await reassignDelivery(id, body.driverId, user)
     }
-  } catch (err) {
-    if (err instanceof AccountingError) return NextResponse.json({ error: err.message }, { status: err.status })
-    throw err
+    if (body.notes !== undefined) {
+      const notes = typeof body.notes === 'string' ? body.notes.trim() || null : null
+      await prisma.delivery.update({ where: { id }, data: { notes } })
+    }
+  } catch (e) {
+    return deliveryErrorResponse(e, '[deliveries/[id]]')
   }
 
-  await syncSafe('DELIVERY_COGS', existing.orderId)
   const delivery = await prisma.delivery.findUnique({ where: { id } })
-  return NextResponse.json({ data: delivery, warnings })
+  return NextResponse.json({ data: delivery })
 }
