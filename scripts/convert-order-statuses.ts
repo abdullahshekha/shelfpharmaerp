@@ -43,7 +43,12 @@ async function main() {
   for (const u of plan.updates) {
     await prisma.$transaction(async (tx) => {
       await tx.order.updateMany({ where: { id: u.id, status: u.from }, data: { status: u.to } })
-      if (u.deliveryStatus) await tx.delivery.updateMany({ where: { orderId: u.id }, data: { status: u.deliveryStatus, assignedAt: null } })
+      if (u.deliveryStatus) {
+        await tx.delivery.updateMany({
+          where: { orderId: u.id },
+          data: { status: u.deliveryStatus, ...(u.clearDriver ? { driverId: null, assignedAt: null } : {}) },
+        })
+      }
     })
   }
   for (const id of plan.deletes) {

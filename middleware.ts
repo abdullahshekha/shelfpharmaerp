@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { actorFromStaffSession, buildForwardHeaders, type AuditActor } from '@/lib/audit/actor'
+import { isApiAllowedForRole } from '@/lib/utils/role-api-allowlist'
 
 const COOKIE = 'sp_session'
 // /api/portal/* is exempt from the staff-cookie check: every portal route authenticates the separate customer
@@ -83,6 +84,10 @@ export async function middleware(req: NextRequest) {
   const session = token ? await verifyStaffSession(token) : null
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  // Role allowlist (only DRIVER is restricted: My Deliveries and what it needs, see lib/utils/role-api-allowlist.ts).
+  if (!isApiAllowedForRole(session.role, req.method, pathname)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   return forward(req, actorFromStaffSession(session))

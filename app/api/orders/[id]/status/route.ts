@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { setOrderStatus } from '@/lib/orders/set-status'
-import { canSetViaStatusRoute } from '@/lib/orders/status'
+import { canSetViaStatusRoute, statusRouteRoleError } from '@/lib/orders/status'
 import { AccountingError } from '@/lib/accounting/core'
 import { getUserFromRequest } from '@/lib/utils/auth'
 
@@ -15,11 +15,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (typeof status !== 'string' || !canSetViaStatusRoute(status)) {
     return NextResponse.json({ error: 'Status can only be set to INVOICED or CANCELLED here; use the delivery actions for other moves' }, { status: 400 })
   }
+  // INVOICED: ADMIN/MANAGER. CANCELLED: ADMIN only (restocks goods that may still be in a van; a MANAGER goes
+  // through DELETE /api/orders/[id], which creates a DeleteApproval).
+  const user = getUserFromRequest(req)
+  const roleErr = statusRouteRoleError(status, user.id ? user.role : null)
+  if (roleErr) return NextResponse.json({ error: roleErr.message }, { status: roleErr.status })
   if (status === 'INVOICED') {
-    const user = getUserFromRequest(req)
-    if (user.role !== 'ADMIN' && user.role !== 'MANAGER') {
-      return NextResponse.json({ error: 'Only an admin or manager can confirm an order' }, { status: 403 })
-    }
     const current = await prisma.order.findUnique({ where: { id }, select: { status: true } })
     if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (current.status !== 'RECEIVED') {

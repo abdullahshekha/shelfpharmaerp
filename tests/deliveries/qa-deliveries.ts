@@ -16,7 +16,7 @@
 // Caveat: a real "Rebuild ledger" run while the QA invoices/payments exist would post them (they are dated today,
 // after go-live); cleanup re-syncs any such source after deleting it so the entries are removed.
 import { config as loadEnv } from 'dotenv'
-import { createHmac } from 'crypto'
+import { createHmac, randomBytes } from 'crypto'
 import { spawnSync } from 'child_process'
 import { prisma, check, BASE } from '../portal/qa-helpers'
 import { hashPassword } from '../../lib/utils/auth'
@@ -29,7 +29,7 @@ const START = new Date(Date.now() - 5000)
 const CUST = 'QA DLV Customer'
 const TAG = 'QA-DLV'
 const EMP_PREFIX = 'QA DLV '
-const PASSWORD = 'qa-dlv-password-1'
+const PASSWORD = `qa-dlv-${randomBytes(12).toString('hex')}` // random per run: QA logins are live for minutes
 const RUN = Date.now().toString(36)
 let started = false
 
@@ -202,6 +202,11 @@ async function main() {
   check('short stock changed nothing (status INVOICED, stock, deductedQty, driver)',
     r2?.status === 'INVOICED' && (await stock(m2.id)).total === m2Before.total && r2.items[0].deductedQty === null && !r2.delivery?.driverId && !r2.delivery?.assignedAt)
 
+  // ---- 2b. the status route's CANCELLED is ADMIN only ----
+  const cancelNonAdmin = await Promise.all([MANAGER, A.cookie, TL.cookie, SR.cookie].map((c) => call('PUT', `/api/orders/${O2.id}/status`, c, { status: 'CANCELLED' })))
+  check('status route CANCELLED by MANAGER / DRIVER / TEAM_LEAD / SALES_REP -> 403, order still INVOICED',
+    cancelNonAdmin.every((r) => r.status === 403) && (await orderRow(O2.id))?.status === 'INVOICED', cancelNonAdmin.map((r) => r.status).join(','))
+
   // ---- 3. bulk assign: one short, the rest go through; unassign restocks ----
   const O3 = await mkOrder(cust.id, [{ medicineId: m2.id, quantity: 5, unitPrice: 50 }])
   const bulkBad = await call('PUT', '/api/deliveries/bulk', A.cookie, { ids: [O3.deliveryId], driverId: A.id })
@@ -248,6 +253,16 @@ async function main() {
   const noPic = await outcome(O1.deliveryId, A.cookie, { outcome: 'PAID_FULL', method: 'CASH' })
   check('Paid in Full without a picture -> 400', noPic.status === 400, `${noPic.status} ${noPic.json?.error}`)
 
+  // DRIVER server-side allowlist (middleware): only My Deliveries and what it needs
+  const drvInv = await call('GET', '/api/invoices', A.cookie)
+  const drvRet = await call('GET', '/api/retailers', A.cookie)
+  const drvNotif = await call('GET', '/api/notifications', A.cookie)
+  const drvOwn = await call('GET', '/api/deliveries', A.cookie)
+  check('DRIVER allowlist: GET /api/invoices and /api/retailers 403; own GET /api/deliveries and /api/notifications 200',
+    drvInv.status === 403 && drvRet.status === 403 && drvNotif.status === 200 && drvOwn.status === 200, `${drvInv.status} ${drvRet.status} ${drvNotif.status} ${drvOwn.status}`)
+  const tlInv = await call('GET', '/api/invoices', TL.cookie)
+  check('TEAM_LEAD is not affected by the DRIVER allowlist (GET /api/invoices not 403)', tlInv.status !== 403, `${tlInv.status}`)
+
   // ---- 5. Paid in Full, cash: collection waits for acknowledgement ----
   const out0 = await outstanding()
   const pf = await outcome(O1.deliveryId, A.cookie, { outcome: 'PAID_FULL', method: 'CASH', pictureUrl: PIC })
@@ -291,8 +306,9 @@ async function main() {
     check('bank collection without a bank account -> 400', noBank.status === 400, `${noBank.status}`)
     const pb = await outcome(O3.deliveryId, A.cookie, { outcome: 'PAID_FULL', method: 'BANK', bankAccountId: bank.id, pictureUrl: PIC })
     const col3 = await prisma.deliveryCollection.findFirst({ where: { orderId: O3.id } })
-    check('Paid in Full by bank -> DELIVERED, BANK collection of 250 with the bank account, no payment',
-      pb.status === 200 && (await orderRow(O3.id))?.status === 'DELIVERED' && col3?.method === 'BANK' && Number(col3.amount) === 250 && col3.bankAccountId === bank.id && !col3.paymentId,
+    const r6a = await orderRow(O3.id)
+    check('Paid in Full by bank -> DELIVERED, BANK collection of 250 with the bank account, no payment, invoice UNPAID until acknowledged',
+      pb.status === 200 && r6a?.status === 'DELIVERED' && r6a.invoice?.status === 'UNPAID' && r6a.invoice?.payments.length === 0 && col3?.method === 'BANK' && Number(col3.amount) === 250 && col3.bankAccountId === bank.id && !col3.paymentId,
       `${pb.status} ${pb.json?.error ?? ''}`)
     const kb = await call('POST', `/api/delivery-acknowledgements/collections/${col3!.id}`, MANAGER)
     const r6 = await orderRow(O3.id)
@@ -300,7 +316,7 @@ async function main() {
       kb.status === 200 && r6?.invoice?.payments.length === 1 && r6.invoice.payments[0].method === 'BANK_TRANSFER' && r6.invoice.payments[0].bankAccountId === bank.id && r6.invoice.status === 'PAID',
       `${kb.status} ${kb.json?.error ?? ''}`)
   } else {
-    check('SKIPPED bank collection: no active bank account exists (not created by QA)', true)
+    console.log('SKIP bank collection: no active bank account exists (QA never creates one)')
     await outcome(O3.deliveryId, A.cookie, { outcome: 'PAY_LATER' })
   }
 
@@ -426,12 +442,51 @@ async function main() {
   check('cancel (DELETE) of an OUT_FOR_DELIVERY order -> CANCELLED, stock restocked (+1)',
     c9.status === 200 && r11b?.status === 'CANCELLED' && (await stock(m1.id)).total === m1O9 + 1 && r11b.items[0].deductedQty === null, `${c9.status} ${c9.json?.error ?? ''}`)
 
+  // ---- 11b. admin edit is refused once an outcome / collection / delivery return exists ----
+  // Bodies repeat the stored values; the guard refuses before anything is written or synced.
+  const editBody = async (orderId: string) => ({
+    items: (await orderRow(orderId))!.items.map((i) => ({
+      id: i.id, quantity: i.quantity, unitPrice: Number(i.unitPrice), offerPercent: Number(i.offerPercent),
+      salesTax: Number(i.salesTax), bonusQty: i.bonusQty, mrp: i.mrp === null ? null : Number(i.mrp),
+    })),
+  })
+  const eCol = await call('PUT', `/api/orders/${O1.id}`, ADMIN, await editBody(O1.id))
+  const eRet = await call('PUT', `/api/orders/${O6.id}`, ADMIN, await editBody(O6.id))
+  const eOut = await call('PUT', `/api/orders/${O7.id}`, ADMIN, await editBody(O7.id))
+  check('admin edit refused 409: order with a collection (O1), a delivery return (O6), a recorded outcome (O7 Pay Later)',
+    eCol.status === 409 && /collection/i.test(eCol.json?.error ?? '') && eRet.status === 409 && /return/i.test(eRet.json?.error ?? '') &&
+    eOut.status === 409 && /outcome/i.test(eOut.json?.error ?? ''), `${eCol.status} ${eCol.json?.error} | ${eRet.status} ${eRet.json?.error} | ${eOut.status} ${eOut.json?.error}`)
+  await assertNoLedger('after the refused admin edits')
+
+  // ---- 11c. an OUT_FOR_DELIVERY order whose stock never left (converted DISPATCHED) cannot get an outcome ----
+  const U = await prisma.order.create({
+    data: {
+      retailerId: cust.id, orderNumber: `${TAG}-${RUN}-UNDEDUCTED`, status: 'OUT_FOR_DELIVERY', totalAmount: 100,
+      items: { create: [{ medicineId: m1.id, quantity: 1, unitPrice: 100, lineTotal: 100 }] }, // deductedQty null
+    },
+  })
+  ids.orders.push(U.id)
+  await prisma.invoice.create({ data: { invoiceNumber: `${TAG}-${RUN}-UINV`, orderId: U.id, retailerId: cust.id, subtotal: 100, totalAmount: 100 } })
+  const UD = await prisma.delivery.create({ data: { orderId: U.id, driverId: A.id, scheduledDate: new Date(), status: 'OUT_FOR_DELIVERY' } })
+  const m1U = (await stock(m1.id)).total
+  const uo = await outcome(UD.id, A.cookie, { outcome: 'PAY_LATER' })
+  const uoAdmin = await outcome(UD.id, ADMIN, { outcome: 'PAY_LATER' })
+  check('outcome on an OUT_FOR_DELIVERY order with null deductedQty -> 409 (assignee and admin), order unchanged',
+    uo.status === 409 && /un-assign and assign it again/.test(uo.json?.error ?? '') && uoAdmin.status === 409 && (await orderRow(U.id))?.status === 'OUT_FOR_DELIVERY',
+    `${uo.status} ${uo.json?.error} | ${uoAdmin.status}`)
+  const uUn = await call('POST', `/api/deliveries/${UD.id}/assign`, ADMIN, { unassign: true })
+  check('recovery: un-assign restocks nothing (stock never left)', uUn.status === 200 && (await stock(m1.id)).total === m1U && (await orderRow(U.id))?.status === 'INVOICED', `${uUn.status} ${uUn.json?.error ?? ''}`)
+  const uAs = await assign(UD.id, A.id)
+  check('recovery: assign again deducts the stock (-1, deductedQty 1)', uAs.status === 200 && (await stock(m1.id)).total === m1U - 1 && (await orderRow(U.id))?.items[0].deductedQty === 1, `${uAs.status}`)
+  const uPl = await outcome(UD.id, A.cookie, { outcome: 'PAY_LATER' })
+  check('recovery: the outcome is then accepted (Pay Later -> DELIVERED)', uPl.status === 200 && (await orderRow(U.id))?.status === 'DELIVERED', `${uPl.status} ${uPl.json?.error ?? ''}`)
+
   // ---- 12. confirm vs cancel race ----
   for (let i = 0; i < 3; i++) {
     const R = await mkOrder(cust.id, [{ medicineId: m2.id, quantity: 1, unitPrice: 50 }], false)
     const [ci, cc] = await Promise.all([
       call('PUT', `/api/orders/${R.id}/status`, ADMIN, { status: 'INVOICED' }),
-      call('PUT', `/api/orders/${R.id}/status`, MANAGER, { status: 'CANCELLED' }),
+      call('PUT', `/api/orders/${R.id}/status`, ADMIN, { status: 'CANCELLED' }),
     ])
     const row = await orderRow(R.id)
     const inv = !!row?.invoice
@@ -470,7 +525,11 @@ async function main() {
   check('conversion plan: DRAFT deleted, DISPATCHED (never deducted) flagged for manual review',
     plan.deletes.length === 1 && plan.deletes[0] === fx.DRAFT && plan.review.length === 1 && plan.review[0].id === fx.DISPATCHED, JSON.stringify({ d: plan.deletes.length, r: plan.review }))
   console.log('  conversion plan on QA fixtures:', JSON.stringify({ counts: plan.counts, updates: plan.updates.map((u) => `${u.from}->${u.to}`), deletes: plan.deletes.length, review: plan.review.length }))
-  const run = (args: string[]) => spawnSync('npx', ['tsx', 'scripts/convert-order-statuses.ts', ...args], { shell: true, encoding: 'utf8', timeout: 120000 })
+  // Invalid DATABASE_URL/DIRECT_URL: even if the refusal were broken, the script could not reach the real database.
+  const badDb = 'postgresql://qa:qa@127.0.0.1:1/qa_no_such_db'
+  const run = (args: string[]) => spawnSync('npx', ['tsx', 'scripts/convert-order-statuses.ts', ...args], {
+    shell: true, encoding: 'utf8', timeout: 120000, env: { ...process.env, DATABASE_URL: badDb, DIRECT_URL: badDb },
+  })
   const x1 = run(['--apply'])
   const x2 = run(['--apply', '--backup'])
   check('convert script: --apply without --backup refuses (exit 1, "Refusing"), also with --backup but no path',

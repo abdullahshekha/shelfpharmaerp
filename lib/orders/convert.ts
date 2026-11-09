@@ -8,7 +8,8 @@ export interface ConvertRow {
   deliveryStatus: string | null
   items: { deductedQty: number | null }[]
 }
-export interface ConvertUpdate { id: string; orderNumber: string; from: string; to: OrderStatus; deliveryStatus: 'SCHEDULED' | null }
+/** clearDriver: the delivery goes back to Ready to Dispatch, so driverId and assignedAt are cleared together. */
+export interface ConvertUpdate { id: string; orderNumber: string; from: string; to: OrderStatus; deliveryStatus: 'SCHEDULED' | null; clearDriver: boolean }
 export interface ConvertPlan {
   updates: ConvertUpdate[]
   deletes: string[]
@@ -26,7 +27,7 @@ export function planConversion(rows: ConvertRow[]): ConvertPlan {
     const to = mapOldStatus(r.status)
     if (to === 'DELETE') { plan.deletes.push(r.id); continue }
     if (to === r.status) continue
-    plan.updates.push({ id: r.id, orderNumber: r.orderNumber, from: r.status, to, deliveryStatus: to === 'INVOICED' ? 'SCHEDULED' : null })
+    plan.updates.push({ id: r.id, orderNumber: r.orderNumber, from: r.status, to, deliveryStatus: to === 'INVOICED' ? 'SCHEDULED' : null, clearDriver: to === 'INVOICED' })
     if (to === 'OUT_FOR_DELIVERY' && r.items.some((i) => i.deductedQty === null)) {
       plan.review.push({ id: r.id, orderNumber: r.orderNumber, reason: 'was DISPATCHED but stock was never deducted (the old code deducted at DELIVERED); deduct or revert manually' })
     }

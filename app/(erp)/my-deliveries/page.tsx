@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { boardColumn } from '@/lib/orders/status'
 import { cardActions } from '@/lib/deliveries/ui-helpers'
+import { hasUndeductedLines } from '@/lib/deliveries/outcome-rules'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 import { Truck, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -64,7 +65,7 @@ export default function MyDeliveriesPage() {
         <div className="space-y-3">
           {mine.map(({ d, col }) => (
             <DeliveryCard key={d.id} delivery={d} column={col}
-              actions={cardActions(role, userId, { driverId: d.driverId }, col)}
+              actions={cardActions(role, userId, { driverId: d.driverId, stockOut: !hasUndeductedLines(d.order.items) }, col)}
               onAction={a => { if (a === 'outcome') setOutcomeFor(d) }} />
           ))}
         </div>

@@ -1,4 +1,5 @@
 // Pure acknowledgement rules (no Prisma imports), used by lib/deliveries/acknowledge.ts and lib/orders/lifecycle.ts.
+import { hasCurrentOutcome } from './assign-rules'
 
 export class AckError extends Error {
   constructor(public status: number, message: string) {
@@ -110,4 +111,20 @@ export function orderCollectionBlock(collections: { acknowledgedAt: Date | null 
   if (collections.length === 0) return null
   if (action === 'cancel') return COLLECTION_CANCEL_MESSAGE
   return acknowledgedCollectionDeleteBlock(collections) ?? COLLECTION_DELETE_MESSAGE
+}
+
+export const EDIT_OUTCOME_MESSAGE = 'This delivery already has a recorded outcome; the order cannot be edited (use a Sales Return)'
+export const EDIT_COLLECTION_MESSAGE = 'This order has a delivery collection; it cannot be edited'
+export const EDIT_RETURN_MESSAGE = 'This order has a delivery return; it cannot be edited'
+
+/**
+ * Admin quantity/price edit guard: once an outcome has been recorded (any but an ON_HOLD left from an earlier trip),
+ * or a delivery collection or delivery-linked sales return exists, amounts and stock have been settled against the
+ * order and an edit would silently diverge from them. Returns the 409 message, or null when the edit may go ahead.
+ */
+export function orderEditBlock(o: { outcome: string | null | undefined; collectionCount: number; deliveryReturnCount: number }): string | null {
+  if (o.deliveryReturnCount > 0) return EDIT_RETURN_MESSAGE
+  if (o.collectionCount > 0) return EDIT_COLLECTION_MESSAGE
+  if (hasCurrentOutcome(o.outcome)) return EDIT_OUTCOME_MESSAGE
+  return null
 }

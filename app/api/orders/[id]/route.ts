@@ -7,6 +7,7 @@ import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty, restockOnDec
 import { AccountingError } from '@/lib/accounting/core'
 import { syncAllSafe } from '@/lib/accounting/sync'
 import { canViewOrder } from '@/lib/orders/access'
+import { orderEditBlock } from '@/lib/deliveries/acknowledge-rules'
 import { cancelOrder, hardDeleteOrder, isStockOutStatus } from '@/lib/orders/lifecycle'
 
 export const dynamic = 'force-dynamic'
@@ -98,6 +99,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (isStockOutStatus(liveStatus) !== isStockOutStatus(order.status)) {
       throw new AccountingError(409, 'The order status changed while you were editing — reload and try again')
     }
+    // Read under the row lock (outcomes, collections and delivery returns are all written under the same lock).
+    const delivery = await tx.delivery.findUnique({ where: { orderId: id }, select: { outcome: true } })
+    const block = orderEditBlock({
+      outcome: delivery?.outcome,
+      collectionCount: await tx.deliveryCollection.count({ where: { orderId: id } }),
+      deliveryReturnCount: await tx.salesReturn.count({ where: { orderId: id } }),
+    })
+    if (block) throw new AccountingError(409, block)
     // Re-read the items inside the transaction (quantity / deductedQty / unitCost must be current for the stock delta).
     const freshItems = await tx.orderItem.findMany({ where: { orderId: id } })
     const freshById = new Map(freshItems.map((i) => [i.id, i]))

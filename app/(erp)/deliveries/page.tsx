@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { formatPKR, formatDate } from '@/lib/utils/format'
 import { boardColumn, type BoardColumn } from '@/lib/orders/status'
 import { cardActions, type CardAction } from '@/lib/deliveries/ui-helpers'
+import { hasUndeductedLines } from '@/lib/deliveries/outcome-rules'
 import { ASSIGNEE_ROLES, canManageAssignments } from '@/lib/deliveries/assign-rules'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 import { FileDown, Printer, Truck } from 'lucide-react'
@@ -253,7 +254,7 @@ export default function DeliveriesPage() {
               {placed[c.key].length === 0
                 ? <p className="text-xs text-slate-400 py-4 text-center">Nothing here</p>
                 : placed[c.key].map(d => {
-                    const actions = cardActions(role, userId, { driverId: d.driverId }, c.key)
+                    const actions = cardActions(role, userId, { driverId: d.driverId, stockOut: !hasUndeductedLines(d.order.items) }, c.key)
                     return (
                       <DeliveryCard key={d.id} delivery={d} column={c.key} actions={actions} busy={busyId === d.id}
                         selectable={manager && actions.includes('assign')} selected={selected.has(d.id)}

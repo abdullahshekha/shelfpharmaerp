@@ -86,13 +86,30 @@ export function canSetViaStatusRoute(to: string): boolean {
   return to === 'INVOICED' || to === 'CANCELLED'
 }
 
+/**
+ * Who may use the generic status route: INVOICED ("Confirm") is ADMIN/MANAGER, CANCELLED is ADMIN only (a manager
+ * cancels through the delete-approval flow). Returns the 403 to send, or null when allowed.
+ */
+export function statusRouteRoleError(to: string, role: string | null | undefined): { status: 403; message: string } | null {
+  if (to === 'INVOICED') {
+    return role === 'ADMIN' || role === 'MANAGER' ? null : { status: 403, message: 'Only an admin or manager can confirm an order' }
+  }
+  if (to === 'CANCELLED') {
+    return role === 'ADMIN' ? null : { status: 403, message: 'Only an admin can cancel an order here; a manager requests it through Delete' }
+  }
+  return { status: 403, message: 'Forbidden' }
+}
+
 /** Whether an order of this status counts as a sale in counts/totals/reports. */
 export function countsAsSale(status: string): boolean {
   return status !== 'CANCELLED'
 }
 
-/** Orders whose lines are still owed to the customer (purchase demand). */
-export const PENDING_DEMAND_STATUSES: readonly OrderStatus[] = ['RECEIVED', 'INVOICED', 'OUT_FOR_DELIVERY', 'ON_HOLD']
+/**
+ * Orders whose lines still need stock from the warehouse (purchase demand). OUT_FOR_DELIVERY / ON_HOLD orders are not
+ * demand: their stock already left at assignment.
+ */
+export const PENDING_DEMAND_STATUSES: readonly OrderStatus[] = ['RECEIVED', 'INVOICED']
 
 /** Badge classes shared by every page that shows an order status. */
 export const ORDER_STATUS_COLOR: Record<OrderStatus, string> = {

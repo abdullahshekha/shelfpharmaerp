@@ -25,6 +25,8 @@ import {
   buildSalesReturnLines,
   canRecordOutcome,
   chequeAmountMismatch,
+  hasUndeductedLines,
+  UNDEDUCTED_OUTCOME_MESSAGE,
   outcomeBodyError,
   outcomeOrderStatus,
   validateOutcomeInput,
@@ -97,6 +99,9 @@ export async function recordOutcome(deliveryId: string, actor: Actor, input: Rec
     })
     if (!order) throw new OutcomeError(404, 'Order not found')
     if (!order.invoice) throw new OutcomeError(409, 'This order has no invoice')
+    // Read under the order lock: a line whose stock never left (null deductedQty, e.g. a converted DISPATCHED order)
+    // must go through un-assign -> assign first so stock leaves and COGS posts.
+    if (hasUndeductedLines(order.items)) throw new OutcomeError(409, UNDEDUCTED_OUTCOME_MESSAGE)
     const invoice = order.invoice
 
     const items: ReturnSourceItem[] = order.items.map((i) => ({

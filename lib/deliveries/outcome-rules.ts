@@ -304,3 +304,13 @@ export function outcomeBodyError(body: unknown): string | null {
   }
   return null
 }
+
+export const UNDEDUCTED_OUTCOME_MESSAGE = 'Stock was never taken out for this delivery; un-assign and assign it again'
+
+/**
+ * True when a line that has units to ship has no recorded deduction (null deductedQty): the stock never left, e.g. an
+ * order converted from the old DISPATCHED status. Recording an outcome would then deliver goods that never left stock.
+ */
+export function hasUndeductedLines(items: { quantity: number; bonusQty?: number | null; deductedQty: number | null }[]): boolean {
+  return items.some((i) => totalUnits(i) > 0 && i.deductedQty === null)
+}

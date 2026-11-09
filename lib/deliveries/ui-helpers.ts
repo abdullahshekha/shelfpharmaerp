@@ -9,6 +9,18 @@ export type CardAction = 'assign' | 'reassign' | 'unassign' | 'outcome'
 export function cardActions(
   role: string,
   userId: string,
+  // stockOut false = a line never had its stock deducted (converted DISPATCHED order): the server refuses an outcome
+  // until it is un-assigned and assigned again, so the outcome action is not offered.
+  delivery: { driverId: string | null; stockOut?: boolean },
+  column: BoardColumn,
+): CardAction[] {
+  const all = baseCardActions(role, userId, delivery, column)
+  return delivery.stockOut === false ? all.filter((a) => a !== 'outcome') : all
+}
+
+function baseCardActions(
+  role: string,
+  userId: string,
   delivery: { driverId: string | null },
   column: BoardColumn,
 ): CardAction[] {

@@ -19,7 +19,8 @@ test('canSetViaStatusRoute only INVOICED and CANCELLED', () => {
 
 test('countsAsSale: everything except CANCELLED; demand statuses', () => {
   for (const s of ORDER_STATUSES) assert.equal(countsAsSale(s), s !== 'CANCELLED')
-  assert.deepEqual([...PENDING_DEMAND_STATUSES], ['RECEIVED', 'INVOICED', 'OUT_FOR_DELIVERY', 'ON_HOLD'])
+  // OUT_FOR_DELIVERY / ON_HOLD stock has already left the warehouse: no longer demand
+  assert.deepEqual([...PENDING_DEMAND_STATUSES], ['RECEIVED', 'INVOICED'])
 })
 
 test('planConversion maps statuses, deletes drafts, flags undeducted OUT_FOR_DELIVERY', () => {
@@ -43,6 +44,9 @@ test('planConversion maps statuses, deletes drafts, flags undeducted OUT_FOR_DEL
   // Delivery rows of INVOICED orders go back to SCHEDULED; the others stay as they are
   assert.equal(p.updates.find((u) => u.id === 'c')!.deliveryStatus, 'SCHEDULED')
   assert.equal(p.updates.find((u) => u.id === 'e')!.deliveryStatus, null)
+  // INVOICED orders are no longer assigned: driver and assignedAt are cleared together
+  for (const id of ['b', 'c']) assert.equal(p.updates.find((u) => u.id === id)!.clearDriver, true, id)
+  for (const id of ['a', 'e', 'f']) assert.equal(p.updates.find((u) => u.id === id)!.clearDriver, false, id)
 })
 
 test('confirmClaimError: only a locked RECEIVED order may be confirmed', () => {
