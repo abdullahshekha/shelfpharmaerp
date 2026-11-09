@@ -46,8 +46,8 @@ export type BoardColumn = 'READY' | 'ASSIGNED' | 'DELIVERED' | 'RETURNED' | 'ON_
 
 /**
  * Which Deliveries-board column an order belongs in, or null if it is not on the board.
- * INVOICED -> READY, OUT_FOR_DELIVERY -> ASSIGNED, DELIVERED, RETURNED.
- * ON_HOLD shows only on its scheduled (held-until) day or later, compared as Karachi calendar days.
+ * INVOICED (and ON_HOLD whose date has arrived) -> READY, OUT_FOR_DELIVERY -> ASSIGNED, DELIVERED, RETURNED.
+ * ON_HOLD with a future held-until date -> ON_HOLD column. Days compare as Karachi calendar days.
  */
 export function boardColumn(
   order: { status: string },
@@ -60,7 +60,8 @@ export function boardColumn(
     case 'DELIVERED': return 'DELIVERED'
     case 'RETURNED': return 'RETURNED'
     case 'ON_HOLD':
-      return karachiDayKey(delivery.scheduledDate) <= karachiDayKey(now) ? 'ON_HOLD' : null
+      // Held-until day has arrived (Karachi) -> back in Ready to Dispatch; still in the future -> On Hold column.
+      return karachiDayKey(delivery.scheduledDate) <= karachiDayKey(now) ? 'READY' : 'ON_HOLD'
     default: return null
   }
 }

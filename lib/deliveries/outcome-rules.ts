@@ -4,8 +4,8 @@ import { toPaisa } from '@/lib/accounting/money'
 
 export const OUTCOMES = ['PAID_FULL', 'PAID_WITH_RETURN', 'RETURNED', 'ON_HOLD', 'PAY_LATER'] as const
 export type Outcome = (typeof OUTCOMES)[number]
-export const RETURN_REASONS = ['Shop closed / refused', 'Wrong item', 'Damaged', 'Expired / short expiry', 'Price dispute', 'Other'] as const
-export const HOLD_REASONS = ['Shop closed', 'Customer asked to come later', 'Address issue', 'Payment not ready', 'Other'] as const
+export const RETURN_REASONS = ['no cash', 'not required', 'wrong order', 'late'] as const
+export const HOLD_REASONS = ['no cash', 'shop closed'] as const
 export const PAYMENT_METHODS = ['CASH', 'BANK', 'CHEQUE'] as const
 
 export type OutcomeInput = {
@@ -21,8 +21,9 @@ export type OutcomeInput = {
 }
 
 export type OutcomeOrder = {
-  items: { id: string; quantity: number; unitPrice?: number; offerPercent?: number; salesTax?: number }[]
-  totalAmount?: number // informational only; the amount due is recomputed from the lines
+  // Stored OrderItem values (the invoice is built from these, see lib/orders/set-status.ts)
+  items: { id: string; quantity: number; lineTotal: number; salesTaxAmount: number }[]
+  discountAmount?: number // order-level discount
 }
 
 export type OutcomeResult =
@@ -30,26 +31,26 @@ export type OutcomeResult =
   | { ok: false; error: string }
 
 /**
- * Invoice total in paisa, same arithmetic as the sales invoice:
- *   line = round(qty x unitPrice x (1 - offer/100)); tax = round(salesTax x qty); total = sum of both over all lines.
+ * Invoice total in paisa, exactly as the invoice is built:
+ *   sum(stored lineTotal) - order discountAmount + sum(stored salesTaxAmount), each converted to paisa.
  */
-export function invoiceTotalPaisa(items: OutcomeOrder['items']): number {
+export function invoiceTotalPaisa(order: OutcomeOrder): number {
   let t = 0
-  for (const i of items) {
-    t += toPaisa(i.quantity * (i.unitPrice ?? 0) * (1 - (i.offerPercent ?? 0) / 100))
-    t += toPaisa((i.salesTax ?? 0) * i.quantity)
-  }
-  return t
+  for (const i of order.items) t += toPaisa(i.lineTotal) + toPaisa(i.salesTaxAmount)
+  return t - toPaisa(order.discountAmount ?? 0)
 }
 
 /**
- * Credit for returned units, in paisa:
- *   perUnit = round(unitPrice x (1 - offer/100)) + round(salesTax);  credit = perUnit x returnedQty.
- * Amount due for Paid-with-Return = invoiceTotalPaisa - sum of credits (never below 0).
+ * Credit for returned units of one line, in paisa:
+ *   round(lineTotalPaisa x returnedQty / qty) + round(salesTaxAmountPaisa x returnedQty / qty).
+ * Returning the full quantity credits the stored lineTotal and salesTaxAmount exactly (no rounding drift).
+ * The order-level discount is not credited back on returns.
  */
 export function returnCreditPaisa(item: OutcomeOrder['items'][number], qty: number): number {
-  const perUnit = toPaisa((item.unitPrice ?? 0) * (1 - (item.offerPercent ?? 0) / 100)) + toPaisa(item.salesTax ?? 0)
-  return perUnit * qty
+  const lt = toPaisa(item.lineTotal)
+  const st = toPaisa(item.salesTaxAmount)
+  if (qty >= item.quantity) return lt + st
+  return Math.round((lt * qty) / item.quantity) + Math.round((st * qty) / item.quantity)
 }
 
 const fail = (error: string): OutcomeResult => ({ ok: false, error })
@@ -67,7 +68,7 @@ function validatePayment(i: OutcomeInput): string | null {
 }
 
 export function validateOutcomeInput(input: OutcomeInput, order: OutcomeOrder, now: Date): OutcomeResult {
-  const total = invoiceTotalPaisa(order.items)
+  const total = Math.max(0, invoiceTotalPaisa(order))
   switch (input.outcome) {
     case 'PAID_FULL': {
       const e = validatePayment(input)
@@ -86,6 +87,7 @@ export function validateOutcomeInput(input: OutcomeInput, order: OutcomeOrder, n
         seen.add(l.orderItemId)
         if (!Number.isInteger(l.quantity) || l.quantity <= 0) return fail('Returned quantity must be a positive whole number')
         if (l.quantity > item.quantity) return fail('Returned quantity cannot exceed the ordered quantity')
+        if (l.reason !== undefined && l.reason !== '' && !(RETURN_REASONS as readonly string[]).includes(l.reason)) return fail('Invalid return reason on a returned line')
         if (l.quantity < item.quantity) allReturned = false
         credit += returnCreditPaisa(item, l.quantity)
       }

@@ -42,10 +42,10 @@ test('boardColumn', () => {
   assert.equal(boardColumn({ status: 'CANCELLED' }, d, now), null)
 })
 
-test('ON_HOLD appears only from its Karachi day', () => {
+test('ON_HOLD: arrived date -> READY, future date -> ON_HOLD (Karachi days)', () => {
   // 20:00Z on Nov 9 is 01:00 Nov 10 in Karachi
   const now = new Date('2026-11-09T20:00:00Z')
-  assert.equal(boardColumn({ status: 'ON_HOLD' }, { scheduledDate: new Date('2026-11-10T00:00:00+05:00') }, now), 'ON_HOLD')
-  assert.equal(boardColumn({ status: 'ON_HOLD' }, { scheduledDate: new Date('2026-11-11T00:00:00+05:00') }, now), null)
-  assert.equal(boardColumn({ status: 'ON_HOLD' }, { scheduledDate: new Date('2026-11-09T00:00:00+05:00') }, now), 'ON_HOLD')
+  assert.equal(boardColumn({ status: 'ON_HOLD' }, { scheduledDate: new Date('2026-11-10T00:00:00+05:00') }, now), 'READY')
+  assert.equal(boardColumn({ status: 'ON_HOLD' }, { scheduledDate: new Date('2026-11-09T00:00:00+05:00') }, now), 'READY')
+  assert.equal(boardColumn({ status: 'ON_HOLD' }, { scheduledDate: new Date('2026-11-11T00:00:00+05:00') }, now), 'ON_HOLD')
 })
