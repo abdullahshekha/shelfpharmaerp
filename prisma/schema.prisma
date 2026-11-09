@@ -37,6 +37,7 @@ model Supplier {
   isActive          Boolean           @default(true)
   purchaseInvoices  PurchaseInvoice[]
   supplierReturns   SupplierReturn[]
+  cheques           Cheque[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 }
@@ -136,9 +137,13 @@ model SupplierPayment {
   method            String          @default("CASH")
   reference         String?
   notes             String?
+  chequeId          String?
+  cheque            Cheque?         @relation(fields: [chequeId], references: [id])
+  bankAccountId     String?
   createdAt         DateTime        @default(now())
 
   @@index([purchaseInvoiceId])
+  @@index([chequeId])
 }
 
 model DeleteApproval {
@@ -285,6 +290,7 @@ model Retailer {
   orders           Order[]
   invoices         Invoice[]
   payments         Payment[]
+  cheques          Cheque[]
   whatsappOrders   WhatsappOrder[]
   // Customer portal login (set by staff; customers cannot change it). portalPasswordHash is omitted
   // from all queries by default — see lib/prisma.ts.
@@ -472,9 +478,46 @@ model Payment {
   method      String   @default("CASH")
   reference   String?
   notes       String?
+  chequeId    String?
+  cheque      Cheque?  @relation(fields: [chequeId], references: [id])
+  bankAccountId String?
   createdAt   DateTime @default(now())
 
   @@index([retailerId])
+  @@index([chequeId])
+}
+
+model Cheque {
+  id               String            @id @default(cuid())
+  direction        String // RECEIVABLE | PAYABLE
+  chequeNumber     String
+  amount           Decimal           @db.Decimal(12, 2)
+  chequeDate       DateTime
+  receivedDate     DateTime
+  retailerId       String?
+  retailer         Retailer?         @relation(fields: [retailerId], references: [id])
+  supplierId       String?
+  supplier         Supplier?         @relation(fields: [supplierId], references: [id])
+  bankAccountId    String?
+  drawerBank       String?
+  pictureUrl       String?
+  notes            String?
+  status           String            @default("PENDING") // PENDING | STOPPED | RETURNED | CLEARED
+  recordedById     String?
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  clearedAt        DateTime?
+  clearedById      String?
+  replacedByNote   String?
+  payments         Payment[]
+  supplierPayments SupplierPayment[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([direction, status])
+  @@index([retailerId])
+  @@index([supplierId])
+  @@index([chequeDate])
 }
 
 model WhatsappOrder {
