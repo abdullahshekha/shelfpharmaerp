@@ -23,6 +23,10 @@ export function chequeInputFromPayment(
     chequeNumber,
     amount: body.amount,
     chequeDate: str(body.chequeDate) ?? body.paymentDate,
+    // The payment screen's Date is when the cheque was received/issued; without it a back-dated cheque would get
+    // receivedDate = now and could not be cleared with the earlier date.
+    receivedDate: str(body.paymentDate),
+    allowDuplicate: body.allowDuplicate === true,
     retailerId: direction === 'RECEIVABLE' ? invoice.retailerId ?? null : null,
     supplierId: direction === 'PAYABLE' ? invoice.supplierId ?? null : null,
     bankAccountId: str(body.bankAccountId),

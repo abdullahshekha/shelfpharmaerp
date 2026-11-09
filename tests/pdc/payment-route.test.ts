@@ -45,3 +45,15 @@ test('payment method is normalised (case-insensitive, default CASH)', async () =
   assert.equal(normalizePaymentMethod(undefined), 'CASH')
   assert.equal(normalizePaymentMethod(null), 'CASH')
 })
+
+test('payment Date becomes the received date; allowDuplicate passes through only when true', () => {
+  const a = chequeInputFromPayment({ ...base, paymentDate: '2026-11-01' }, { retailerId: 'r1' }, 'RECEIVABLE')
+  assert.equal(a.receivedDate, '2026-11-01')
+  assert.equal(a.allowDuplicate, false)
+  const b = chequeInputFromPayment({ ...base, allowDuplicate: true }, { retailerId: 'r1' }, 'RECEIVABLE')
+  assert.equal(b.allowDuplicate, true)
+  const c = chequeInputFromPayment({ ...base, allowDuplicate: 'true' }, { retailerId: 'r1' }, 'RECEIVABLE')
+  assert.equal(c.allowDuplicate, false)
+  const d = chequeInputFromPayment({ ...base, paymentDate: undefined }, { retailerId: 'r1' }, 'RECEIVABLE')
+  assert.equal(d.receivedDate, null)
+})

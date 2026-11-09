@@ -1,16 +1,43 @@
 import { prisma } from '@/lib/prisma'
 import { parseDateInput } from '@/lib/accounting/dates'
 import { canCreateCheque, canManageCheques, validatePartyShape } from './guard'
-import type { ChequeDirection } from './rules'
+import { chequeDuplicateKey, duplicateChequeMessage, type ChequeDirection } from './rules'
 
 export class ChequeError extends Error {
-  constructor(public status: number, message: string) { super(message) }
+  /** `extra` is merged into the JSON error body (e.g. `{ duplicate: true }` so the UI can offer "Record anyway?"). */
+  constructor(public status: number, message: string, public extra: Record<string, unknown> = {}) { super(message) }
+}
+
+export const ROLE_CANNOT_RECORD = 'Your role cannot record cheques'
+
+type Db = Pick<typeof prisma, 'cheque'>
+
+/**
+ * 409 when the same physical cheque (direction + party + number, trimmed, case-insensitive, any status) is already
+ * recorded, unless the caller explicitly allows a duplicate (same number from a different drawer bank).
+ */
+export async function assertNotDuplicate(
+  db: Db,
+  c: { direction: ChequeDirection; retailerId: string | null; supplierId: string | null; chequeNumber: string; excludeId?: string },
+): Promise<void> {
+  const existing = await db.cheque.findFirst({
+    where: {
+      direction: c.direction,
+      ...(c.direction === 'RECEIVABLE' ? { retailerId: c.retailerId } : { supplierId: c.supplierId }),
+      chequeNumber: { equals: c.chequeNumber.trim(), mode: 'insensitive' },
+      ...(c.excludeId ? { NOT: { id: c.excludeId } } : {}),
+    },
+    select: { id: true, chequeNumber: true, status: true },
+  })
+  if (existing) {
+    throw new ChequeError(409, duplicateChequeMessage(existing.chequeNumber, c.direction, existing.status), { duplicate: true, existingId: existing.id })
+  }
 }
 
 export type ChequeInput = {
   direction?: unknown; chequeNumber?: unknown; amount?: unknown; chequeDate?: unknown
   receivedDate?: unknown; retailerId?: unknown; supplierId?: unknown; bankAccountId?: unknown
-  drawerBank?: unknown; pictureUrl?: unknown; notes?: unknown
+  drawerBank?: unknown; pictureUrl?: unknown; notes?: unknown; allowDuplicate?: unknown
 }
 
 /** Parses an amount into a Decimal(12,2)-safe number; throws ChequeError otherwise. */
@@ -54,7 +81,7 @@ export async function createChequeRecord(user: { id: string; role: string }, inp
   const direction = input.direction
   if (direction !== 'RECEIVABLE' && direction !== 'PAYABLE') throw new ChequeError(400, 'Invalid direction')
   if (!user.id || !canCreateCheque(user.role, direction as ChequeDirection)) {
-    throw new ChequeError(403, 'Forbidden')
+    throw new ChequeError(403, ROLE_CANNOT_RECORD)
   }
   const chequeNumber = optStr(input.chequeNumber)
   if (!chequeNumber) throw new ChequeError(400, 'Cheque number is required')
@@ -74,16 +101,24 @@ export async function createChequeRecord(user: { id: string; role: string }, inp
   if (bankAccountId) await assertBankAccount(bankAccountId)
 
   const auto = canManageCheques(user.role)
-  return prisma.cheque.create({
-    data: {
-      direction, chequeNumber, amount, chequeDate, receivedDate,
-      retailerId, supplierId, bankAccountId,
-      drawerBank: optStr(input.drawerBank),
-      pictureUrl: optStr(input.pictureUrl),
-      notes: optStr(input.notes),
-      recordedById: user.id,
-      acknowledgedAt: auto ? new Date() : null,
-      acknowledgedById: auto ? user.id : null,
-    },
-  })
+  const partyId = (retailerId ?? supplierId)!
+  // Serialise creates of the same cheque so two concurrent requests cannot both pass the duplicate check.
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'PDC_CHEQUE:' + chequeDuplicateKey(direction as ChequeDirection, partyId, chequeNumber)}))`
+    if (input.allowDuplicate !== true) {
+      await assertNotDuplicate(tx, { direction: direction as ChequeDirection, retailerId, supplierId, chequeNumber })
+    }
+    return tx.cheque.create({
+      data: {
+        direction, chequeNumber, amount, chequeDate, receivedDate,
+        retailerId, supplierId, bankAccountId,
+        drawerBank: optStr(input.drawerBank),
+        pictureUrl: optStr(input.pictureUrl),
+        notes: optStr(input.notes),
+        recordedById: user.id,
+        acknowledgedAt: auto ? new Date() : null,
+        acknowledgedById: auto ? user.id : null,
+      },
+    })
+  }, { maxWait: 10000, timeout: 15000 })
 }

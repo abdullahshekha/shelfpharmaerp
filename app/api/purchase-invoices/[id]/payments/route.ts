@@ -25,9 +25,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const cheque = await createChequeRecord(user, chequeInputFromPayment(body, invoice, 'PAYABLE'))
       return NextResponse.json({ data: { cheque }, pending: true }, { status: 201 })
     } catch (e) {
-      if (e instanceof ChequeError || e instanceof PaymentChequeError) {
-        return NextResponse.json({ error: e.message }, { status: e.status })
-      }
+      if (e instanceof ChequeError) return NextResponse.json({ error: e.message, ...e.extra }, { status: e.status })
+      if (e instanceof PaymentChequeError) return NextResponse.json({ error: e.message }, { status: e.status })
       throw e
     }
   }

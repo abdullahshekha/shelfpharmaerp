@@ -124,12 +124,25 @@ export function ChequeForm({ open, onOpenChange, role, banks, cheque, editMode =
     busy.current = true
     setSaving(true)
     try {
-      const res = await fetch(editing ? `/api/cheques/${cheque!.id}` : '/api/cheques', {
-        method: editing ? 'PATCH' : 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const j = await res.json().catch(() => ({}))
+      const send = async (b: Record<string, unknown>) => {
+        const res = await fetch(editing ? `/api/cheques/${cheque!.id}` : '/api/cheques', {
+          method: editing ? 'PATCH' : 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(b),
+        })
+        return { res, j: await res.json().catch(() => ({})) }
+      }
+      let { res, j } = await send(body)
+      // Same number already recorded for this party: only a deliberate "Record anyway" resends with allowDuplicate.
+      if (res.status === 409 && j.duplicate) {
+        if (!confirm(`${j.error}.
+
+Record anyway? (only if it is a different cheque with the same number)`)) {
+          setError(j.error)
+          return
+        }
+        ;({ res, j } = await send({ ...body, allowDuplicate: true }))
+      }
       if (!res.ok) { setError(j.error ?? 'Could not save the cheque'); return }
       toast.success(editing ? 'Cheque updated' : 'Cheque recorded as Pending')
       onOpenChange(false)

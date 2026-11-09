@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     const data = await createChequeRecord(user, body)
     return NextResponse.json({ data }, { status: 201 })
   } catch (e) {
-    if (e instanceof ChequeError) return NextResponse.json({ error: e.message }, { status: e.status })
+    if (e instanceof ChequeError) return NextResponse.json({ error: e.message, ...e.extra }, { status: e.status })
     throw e
   }
 }

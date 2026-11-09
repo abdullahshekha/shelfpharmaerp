@@ -11,6 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { restockFefo, restockQtyFor } from '@/lib/accounting/cost'
 import { syncAllSafe } from '@/lib/accounting/sync'
 import { AccountingError, assertNotLocked, getSettings } from '@/lib/accounting/core'
+import { clearedChequeDeleteBlock } from '@/lib/pdc/rules'
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
 
@@ -68,8 +69,19 @@ export async function cancelOrder(orderId: string): Promise<{ warnings: string[]
   return { warnings }
 }
 
+/** Refuses (AccountingError 409, so a MANAGER approval stays PENDING) when a cleared cheque paid this invoice. */
+async function assertNoChequePayments(db: Tx | typeof prisma, invoiceId: string): Promise<void> {
+  const pays = await db.payment.findMany({
+    where: { invoiceId, chequeId: { not: null } },
+    select: { chequeId: true, cheque: { select: { chequeNumber: true } } },
+  })
+  const block = clearedChequeDeleteBlock(pays.map((p) => ({ chequeId: p.chequeId, chequeNumber: p.cheque?.chequeNumber })))
+  if (block) throw new AccountingError(409, block)
+}
+
 /**
- * Hard delete: order, items, delivery, challan, invoice and its payments. A DELIVERED order is restocked inside the
+ * Hard delete: order, items, delivery, challan, invoice and its payments. Refused when any of those payments came
+ * from a cleared cheque (deleting it would silently drop bank money while the cheque stays CLEARED). A DELIVERED order is restocked inside the
  * same transaction; any other status (including an already CANCELLED one, restocked at cancel time) is not.
  */
 export async function hardDeleteOrder(orderId: string): Promise<{ warnings: string[] }> {
@@ -78,8 +90,12 @@ export async function hardDeleteOrder(orderId: string): Promise<{ warnings: stri
   const doomedPayments = doomedInvoice
     ? await prisma.payment.findMany({ where: { invoiceId: doomedInvoice.id }, select: { id: true } })
     : []
+  if (doomedInvoice) await assertNoChequePayments(prisma, doomedInvoice.id)
 
   const warnings = await prisma.$transaction(async (tx) => {
+    // Re-check inside the transaction: a cheque may have cleared against this invoice meanwhile.
+    const inv = await tx.invoice.findUnique({ where: { orderId }, select: { id: true } })
+    if (inv) await assertNoChequePayments(tx, inv.id)
     const w = (await undeliverInTx(tx, orderId, 'CANCELLED')) ?? []
     await tx.delivery.deleteMany({ where: { orderId } })
     await tx.deliveryChallan.deleteMany({ where: { orderId } })

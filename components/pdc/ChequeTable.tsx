@@ -68,8 +68,12 @@ function ClearDialog({ cheque, banks, onClose, onCleared }: { cheque: Cheque | n
   const busy = useRef(false)
 
   useEffect(() => {
-    if (cheque) { setDate(todayKarachi()); setBank(cheque.bankAccountId ?? ''); setError('') }
-  }, [cheque])
+    if (!cheque) return
+    setDate(todayKarachi())
+    // Pre-select the cheque's bank only if it is still active (the list offers active banks only).
+    setBank(banks.some((b) => b.isActive && b.id === cheque.bankAccountId) ? cheque.bankAccountId! : '')
+    setError('')
+  }, [cheque, banks])
 
   const active = banks.filter((b) => b.isActive)
   const items = active.map((b) => ({ value: b.id, label: `${b.code} · ${b.name}` }))

@@ -6,6 +6,8 @@
 // The dev server MUST run with the ledger switched off for clearing, because go-live is set on production:
 //   PDC_TEST_SKIP_SYNC=1 AUDIT_ALLOW_PURGE=1 npx next dev -p 3100
 // Run: AUDIT_ALLOW_PURGE=1 npx tsx tests/pdc/qa-pdc.ts
+// PREFLIGHT: before creating anything the script calls GET /api/cheques/qa-mode (a non-production-only diagnostic,
+// always 404 when NODE_ENV=production) and refuses to run unless the server reports `skipSync: true`.
 // It never changes accounting settings and never posts journal entries: the cleared-cheque payments are not synced
 // (PDC_TEST_SKIP_SYNC) and the one CASH payment is dated before go-live (sync skips it). It aborts if any journal
 // entry ever references a QA record. Concurrent real use is fine, except a "Rebuild ledger" run during the few
@@ -86,6 +88,11 @@ async function main() {
   if (!bank) throw new Error('No active bank account to clear into')
   const ping = await call('GET', '/api/cheques?page=1', ADMIN).catch(() => null)
   if (!ping || ping.status !== 200) throw new Error(`Dev server on ${BASE} not reachable / cheque API not answering`)
+  const mode = await call('GET', '/api/cheques/qa-mode', ADMIN)
+  if (mode.status !== 200 || mode.json?.skipSync !== true) {
+    throw new Error(`Refusing to run: the dev server must be started with PDC_TEST_SKIP_SYNC=1 (qa-mode: ${mode.status} ${JSON.stringify(mode.json)})`)
+  }
+  check('preflight: dev server skips the ledger sync for clearing (PDC_TEST_SKIP_SYNC=1)', true)
   started = true
 
   // ---- data: one customer with three invoices (distinct dates, oldest first = I1), one supplier with one purchase invoice
@@ -227,6 +234,23 @@ async function main() {
   check('list totals: receivable sum of the customer cheques, payable 0',
     recvTotals.json?.totals?.receivable === 1200 + 300 + 5000 + 100 + 50 && recvTotals.json?.totals?.payable === 0, JSON.stringify(recvTotals.json?.totals))
 
+  // ---- 8b. the same physical cheque cannot be recorded twice (unless explicitly allowed) ----
+  const dup = await newCheque(ADMIN, { retailerId: cust.id, chequeNumber: ` ${TAG.toLowerCase()}-a `, amount: '10' })
+  check('same number (other case/spaces) for the same customer -> 409 duplicate naming the cleared cheque',
+    dup.status === 409 && dup.json?.duplicate === true && /already recorded for this customer \(status CLEARED\)/.test(dup.json?.error ?? ''), `${dup.status} ${dup.json?.error}`)
+  const dupOk = await newCheque(ADMIN, { retailerId: cust.id, chequeNumber: `${TAG}-A`, amount: '10', allowDuplicate: true })
+  check('allowDuplicate: true records it anyway -> 201', dupOk.status === 201, `${dupOk.status} ${dupOk.json?.error ?? ''}`)
+  const pdup = await call('PATCH', `/api/cheques/${c.json.data.id}`, ADMIN, { chequeNumber: `${TAG}-B` })
+  check('PATCH a cheque number onto an existing one -> 409 duplicate', pdup.status === 409 && pdup.json?.duplicate === true, `${pdup.status} ${pdup.json?.error}`)
+  const pdupOk = await call('PATCH', `/api/cheques/${c.json.data.id}`, ADMIN, { chequeNumber: `${TAG}-B`, allowDuplicate: true })
+  check('PATCH with allowDuplicate -> 200', pdupOk.status === 200, `${pdupOk.status} ${pdupOk.json?.error ?? ''}`)
+
+  // ---- 8c. hard-deleting an order whose invoice was paid by a cleared cheque is refused ----
+  const hd = await call('DELETE', `/api/orders/${I1.orderId}?hard=true`, ADMIN)
+  const i1After = await prisma.invoice.findUnique({ where: { id: I1.id }, select: { id: true, payments: { select: { id: true } } } })
+  check('hard delete of an order paid by a cleared cheque -> 409 naming the cheque, nothing deleted',
+    hd.status === 409 && new RegExp(`cleared cheque ${TAG}-A`).test(hd.json?.error ?? '') && !!i1After && i1After.payments.length === 1, `${hd.status} ${hd.json?.error}`)
+
   // ---- 9. payment routes ----
   const before3 = await prisma.payment.count({ where: { invoiceId: I3.id } })
   const lc = await call('POST', `/api/invoices/${I3.id}/payments`, ADMIN, { amount: 20, method: 'cheque', reference: `${TAG}-LC`, paymentDate: today() })
@@ -234,17 +258,29 @@ async function main() {
   check("payment route with method 'cheque' (lowercase) -> pending cheque, no payment",
     lc.status === 201 && lc.json?.pending === true && lcRow?.status === 'PENDING' && lcRow.retailerId === cust.id &&
     (await prisma.payment.count({ where: { invoiceId: I3.id } })) === before3, `${lc.status} ${JSON.stringify(lc.json).slice(0, 150)}`)
+  const lcDup = await call('POST', `/api/invoices/${I3.id}/payments`, ADMIN, { amount: 20, method: 'CHEQUE', reference: `${TAG}-lc`, paymentDate: today() })
+  check('payment route: same cheque number again -> 409 duplicate', lcDup.status === 409 && lcDup.json?.duplicate === true, `${lcDup.status} ${lcDup.json?.error}`)
+  const lcDup2 = await call('POST', `/api/invoices/${I3.id}/payments`, ADMIN, { amount: 20, method: 'CHEQUE', reference: `${TAG}-LC`, paymentDate: '2026-11-01', allowDuplicate: true })
+  const lc2 = lcDup2.json?.data?.cheque
+  check('payment route passes allowDuplicate through and uses the payment Date as received date',
+    lcDup2.status === 201 && !!lc2 && new Date(lc2.receivedDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' }) === '2026-11-01', `${lcDup2.status} ${lc2?.receivedDate}`)
+  const tl = await call('POST', `/api/invoices/${I3.id}/payments`, cookie('TEAM_LEAD', 'qa-pdc-teamlead'), { amount: 20, method: 'CHEQUE', reference: `${TAG}-TL`, paymentDate: today() })
+  check("TEAM_LEAD recording a cheque on the payment route -> 403 'Your role cannot record cheques'", tl.status === 403 && tl.json?.error === 'Your role cannot record cheques', `${tl.status} ${tl.json?.error}`)
+  const banksDefault = await call('GET', '/api/cheques/banks', MANAGER)
+  const banksAll = await call('GET', '/api/cheques/banks?includeInactive=1', MANAGER)
+  check('banks endpoint returns only active banks by default; includeInactive=1 returns at least as many',
+    banksDefault.status === 200 && banksDefault.json.data.every((x: any) => x.isActive) && banksAll.status === 200 && banksAll.json.data.length >= banksDefault.json.data.length)
   const cash = await call('POST', `/api/invoices/${I3.id}/payments`, ADMIN, { amount: 10, method: 'CASH', paymentDate: CASH_DATE })
   const s9 = (await invoiceState([I3.id]))[0]
   check('CASH payment route unchanged: payment created and invoice status recomputed',
     cash.status === 201 && cash.json?.data?.payment?.method === 'CASH' && cash.json?.data?.newStatus === 'PARTIAL' && s9.paid === 110, `${cash.status} paid=${s9.paid}`)
 
   // ---- 10. payable cheque clears against the purchase invoice ----
-  const pc = await call('POST', '/api/cheques', ACCOUNTANT, { direction: 'PAYABLE', supplierId: supp.id, chequeNumber: `${TAG}-P`, amount: '400', chequeDate: today(), bankAccountId: bank.id })
+  const pc = await call('POST', '/api/cheques', ACCOUNTANT, { direction: 'PAYABLE', supplierId: supp.id, chequeNumber: `${TAG}-A`, amount: '400', chequeDate: today(), bankAccountId: bank.id })
   const pcc = await status(pc.json?.data?.id, ACCOUNTANT, 'clear', { clearingDate: today() })
   const spays = await prisma.supplierPayment.findMany({ where: { chequeId: pc.json?.data?.id } })
   const piRow = await prisma.purchaseInvoice.findUnique({ where: { id: PI.id } })
-  check('payable cheque clears: one supplier payment, purchase invoice PAID',
+  check('payable cheque with the number of a receivable cheque (other direction/party) is not a duplicate; it clears: one supplier payment, purchase invoice PAID',
     pc.status === 201 && pcc.status === 200 && spays.length === 1 && Number(spays[0].amount) === 400 && piRow?.status === 'PAID', `${pc.status} ${pcc.status} ${pcc.json?.error ?? ''}`)
 
   // ---- 11. audit ----

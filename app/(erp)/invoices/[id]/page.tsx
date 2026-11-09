@@ -13,6 +13,7 @@ import { ArrowLeft, Printer, Trash2, Plus, X, Download } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
+import { canCreateCheque, canManageCheques } from '@/lib/pdc/guard'
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-slate-100 text-slate-700',
@@ -62,14 +63,15 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => { fetchInvoice() }, [fetchInvoice])
 
-  // Bank accounts for the optional cheque bank selector (the accounts API is ADMIN/ACCOUNTANT only).
-  const canPickBank = user?.role === 'ADMIN' || user?.role === 'ACCOUNTANT'
+  // Cheque option only for roles that may record a cheque; bank list (active banks) for roles that manage cheques.
+  const canRecordCheque = !!user && canCreateCheque(user.role, 'RECEIVABLE')
+  const canPickBank = !!user && canManageCheques(user.role)
   const [banks, setBanks] = useState<{ id: string; name: string }[]>([])
   useEffect(() => {
     if (!canPickBank) return
-    fetch('/api/accounts/accounts?type=ASSET')
-      .then(r => r.json())
-      .then(j => setBanks((j.data ?? []).filter((a: { subType?: string | null }) => a.subType === 'BANK')))
+    fetch('/api/cheques/banks')
+      .then(r => (r.ok ? r.json() : { data: [] }))
+      .then(j => setBanks(j.data ?? []))
       .catch(() => setBanks([]))
   }, [canPickBank])
   const isCheque = paymentForm.method === 'CHEQUE'
@@ -95,11 +97,21 @@ export default function InvoiceDetailPage() {
       return
     }
     setSavingPayment(true)
-    const res = await fetch(`/api/invoices/${id}/payments`, {
+    const post = (body: object) => fetch(`/api/invoices/${id}/payments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(paymentForm),
+      body: JSON.stringify(body),
     })
+    let res = await post(paymentForm)
+    if (res.status === 409) {
+      // Same cheque number already recorded for this party: resend only after an explicit "Record anyway".
+      const dup = await res.clone().json().catch(() => ({}))
+      if (dup.duplicate && confirm(`${dup.error}.
+
+Record anyway? (only if it is a different cheque with the same number)`)) {
+        res = await post({ ...paymentForm, allowDuplicate: true })
+      }
+    }
     if (res.ok) {
       const j = await res.json()
       if (j.pending) toast.success('Cheque recorded as Pending — it will be applied when cleared')
@@ -193,7 +205,7 @@ export default function InvoiceDetailPage() {
                   <SelectContent>
                     <SelectItem value="CASH">Cash</SelectItem>
                     <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
-                    <SelectItem value="CHEQUE">Cheque</SelectItem>
+                    {canRecordCheque && <SelectItem value="CHEQUE">Cheque</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>

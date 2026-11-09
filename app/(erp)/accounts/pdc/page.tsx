@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,13 +62,18 @@ export default function PdcPage() {
 
   useEffect(() => {
     if (!isMgr) return
-    fetch('/api/cheques/banks')
+    fetch('/api/cheques/banks?includeInactive=1')
       .then((r) => (r.ok ? r.json() : { data: [] }))
       .then((j) => setBanks(j.data ?? []))
       .catch(() => setBanks([]))
   }, [isMgr])
 
+  // Only the latest request may update the list (a filter change on page N fires a fetch for the old page and then
+  // one for page 1; a slow stale response must not overwrite the newer one).
+  const reqSeq = useRef(0)
   const fetchRows = useCallback(async () => {
+    const seq = ++reqSeq.current
+    const stale = () => seq !== reqSeq.current
     setLoading(true)
     setLoadError('')
     const p = new URLSearchParams({ page: String(page) })
@@ -83,6 +88,7 @@ export default function PdcPage() {
     try {
       const res = await fetch(`/api/cheques?${p}`)
       const j = await res.json().catch(() => ({}))
+      if (stale()) return
       if (!res.ok) {
         setRows([]); setTotal(0); setTotals({ receivable: 0, payable: 0 })
         setLoadError(j.error ?? 'Could not load cheques')
@@ -92,9 +98,9 @@ export default function PdcPage() {
       setTotal(j.total ?? 0)
       setTotals(j.totals ?? { receivable: 0, payable: 0 })
     } catch {
-      setLoadError('Network error — could not load cheques')
+      if (!stale()) setLoadError('Network error — could not load cheques')
     } finally {
-      setLoading(false)
+      if (!stale()) setLoading(false)
     }
   }, [page, tab, status, bank, dateRange, party, q, unack])
 

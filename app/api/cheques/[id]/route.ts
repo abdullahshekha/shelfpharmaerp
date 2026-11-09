@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { parseDateInput } from '@/lib/accounting/dates'
 import { canManageCheques, canEditCheque, canEditParty } from '@/lib/pdc/guard'
-import { assertBankAccount, resolveParty, parseChequeAmount, optStr, ChequeError } from '@/lib/pdc/create'
+import { assertBankAccount, assertNotDuplicate, resolveParty, parseChequeAmount, optStr, ChequeError } from '@/lib/pdc/create'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +45,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const data: Prisma.ChequeUpdateManyMutationInput = {}
     if (mode === 'NOTES') {
-      const extra = Object.keys(body).filter((k) => k !== 'notes')
+      const extra = Object.keys(body).filter((k) => k !== 'notes' && k !== 'allowDuplicate')
       if (extra.length) throw new ChequeError(400, 'A cleared cheque only allows editing notes')
     }
     if ('notes' in body) data.notes = optStr(body.notes)
@@ -88,6 +88,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (b) await assertBankAccount(b)
       extraData.bankAccountId = b
     }
+    // Same physical cheque recorded twice? Checked when the number or the party changes (allowDuplicate overrides).
+    if (mode === 'FULL' && ('chequeNumber' in data || partyTouched) && body.allowDuplicate !== true) {
+      await assertNotDuplicate(prisma, {
+        direction: cheque.direction as 'RECEIVABLE' | 'PAYABLE',
+        retailerId: 'retailerId' in extraData ? extraData.retailerId ?? null : cheque.retailerId,
+        supplierId: 'supplierId' in extraData ? extraData.supplierId ?? null : cheque.supplierId,
+        chequeNumber: (data.chequeNumber as string | undefined) ?? cheque.chequeNumber,
+        excludeId: id,
+      })
+    }
     if (Object.keys(data).length + Object.keys(extraData).length === 0) {
       throw new ChequeError(400, 'Nothing to update')
     }
@@ -99,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (res.count === 0) return NextResponse.json({ error: 'Cheque changed, reload and retry' }, { status: 409 })
     return NextResponse.json({ data: await prisma.cheque.findUnique({ where: { id }, include }) })
   } catch (e) {
-    if (e instanceof ChequeError) return NextResponse.json({ error: e.message }, { status: e.status })
+    if (e instanceof ChequeError) return NextResponse.json({ error: e.message, ...e.extra }, { status: e.status })
     throw e
   }
 }
