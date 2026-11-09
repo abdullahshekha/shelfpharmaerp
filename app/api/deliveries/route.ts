@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import { getUserFromRequest } from '@/lib/utils/auth'
-import { canManageAssignments } from '@/lib/deliveries/assign-rules'
+import { canManageAssignments, deliveryScope } from '@/lib/deliveries/assign-rules'
 import { isOrderStatus } from '@/lib/orders/status'
 import { OUTCOMES } from '@/lib/deliveries/outcome-rules'
 
@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
   }
 
   const where: Prisma.DeliveryWhereInput = {
-    ...(manager ? (driverFilter ? { driverId: driverFilter } : {}) : { driverId: user.id }),
+    ...deliveryScope(user),
+    ...(manager && driverFilter ? { driverId: driverFilter } : {}),
     ...(status && { status }),
     ...(outcome && { outcome }),
     ...(orderStatuses.length > 0 && { order: { status: { in: orderStatuses } } }),

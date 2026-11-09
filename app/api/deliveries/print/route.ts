@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import { createElement, type ReactElement, type JSXElementConstructor } from 'react'
 import { prisma } from '@/lib/prisma'
+import { getUserFromRequest } from '@/lib/utils/auth'
+import { deliveryScope } from '@/lib/deliveries/assign-rules'
 import { DeliveryManifestPDF } from '@/components/deliveries/DeliveryManifestPDF'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req)
+  if (!user.id) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
   const { searchParams } = new URL(req.url)
   // The Deliveries page sends from/to (a range); `date` is kept for older links.
   const today = new Date().toISOString().slice(0, 10)
@@ -18,6 +22,7 @@ export async function GET(req: NextRequest) {
 
   const deliveries = await prisma.delivery.findMany({
     where: {
+      ...deliveryScope(user),
       scheduledDate: {
         gte: new Date(from),
         lt: new Date(new Date(to).getTime() + 24 * 60 * 60 * 1000),

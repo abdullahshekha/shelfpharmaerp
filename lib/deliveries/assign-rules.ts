@@ -70,3 +70,12 @@ export function stillDeductedQty(orderStatus: string, item: { quantity: number; 
   if (item.deductedQty == null && orderStatus !== 'DELIVERED') return 0
   return restockQtyFor(item)
 }
+
+/**
+ * Prisma `where` fragment limiting which deliveries a session may see: ADMIN/MANAGER everything, anyone else only
+ * deliveries assigned to them (never the query string's say-so). No user id -> matches nothing.
+ */
+export function deliveryScope(user: { id?: string | null; role?: string | null }): { driverId?: string } {
+  if (canManageAssignments(user.role)) return {}
+  return { driverId: user.id || '__none__' }
+}

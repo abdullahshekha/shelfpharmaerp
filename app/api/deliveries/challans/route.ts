@@ -3,6 +3,7 @@ import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import { createElement, type ReactElement, type JSXElementConstructor } from 'react'
 import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { deliveryScope } from '@/lib/deliveries/assign-rules'
 import { DeliveryChallanPDF } from '@/components/deliveries/DeliveryChallanPDF'
 import { loadChallans } from '@/lib/challan'
 
@@ -16,11 +17,12 @@ export async function GET(req: NextRequest) {
   const from = searchParams.get('from') ?? today
   const to = searchParams.get('to') ?? from
   const user = getUserFromRequest(req)
+  if (!user.id) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
 
   const deliveries = await prisma.delivery.findMany({
     where: {
       scheduledDate: { gte: new Date(from), lt: new Date(new Date(to).getTime() + 86400000) },
-      ...(user.role === 'SALESMAN' && { driverId: user.id }),
+      ...deliveryScope(user),
     },
     select: { orderId: true },
   })

@@ -12,10 +12,8 @@ import { DeliveryCard } from '@/components/deliveries/DeliveryCard'
 import { OutcomeDialog } from '@/components/deliveries/OutcomeDialog'
 import type { BoardDelivery } from '@/components/deliveries/types'
 
-const karachiDay = (d: Date | string) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' })
-
 // The logged-in person's own work: deliveries assigned to them and not yet resolved, plus their held deliveries
-// that are due today. The API already scopes non-managers to their own deliveries; the filter below also covers
+// (any date: the card shows when a hold ends). The API already scopes non-managers to their own deliveries; the filter below also covers
 // a manager/admin who opens this page.
 export default function MyDeliveriesPage() {
   const { user } = useCurrentUser()
@@ -39,11 +37,9 @@ export default function MyDeliveriesPage() {
   useEffect(() => { load() }, [load])
 
   const mine = useMemo(() => {
-    const today = karachiDay(new Date())
     const now = new Date()
     return deliveries
       .filter(d => d.driverId === userId)
-      .filter(d => d.order.status === 'OUT_FOR_DELIVERY' || (d.order.status === 'ON_HOLD' && karachiDay(d.scheduledDate) <= today))
       .map(d => ({ d, col: boardColumn(d.order, { scheduledDate: new Date(d.scheduledDate) }, now) }))
       .filter((x): x is { d: BoardDelivery; col: NonNullable<typeof x.col> } => x.col !== null)
   }, [deliveries, userId])

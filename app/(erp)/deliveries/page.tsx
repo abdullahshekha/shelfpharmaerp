@@ -51,13 +51,18 @@ export default function DeliveriesPage() {
   const [assignBusy, setAssignBusy] = useState(false)
   const [outcomeFor, setOutcomeFor] = useState<BoardDelivery | null>(null)
 
+  // Open work (invoiced, out for delivery, on hold) is shown whatever its date, so overdue and held cards never drop
+  // off; the date range only narrows the finished columns (Delivered, Returned).
   const fetchDeliveries = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to })
+    const range = new URLSearchParams({ from: dateRange.from, to: dateRange.to, orderStatus: 'DELIVERED,RETURNED' })
+    const open = new URLSearchParams({ orderStatus: 'INVOICED,OUT_FOR_DELIVERY,ON_HOLD' })
     try {
-      const res = await fetch(`/api/deliveries?${params}`)
-      const json = await res.json()
-      setDeliveries(json.data ?? [])
+      const [o, c] = await Promise.all([
+        fetch(`/api/deliveries?${open}`).then(r => r.json()),
+        fetch(`/api/deliveries?${range}`).then(r => r.json()),
+      ])
+      setDeliveries([...(o.data ?? []), ...(c.data ?? [])])
     } catch {
       toast.error('Could not load deliveries')
     }
@@ -70,16 +75,6 @@ export default function DeliveriesPage() {
     if (!manager) return
     fetch(`/api/employees?role=${ASSIGNEE_ROLES.join(',')}`).then(r => r.json()).then(j => setAssignees(j.data ?? [])).catch(() => {})
   }, [manager])
-
-  // Default to the next delivery day that has deliveries (today or later), else today.
-  useEffect(() => {
-    const today = karachiDay(new Date())
-    fetch(`/api/deliveries?from=${today}`).then(r => r.json()).then(j => {
-      const days: string[] = (j.data ?? []).map((d: BoardDelivery) => karachiDay(d.scheduledDate)).filter((d: string) => d >= today)
-      const next = days.sort()[0]
-      if (next && next !== today) setDateRange({ from: next, to: next, label: formatDate(next) })
-    }).catch(() => {})
-  }, [])
 
   const post = async (url: string, body: object, okMsg: string, id: string) => {
     setBusyId(id)
@@ -122,8 +117,11 @@ export default function DeliveriesPage() {
         if (res.ok) {
           const assigned = Array.isArray(j.assigned) ? j.assigned.length : Number(j.assigned ?? 0)
           if (assigned > 0) toast.success(`Assigned ${assigned} deliveries`)
-          const refused: { id?: string; error?: string; message?: string }[] = Array.isArray(j.refused) ? j.refused : []
-          for (const r of refused) toast.error(r.error ?? r.message ?? 'A delivery could not be assigned')
+          const refused: { id: string; error?: string }[] = Array.isArray(j.refused) ? j.refused : []
+          for (const r of refused) {
+            const num = deliveries.find(x => x.id === r.id)?.order.orderNumber ?? r.id
+            toast.error(`${num}: ${r.error ?? 'could not be assigned'}`)
+          }
         } else toast.error(j.error ?? 'Failed to assign')
       }
       setAssignTarget(null)
@@ -195,7 +193,7 @@ export default function DeliveriesPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><Truck size={22} /> Deliveries</h1>
           <p className="text-slate-500 text-sm">
-            {shown} on the board · {placed.DELIVERED.length} delivered · {formatPKR(total)}
+            {shown} on the board · {placed.DELIVERED.length} delivered in range · {formatPKR(total)}
           </p>
         </div>
         {manager && (
@@ -243,7 +241,7 @@ export default function DeliveriesPage() {
       {loading ? (
         <div className="animate-pulse p-8 text-slate-400">Loading...</div>
       ) : shown === 0 ? (
-        <Card><CardContent className="py-12 text-center text-slate-400">No deliveries for {dateRange.label}</CardContent></Card>
+        <Card><CardContent className="py-12 text-center text-slate-400">No deliveries on the board for {dateRange.label}</CardContent></Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           {COLUMNS.map(c => (

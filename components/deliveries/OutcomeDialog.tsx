@@ -46,7 +46,7 @@ function Pick({ value, onChange, options, placeholder }: {
 
 /** Record what happened at the door. The server recomputes the amount to collect; this one is a read-only preview. */
 export function OutcomeDialog({ delivery, onClose, onDone }: Props) {
-  const [outcome, setOutcome] = useState<Outcome | ''>('')
+  const [outcome, setOutcomeState] = useState<Outcome | ''>('')
   const [method, setMethod] = useState('')
   const [bankAccountId, setBankAccountId] = useState('')
   const [pictureUrl, setPictureUrl] = useState('')
@@ -62,10 +62,11 @@ export function OutcomeDialog({ delivery, onClose, onDone }: Props) {
   const [banks, setBanks] = useState<Bank[]>([])
   const [busy, setBusy] = useState(false)
 
+  const setOutcome = (o: Outcome | '') => { setOutcomeState(o); setReason('') }
   const open = !!delivery
   useEffect(() => {
     if (!delivery) return
-    setOutcome(''); setMethod(''); setBankAccountId(''); setPictureUrl(''); setChequeNumber('')
+    setOutcomeState(''); setMethod(''); setBankAccountId(''); setPictureUrl(''); setChequeNumber('')
     setChequeDate(karachiDay(new Date())); setDrawerBank(''); setChequeAmount(null)
     setRetQty({}); setRetReason({}); setReason(''); setHoldUntil(tomorrow())
   }, [delivery])
@@ -147,13 +148,12 @@ export function OutcomeDialog({ delivery, onClose, onDone }: Props) {
     if (pays) {
       body.method = method
       body.pictureUrl = pictureUrl
-      if (method === 'BANK') body.bankAccountId = bankAccountId
+      if (method === 'BANK') body.bankAccountId = bankAccountId // only Bank sends an account; cheques go to PDC
       if (method === 'CHEQUE') {
         body.chequeNumber = chequeNumber.trim()
         body.chequeDate = chequeDate
         body.chequeAmount = chequeAmount ?? due.toFixed(2)
         if (drawerBank.trim()) body.drawerBank = drawerBank.trim()
-        if (bankAccountId) body.bankAccountId = bankAccountId
         if (allowDuplicate) body.allowDuplicate = true
       }
     }
@@ -172,7 +172,7 @@ export function OutcomeDialog({ delivery, onClose, onDone }: Props) {
         return
       }
       if (res.status === 409 && j.duplicate && !allowDuplicate) {
-        if (window.confirm(`${j.error}\n\nRecord anyway?`)) { setBusy(false); return submit(true) }
+        if (window.confirm(`${j.error}\n\nRecord anyway?`)) { return await submit(true) }
         return
       }
       toast.error(j.error ?? 'Could not record the outcome')
@@ -234,7 +234,7 @@ export function OutcomeDialog({ delivery, onClose, onDone }: Props) {
 
                 <div className="space-y-1.5">
                   <Label>Paid by</Label>
-                  <Pick value={method} onChange={setMethod} options={METHODS} placeholder="Cash, Bank or Cheque" />
+                  <Pick value={method} onChange={m => { setMethod(m); if (m !== 'BANK') setBankAccountId('') }} options={METHODS} placeholder="Cash, Bank or Cheque" />
                 </div>
 
                 {method === 'BANK' && (
