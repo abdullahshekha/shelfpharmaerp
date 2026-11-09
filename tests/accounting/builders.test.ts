@@ -149,3 +149,19 @@ test('blendUnitCost', () => {
   assert.equal(blendUnitCost(10, 10, 0, 10), 5) // nothing deducted: dilutes
   assert.equal(blendUnitCost(10, 10, 60, 5), 10.6667)
 })
+
+test('payment bank account override', () => {
+  const c = buildCustomerPayment({ paymentDate: D, amount: 200, method: 'CHEQUE', retailerId: 'r1', bankAccountId: 'acc1' })
+  const dl = c[0].lines.find((l) => l.debit)!
+  assert.equal(dl.accountId, 'acc1')
+  assert.equal(dl.accountKey, undefined)
+  const n = buildCustomerPayment({ paymentDate: D, amount: 200, method: 'CHEQUE', retailerId: 'r1' })
+  assert.equal(n[0].lines.find((l) => l.debit)!.accountKey, 'BANK')
+  const cash = buildCustomerPayment({ paymentDate: D, amount: 200, method: 'CASH', retailerId: 'r1', bankAccountId: 'acc1' })
+  assert.equal(cash[0].lines.find((l) => l.debit)!.accountKey, 'CASH')
+  const sp = buildSupplierPayment({ paymentDate: D, amount: 500, method: 'CHEQUE', supplierId: 's1', bankAccountId: 'acc1' })
+  const cl = sp[0].lines.find((l) => l.credit)!
+  assert.equal(cl.accountId, 'acc1')
+  assert.equal(cl.accountKey, undefined)
+  assert.equal(buildSupplierPayment({ paymentDate: D, amount: 500, method: 'CASH', supplierId: 's1', bankAccountId: 'acc1' })[0].lines.find((l) => l.credit)!.accountKey, 'CASH')
+})

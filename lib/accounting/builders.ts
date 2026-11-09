@@ -18,6 +18,9 @@ function finish(date: Date, memo: string, lines: LineInput[]): BuiltEntry[] {
 }
 
 const cashKey = (method: string): 'CASH' | 'BANK' => (method === 'CASH' ? 'CASH' : 'BANK')
+// Cash-side line: a specific bank account (non-CASH only) overrides the default BANK key.
+const cashSide = (method: string, bankAccountId?: string | null): { accountKey: 'CASH' | 'BANK' } | { accountId: string } =>
+  method !== 'CASH' && bankAccountId ? { accountId: bankAccountId } : { accountKey: cashKey(method) }
 
 // ---- Sales invoice ----
 export interface InvoiceInput {
@@ -74,13 +77,14 @@ export interface CustomerPaymentInput {
   retailerId: string
   reference?: string | null
   invoiceNumber?: string | null
+  bankAccountId?: string | null
 }
 
 export function buildCustomerPayment(pay: CustomerPaymentInput): BuiltEntry[] {
   const amt = fromPaisa(p(pay.amount))
   const ref = pay.invoiceNumber ? ` against ${pay.invoiceNumber}` : pay.reference ? ` (${pay.reference})` : ''
   return finish(pay.paymentDate, `Customer payment${ref}`, [
-    { accountKey: cashKey(pay.method), debit: amt },
+    { ...cashSide(pay.method, pay.bankAccountId), debit: amt },
     { accountKey: 'AR', credit: amt, retailerId: pay.retailerId },
   ])
 }
@@ -157,6 +161,7 @@ export interface SupplierPaymentInput {
   method: string
   supplierId: string
   invoiceNumber?: string | null
+  bankAccountId?: string | null
 }
 
 export function buildSupplierPayment(pay: SupplierPaymentInput): BuiltEntry[] {
@@ -164,7 +169,7 @@ export function buildSupplierPayment(pay: SupplierPaymentInput): BuiltEntry[] {
   const ref = pay.invoiceNumber ? ` against ${pay.invoiceNumber}` : ''
   return finish(pay.paymentDate, `Supplier payment${ref}`, [
     { accountKey: 'AP', debit: amt, supplierId: pay.supplierId },
-    { accountKey: cashKey(pay.method), credit: amt },
+    { ...cashSide(pay.method, pay.bankAccountId), credit: amt },
   ])
 }
 

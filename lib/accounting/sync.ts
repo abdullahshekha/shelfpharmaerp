@@ -89,6 +89,7 @@ async function load(tx: Tx, type: SourceType, id: string): Promise<Loaded> {
           retailerId: r.retailerId,
           reference: r.reference,
           invoiceNumber: r.invoice?.invoiceNumber ?? null,
+          bankAccountId: r.bankAccountId,
         }),
       }
     }
@@ -140,6 +141,7 @@ async function load(tx: Tx, type: SourceType, id: string): Promise<Loaded> {
           method: r.method,
           supplierId: r.supplierId,
           invoiceNumber: r.purchaseInvoice?.invoiceNumber ?? null,
+          bankAccountId: r.bankAccountId,
         }),
       }
     }
