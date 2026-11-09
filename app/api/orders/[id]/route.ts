@@ -20,13 +20,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       salesRep: { select: { name: true } },
       items: { include: { medicine: { select: { name: true, code: true, category: true, salesTaxApplicable: true } } } },
       invoice: true,
-      delivery: { include: { driver: { select: { name: true } } } },
+      delivery: { include: { driver: { select: { name: true } }, collections: { select: { id: true, method: true, amount: true, pictureUrl: true, collectedAt: true, acknowledgedAt: true } } } },
       whatsappOrder: { select: { imageUrl: true } },
     },
   })
 
   if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json({ data: order })
+  // Returns recorded at delivery (whole or partial) for this order, with their lines and whether the stock is acknowledged.
+  const salesReturns = await prisma.salesReturn.findMany({
+    where: { orderId: id, deliveryId: { not: null } },
+    orderBy: { returnDate: 'asc' },
+    select: {
+      id: true, returnNumber: true, totalAmount: true, stockAcknowledgedAt: true,
+      items: { select: { id: true, quantity: true, reason: true, medicine: { select: { name: true } } } },
+    },
+  })
+  return NextResponse.json({ data: { ...order, salesReturns } })
 }
 
 interface EditItemInput {

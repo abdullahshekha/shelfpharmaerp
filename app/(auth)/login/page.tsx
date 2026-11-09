@@ -7,12 +7,13 @@ import Link from 'next/link'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { visibleHubs } from '@/lib/nav'
 import { Eye, EyeOff, Lock } from 'lucide-react'
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const from = searchParams.get('from') ?? '/dashboard'
+  const from = searchParams.get('from')
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -32,7 +33,10 @@ function LoginForm() {
     })
 
     if (res.ok) {
-      router.push(from)
+      // No explicit return page: open the first screen this role can actually see (a Driver has no Dashboard).
+      const j = await res.json().catch(() => ({}))
+      const home = typeof j.role === 'string' ? visibleHubs(j.role)[0]?.target : undefined
+      router.push(from ?? home ?? '/dashboard')
       router.refresh()
     } else {
       const j = await res.json()

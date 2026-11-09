@@ -34,6 +34,7 @@ export const NAV_HUBS: NavHub[] = [
       { href: '/invoices',          label: 'Invoices',      roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'ACCOUNTANT'] },
       { href: '/offer-list',        label: 'Offer List',    roles: ADMIN_MANAGER },
       { href: '/deliveries',        label: 'Deliveries',    roles: ['ADMIN', 'MANAGER', 'SALESMAN'] },
+      { href: '/deliveries/acknowledgements', label: 'Acknowledgements', roles: ADMIN_MANAGER },
       { href: '/sales/returns',     label: 'Sales Returns', roles: ADMIN_MANAGER },
       { href: '/retailers',         label: 'Customers',     roles: ['ADMIN', 'MANAGER', 'TEAM_LEAD', 'SALES_REP'] },
       // Last on purpose: an Order Booker still lands on Customers (first visible tab opens the hub).

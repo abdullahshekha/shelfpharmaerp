@@ -30,3 +30,13 @@ test('deliveryScope: managers unrestricted, everyone else only their own', () =>
   }
   assert.notDeepEqual(deliveryScope({ id: '', role: 'DRIVER' }), {})
 })
+
+test('Acknowledgements tab: ADMIN/MANAGER only, right after Deliveries', () => {
+  for (const r of ['ADMIN', 'MANAGER']) {
+    const t = salesTabs(r)
+    assert.equal(t[t.indexOf('/deliveries') + 1], '/deliveries/acknowledgements', r)
+  }
+  for (const r of ['DRIVER', 'SALESMAN', 'SALES_REP', 'TEAM_LEAD', 'ACCOUNTANT', 'WAREHOUSE']) {
+    assert.ok(!salesTabs(r).includes('/deliveries/acknowledgements'), r)
+  }
+})

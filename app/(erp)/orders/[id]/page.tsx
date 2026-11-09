@@ -14,6 +14,9 @@ import OrderHistory from '@/components/audit/OrderHistory'
 import { ORDER_STATUS_LABEL, orderStatusColor, orderStatusLabel } from '@/lib/orders/status'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
+const OUTCOME_LABEL: Record<string, string> = {
+  PAID_FULL: 'Paid in full', PAID_WITH_RETURN: 'Paid with return', RETURNED: 'Returned', ON_HOLD: 'On hold', PAY_LATER: 'Delivered, pay later',
+}
 const STATUS_FLOW = ['RECEIVED', 'INVOICED', 'OUT_FOR_DELIVERY', 'DELIVERED'] as const
 // Position on the timeline: On Hold sits at Out for Delivery (stock is out), Returned at the end.
 const FLOW_INDEX: Record<string, number> = { RECEIVED: 0, INVOICED: 1, OUT_FOR_DELIVERY: 2, ON_HOLD: 2, DELIVERED: 3, RETURNED: 3 }
@@ -43,7 +46,12 @@ interface Order {
   salesRep: { name: string } | null
   items: OrderItem[]
   invoice: { id: string; invoiceNumber: string; status: string } | null
-  delivery: { scheduledDate: string; status: string; driver: { name: string } | null } | null
+  delivery: {
+    scheduledDate: string; status: string; driver: { name: string } | null
+    outcome?: string | null; outcomeReason?: string | null; outcomeAt?: string | null
+    collections?: { id: string; method: string; amount: number | string; pictureUrl: string; acknowledgedAt: string | null }[]
+  } | null
+  salesReturns?: { id: string; returnNumber: string; totalAmount: number | string; stockAcknowledgedAt: string | null; items: { id: string; quantity: number; reason: string | null; medicine: { name: string } }[] }[]
   whatsappOrder: { imageUrl: string } | null
 }
 
@@ -256,6 +264,34 @@ export default function OrderDetailPage() {
                 {order.delivery.driver && <p className="text-slate-500">Driver: {order.delivery.driver.name}</p>}
               </div>
             )}
+            {order.delivery?.outcome && (
+              <div className="border-t pt-2 space-y-1">
+                <p className="font-medium">Outcome: {OUTCOME_LABEL[order.delivery.outcome] ?? order.delivery.outcome}</p>
+                {order.delivery.outcomeReason && <p className="text-slate-500">Reason: {order.delivery.outcomeReason}</p>}
+                {order.delivery.outcome === 'ON_HOLD' && <p className="text-slate-500">Held until: {formatDate(order.delivery.scheduledDate)}</p>}
+                {order.delivery.outcomeAt && <p className="text-slate-400 text-xs">Recorded {formatDateTime(order.delivery.outcomeAt)}</p>}
+              </div>
+            )}
+            {(order.delivery?.collections ?? []).map(c => (
+              <div key={c.id} className="border-t pt-2">
+                <p className="font-medium">Collected {formatPKR(Number(c.amount))} ({c.method === 'BANK' ? 'Bank' : 'Cash'})</p>
+                <Badge className={`text-xs ${c.acknowledgedAt ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                  {c.acknowledgedAt ? 'Acknowledged' : 'Awaiting acknowledgement'}
+                </Badge>
+                {' '}<a href={c.pictureUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-xs">Picture</a>
+              </div>
+            ))}
+            {(order.salesReturns ?? []).map(r => (
+              <div key={r.id} className="border-t pt-2">
+                <p className="font-medium">Return {r.returnNumber} ({formatPKR(Number(r.totalAmount))})</p>
+                <ul className="text-slate-500 list-disc ml-4">
+                  {r.items.map(i => <li key={i.id}>{i.medicine.name} x {i.quantity}{i.reason ? ` (${i.reason})` : ''}</li>)}
+                </ul>
+                <Badge className={`text-xs ${r.stockAcknowledgedAt ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                  {r.stockAcknowledgedAt ? 'Stock received' : 'Stock not yet acknowledged'}
+                </Badge>
+              </div>
+            ))}
             {order.invoice && (
               <div>
                 <Link href={`/invoices/${order.invoice.id}`} className="font-medium text-blue-600 hover:underline">
