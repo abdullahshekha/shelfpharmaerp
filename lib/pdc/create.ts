@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { parseDateInput } from '@/lib/accounting/dates'
-import { canCreateCheque, canManageCheques } from './guard'
+import { canCreateCheque, canManageCheques, validatePartyShape } from './guard'
 import type { ChequeDirection } from './rules'
 
 export class ChequeError extends Error {
@@ -34,6 +34,22 @@ export async function assertBankAccount(id: string): Promise<void> {
   }
 }
 
+/** Validates exactly one party matching the direction and that it exists; throws ChequeError. */
+export async function resolveParty(direction: ChequeDirection, retailerIn: unknown, supplierIn: unknown) {
+  const retailerId = optStr(retailerIn)
+  const supplierId = optStr(supplierIn)
+  const bad = validatePartyShape(direction, retailerId, supplierId)
+  if (bad) throw new ChequeError(400, bad)
+  if (direction === 'RECEIVABLE') {
+    const r = await prisma.retailer.findUnique({ where: { id: retailerId! }, select: { id: true } })
+    if (!r) throw new ChequeError(404, 'Customer not found')
+  } else {
+    const sp = await prisma.supplier.findUnique({ where: { id: supplierId! }, select: { id: true } })
+    if (!sp) throw new ChequeError(404, 'Supplier not found')
+  }
+  return { retailerId, supplierId }
+}
+
 export async function createChequeRecord(user: { id: string; role: string }, input: ChequeInput) {
   const direction = input.direction
   if (direction !== 'RECEIVABLE' && direction !== 'PAYABLE') throw new ChequeError(400, 'Invalid direction')
@@ -52,17 +68,7 @@ export async function createChequeRecord(user: { id: string; role: string }, inp
     receivedDate = d
   }
 
-  const retailerId = optStr(input.retailerId)
-  const supplierId = optStr(input.supplierId)
-  if (direction === 'RECEIVABLE') {
-    if (!retailerId || supplierId) throw new ChequeError(400, 'A receivable cheque needs exactly one customer')
-    const r = await prisma.retailer.findUnique({ where: { id: retailerId }, select: { id: true } })
-    if (!r) throw new ChequeError(404, 'Customer not found')
-  } else {
-    if (!supplierId || retailerId) throw new ChequeError(400, 'A payable cheque needs exactly one supplier')
-    const s = await prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } })
-    if (!s) throw new ChequeError(404, 'Supplier not found')
-  }
+  const { retailerId, supplierId } = await resolveParty(direction as ChequeDirection, input.retailerId, input.supplierId)
 
   const bankAccountId = optStr(input.bankAccountId)
   if (bankAccountId) await assertBankAccount(bankAccountId)

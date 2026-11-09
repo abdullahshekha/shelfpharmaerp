@@ -30,3 +30,20 @@ export function canEditCheque(
   ) return 'FULL'
   return false
 }
+
+/** Only managers may change a cheque's party (a salesman may not, even on his own cheque). */
+export function canEditParty(role: string): boolean {
+  return canManageCheques(role)
+}
+
+/** Pure shape check: exactly one party, matching the direction. Returns an error message or null. */
+export function validatePartyShape(
+  direction: ChequeDirection,
+  retailerId: string | null,
+  supplierId: string | null,
+): string | null {
+  if (direction === 'RECEIVABLE') {
+    return !retailerId || supplierId ? 'A receivable cheque needs exactly one customer' : null
+  }
+  return !supplierId || retailerId ? 'A payable cheque needs exactly one supplier' : null
+}

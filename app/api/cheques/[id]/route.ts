@@ -3,8 +3,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
 import { parseDateInput } from '@/lib/accounting/dates'
-import { canManageCheques, canEditCheque } from '@/lib/pdc/guard'
-import { assertBankAccount, parseChequeAmount, optStr, ChequeError } from '@/lib/pdc/create'
+import { canManageCheques, canEditCheque, canEditParty } from '@/lib/pdc/guard'
+import { assertBankAccount, resolveParty, parseChequeAmount, optStr, ChequeError } from '@/lib/pdc/create'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +37,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const mode = user.id ? canEditCheque(user, cheque) : false
   if (!mode) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  const partyTouched = 'retailerId' in body || 'supplierId' in body
+  if (partyTouched && !canEditParty(user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   try {
     const data: Prisma.ChequeUpdateManyMutationInput = {}
     if (mode === 'NOTES') {
@@ -52,6 +57,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
       if ('amount' in body) {
         const a = parseChequeAmount(body.amount)
+        // Defensive for Task 4 onward: once payments are linked to a cheque its amount must stay fixed.
         if (a !== Number(cheque.amount) && cheque._count.payments + cheque._count.supplierPayments > 0) {
           throw new ChequeError(409, 'Amount cannot change once payments are linked to this cheque')
         }
@@ -71,7 +77,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if ('pictureUrl' in body) data.pictureUrl = optStr(body.pictureUrl)
     }
     // bankAccountId is a scalar FK; updateMany takes it directly
-    const extraData: { bankAccountId?: string | null } = {}
+    const extraData: { bankAccountId?: string | null; retailerId?: string | null; supplierId?: string | null } = {}
+    if (mode === 'FULL' && partyTouched) {
+      const p = await resolveParty(cheque.direction as 'RECEIVABLE' | 'PAYABLE', body.retailerId, body.supplierId)
+      extraData.retailerId = p.retailerId
+      extraData.supplierId = p.supplierId
+    }
     if (mode === 'FULL' && 'bankAccountId' in body) {
       const b = optStr(body.bankAccountId)
       if (b) await assertBankAccount(b)

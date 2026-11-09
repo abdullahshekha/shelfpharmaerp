@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { canManageCheques, canAcknowledge, canCreateCheque, canEditCheque } from '../../lib/pdc/guard'
+import { canManageCheques, canAcknowledge, canCreateCheque, canEditCheque, canEditParty, validatePartyShape } from '../../lib/pdc/guard'
 
 const ch = (o: Partial<{ status: string; recordedById: string | null; acknowledgedAt: Date | null }> = {}) => ({
   status: 'PENDING', recordedById: 'u1', acknowledgedAt: null, ...o,
@@ -41,4 +41,19 @@ test('canEditCheque: salesman only own unacknowledged', () => {
   assert.equal(canEditCheque(s, ch({ acknowledgedAt: new Date() })), false)
   assert.equal(canEditCheque(s, ch({ status: 'CLEARED' })), false)
   assert.equal(canEditCheque({ id: 'u1', role: 'WAREHOUSE' }, ch()), false)
+})
+
+test('canEditParty: managers only, not salesman', () => {
+  for (const r of ['ADMIN', 'MANAGER', 'ACCOUNTANT']) assert.equal(canEditParty(r), true)
+  assert.equal(canEditParty('SALESMAN'), false)
+})
+
+test('validatePartyShape: exactly one party matching direction', () => {
+  assert.equal(validatePartyShape('RECEIVABLE', 'r1', null), null)
+  assert.equal(validatePartyShape('PAYABLE', null, 's1'), null)
+  assert.ok(validatePartyShape('RECEIVABLE', null, null))
+  assert.ok(validatePartyShape('RECEIVABLE', 'r1', 's1'))
+  assert.ok(validatePartyShape('RECEIVABLE', null, 's1'))
+  assert.ok(validatePartyShape('PAYABLE', 'r1', null))
+  assert.ok(validatePartyShape('PAYABLE', 'r1', 's1'))
 })
