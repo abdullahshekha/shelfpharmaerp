@@ -15,6 +15,7 @@ import {
   buildSupplierReturn,
   type BuiltEntry,
 } from './builders'
+import { cogsSourceFor, cogsQualifyingWhere } from '@/lib/orders/cogs-source'
 
 export type SourceType =
   | 'INVOICE'
@@ -65,9 +66,16 @@ async function load(tx: Tx, type: SourceType, id: string): Promise<Loaded> {
     case 'DELIVERY_COGS': {
       const r = await tx.order.findUnique({ where: { id }, include: { items: true, delivery: true, invoice: { select: { invoiceDate: true } } } })
       if (!r) return null
-      // Stable fallback chain (never updatedAt, which moves on every edit): deliveredAt, then invoice date, then order date.
-      const date = r.delivery?.deliveredAt ?? r.invoice?.invoiceDate ?? r.orderDate
-      if (r.status !== 'DELIVERED') return { date, entries: [] }
+      // Eligible while the stock is out (STOCK_OUT_STATUSES), dated at assignment; stable fallback chain for legacy
+      // orders (never updatedAt): assignedAt, deliveredAt, invoice date, order date. See lib/orders/cogs-source.ts.
+      const { eligible, date } = cogsSourceFor({
+        status: r.status,
+        assignedAt: r.delivery?.assignedAt,
+        deliveredAt: r.delivery?.deliveredAt,
+        invoiceDate: r.invoice?.invoiceDate,
+        orderDate: r.orderDate,
+      })
+      if (!eligible) return { date, entries: [] }
       return {
         date,
         entries: buildDeliveryCogs({
@@ -350,19 +358,8 @@ function qualifying(type: SourceType, from: Date): any {
     case 'INVOICE':
       return { invoiceDate: { gte: from } }
     case 'DELIVERY_COGS':
-      // Mirrors load(): deliveredAt, else invoice date, else order date.
-      return {
-        status: 'DELIVERED',
-        OR: [
-          { delivery: { is: { deliveredAt: { gte: from } } } },
-          {
-            AND: [
-              { OR: [{ delivery: { is: null } }, { delivery: { is: { deliveredAt: null } } }] },
-              { OR: [{ invoice: { is: { invoiceDate: { gte: from } } } }, { AND: [{ invoice: { is: null } }, { orderDate: { gte: from } }] }] },
-            ],
-          },
-        ],
-      }
+      // Mirrors load() via the shared rule: stock-out statuses, dated assignedAt ?? deliveredAt ?? invoice date ?? order date.
+      return cogsQualifyingWhere(from)
     case 'PAYMENT':
       return { paymentDate: { gte: from } }
     case 'SALES_RETURN':

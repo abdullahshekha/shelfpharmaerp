@@ -1,12 +1,14 @@
 import { AccountingError } from '@/lib/accounting/core'
 import { prisma } from '@/lib/prisma'
-import { deductFefo, unitCostFrom } from '@/lib/accounting/cost'
-import { totalUnits } from '@/lib/orders/units'
-import { syncAllSafe } from '@/lib/accounting/sync'
+import { syncAfterCommit } from '@/lib/deliveries/sync'
 import { undeliverInTx } from '@/lib/orders/lifecycle'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
-/** Moves an order to `status` with all side effects (stock, invoice/delivery/challan, ledger sync). Throws AccountingError unchanged. */
+/**
+ * Moves an order to `status` with its side effects (invoice/delivery/challan on CONFIRMED, restock when leaving a
+ * stock-out status, ledger sync). Never deducts stock: that happens at assignment (lib/deliveries/assign.ts).
+ * Throws AccountingError unchanged.
+ */
 export async function setOrderStatus(id: string, status: string) {
   const warnings: string[] = []
 
@@ -24,13 +26,14 @@ export async function setOrderStatus(id: string, status: string) {
       const claim = await tx.order.updateMany({ where: { id, status: { not: 'DELIVERED' } }, data: { status } })
       alreadyDelivered = claim.count === 0
     } else {
-      // Leaving DELIVERED puts the deducted stock back (claimed, so concurrent requests restock once).
+      // Leaving a stock-out status puts what is still out back (claimed, so concurrent requests restock once).
       const w = await undeliverInTx(tx, id, status)
       if (w !== null) {
         warnings.push(...w)
-        // Moving back to an earlier (non-cancelled) status: the delivery is no longer done.
+        // Moving back to an earlier (non-cancelled) status: the delivery is no longer done and no longer assigned
+        // (assignedAt cleared so a later assignment dates the new COGS posting itself).
         if (status !== 'CANCELLED') {
-          await tx.delivery.updateMany({ where: { orderId: id }, data: { status: 'SCHEDULED', deliveredAt: null } })
+          await tx.delivery.updateMany({ where: { orderId: id }, data: { status: 'SCHEDULED', deliveredAt: null, assignedAt: null } })
         }
       }
     }
@@ -86,19 +89,9 @@ export async function setOrderStatus(id: string, status: string) {
     }
 
     if (status === 'DELIVERED' && !alreadyDelivered) {
-      for (const item of updated.items) {
-        const { costSum, deducted } = await deductFefo(tx, item.medicineId, totalUnits(item))
-        // Bonus units come off the shelf too; unitCost stays per ORDERED unit so quantity x unitCost (the COGS posting)
-        // covers the cost of the free units as well.
-        // deductedQty records what actually came off the shelf (0 on a full shortfall) so an un-deliver/cancel
-        // restocks exactly that.
-        await tx.orderItem.update({
-          where: { id: item.id },
-          data: { deductedQty: deducted, ...(deducted > 0 ? { unitCost: unitCostFrom(costSum, item.quantity) } : {}) },
-        })
-      }
-
-      // Keep a deliveredAt the Deliveries page already recorded (it dates the COGS posting).
+      // Stock is no longer deducted here: it leaves at assignment (lib/deliveries/assign.ts), which also records
+      // deductedQty/unitCost and dates the COGS posting (Delivery.assignedAt). This only marks the order delivered.
+      // Keep a deliveredAt the Deliveries page already recorded.
       await tx.delivery.updateMany({ where: { orderId: id, deliveredAt: null }, data: { deliveredAt: new Date() } })
       await tx.delivery.updateMany({ where: { orderId: id }, data: { status: 'DELIVERED' } })
     }
@@ -108,7 +101,7 @@ export async function setOrderStatus(id: string, status: string) {
 
   // Ledger sync after the business transaction has committed (never fails the request).
   const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } }).catch(() => null)
-  await syncAllSafe([['INVOICE', inv?.id], ['DELIVERY_COGS', id]])
+  await syncAfterCommit([['INVOICE', inv?.id], ['DELIVERY_COGS', id]])
 
   return { order, warnings }
 }

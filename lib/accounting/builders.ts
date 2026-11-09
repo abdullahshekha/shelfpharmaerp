@@ -52,7 +52,7 @@ export function buildInvoice(inv: InvoiceInput): BuiltEntry[] {
 // ---- Cost of goods sold at delivery ----
 export interface DeliveryCogsInput {
   orderNumber: string
-  /** delivery.deliveredAt ?? order.updatedAt */
+  /** cogsSourceFor() date: delivery.assignedAt ?? deliveredAt ?? invoice date ?? order date */
   date: Date
   items: { quantity: number; unitCost: number | null }[]
 }
