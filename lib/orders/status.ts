@@ -108,3 +108,10 @@ export const ORDER_STATUS_COLOR: Record<OrderStatus, string> = {
 export function orderStatusColor(s: string): string {
   return isOrderStatus(s) ? ORDER_STATUS_COLOR[s] : ''
 }
+
+/** Error for a failed RECEIVED -> INVOICED claim, given the order's locked status (null = row gone). Null when it can proceed. */
+export function confirmClaimError(lockedStatus: string | null): { status: number; message: string } | null {
+  if (lockedStatus === null) return { status: 404, message: 'Order not found' }
+  if (lockedStatus !== 'RECEIVED') return { status: 409, message: `Only a received order can be confirmed (this order is ${lockedStatus})` }
+  return null
+}

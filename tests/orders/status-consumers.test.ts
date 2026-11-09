@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ORDER_STATUSES, ORDER_STATUS_LABEL, canSetViaStatusRoute, countsAsSale, PENDING_DEMAND_STATUSES } from '../../lib/orders/status'
+import { ORDER_STATUSES, ORDER_STATUS_LABEL, canSetViaStatusRoute, confirmClaimError, countsAsSale, PENDING_DEMAND_STATUSES } from '../../lib/orders/status'
 import { planConversion } from '../../lib/orders/convert'
 
 test('ORDER_STATUS_LABEL covers every status with the spec wording', () => {
@@ -43,4 +43,10 @@ test('planConversion maps statuses, deletes drafts, flags undeducted OUT_FOR_DEL
   // Delivery rows of INVOICED orders go back to SCHEDULED; the others stay as they are
   assert.equal(p.updates.find((u) => u.id === 'c')!.deliveryStatus, 'SCHEDULED')
   assert.equal(p.updates.find((u) => u.id === 'e')!.deliveryStatus, null)
+})
+
+test('confirmClaimError: only a locked RECEIVED order may be confirmed', () => {
+  assert.equal(confirmClaimError('RECEIVED'), null)
+  assert.equal(confirmClaimError(null)!.status, 404)
+  for (const s of ['CANCELLED', 'INVOICED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'ON_HOLD', 'RETURNED']) assert.equal(confirmClaimError(s)!.status, 409, s)
 })

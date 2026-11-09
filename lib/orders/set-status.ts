@@ -1,3 +1,5 @@
+import { AccountingError } from '@/lib/accounting/core'
+import { confirmClaimError } from '@/lib/orders/status'
 import { prisma } from '@/lib/prisma'
 import { syncAfterCommit } from '@/lib/deliveries/sync'
 import { undeliverInTx } from '@/lib/orders/lifecycle'
@@ -11,11 +13,21 @@ import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForAre
 export async function setOrderStatus(id: string, status: string) {
   const warnings: string[] = []
 
-  const order = await prisma.$transaction(async (tx) => {
+  let order
+  try {
+  order = await prisma.$transaction(async (tx) => {
     // Re-setting DELIVERED must be a no-op for stock and deliveredAt. The conditional update also serialises
     // concurrent DELIVERED requests on the row lock: only the one that actually flips the status sees count 1.
     let alreadyDelivered = false
-    if (status === 'DELIVERED') {
+    if (status === 'INVOICED') {
+      // Confirm = RECEIVED -> INVOICED only. Lock the row, then claim conditionally so a cancel / portal cart-clear
+      // that committed since the caller's check cannot be overwritten (and no invoice is created for it).
+      const locked = await tx.$queryRaw<{ status: string }[]>`SELECT "status" FROM "Order" WHERE "id" = ${id} FOR UPDATE`
+      const bad = confirmClaimError(locked[0]?.status ?? null)
+      if (bad) throw new AccountingError(bad.status, bad.message)
+      const claim = await tx.order.updateMany({ where: { id, status: 'RECEIVED' }, data: { status } })
+      if (claim.count === 0) throw new AccountingError(409, 'The order changed while confirming, reload and retry')
+    } else if (status === 'DELIVERED') {
       const claim = await tx.order.updateMany({ where: { id, status: { not: 'DELIVERED' } }, data: { status } })
       alreadyDelivered = claim.count === 0
     } else {
@@ -91,6 +103,11 @@ export async function setOrderStatus(id: string, status: string) {
 
     return updated
   }, { maxWait: 10000, timeout: 20000 })
+  } catch (e) {
+    // The order was deleted under us (e.g. a portal cart-clear): not found, not a server error.
+    if ((e as { code?: string })?.code === 'P2025') throw new AccountingError(404, 'Order not found')
+    throw e
+  }
 
   // Ledger sync after the business transaction has committed (never fails the request).
   const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } }).catch(() => null)
