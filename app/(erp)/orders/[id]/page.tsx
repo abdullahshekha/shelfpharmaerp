@@ -11,17 +11,12 @@ import { ArrowLeft, Trash2, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import OrderHistory from '@/components/audit/OrderHistory'
+import { ORDER_STATUS_LABEL, orderStatusColor, orderStatusLabel } from '@/lib/orders/status'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 
-const STATUS_FLOW = ['PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED', 'DELIVERED']
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: 'bg-slate-100 text-slate-700',
-  CONFIRMED: 'bg-blue-100 text-blue-700',
-  PICKING: 'bg-yellow-100 text-yellow-700',
-  DISPATCHED: 'bg-orange-100 text-orange-700',
-  DELIVERED: 'bg-green-100 text-green-700',
-  CANCELLED: 'bg-red-100 text-red-700',
-}
+const STATUS_FLOW = ['RECEIVED', 'INVOICED', 'OUT_FOR_DELIVERY', 'DELIVERED'] as const
+// Position on the timeline: On Hold sits at Out for Delivery (stock is out), Returned at the end.
+const FLOW_INDEX: Record<string, number> = { RECEIVED: 0, INVOICED: 1, OUT_FOR_DELIVERY: 2, ON_HOLD: 2, DELIVERED: 3, RETURNED: 3 }
 
 interface OrderItem {
   id: string
@@ -115,22 +110,21 @@ export default function OrderDetailPage() {
     setSaving(false)
   }
 
-  const advanceStatus = async () => {
-    if (!order) return
-    const idx = STATUS_FLOW.indexOf(order.status)
-    if (idx === -1 || idx >= STATUS_FLOW.length - 1) return
-    const next = STATUS_FLOW[idx + 1]
+  // RECEIVED -> INVOICED is the only status move made here; every later move happens on the Deliveries board.
+  const confirmOrder = async () => {
+    if (!order || order.status !== 'RECEIVED') return
     setUpdating(true)
     const res = await fetch(`/api/orders/${id}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: next }),
+      body: JSON.stringify({ status: 'INVOICED' }),
     })
     if (res.ok) {
-      toast.success(`Order moved to ${next}`)
+      toast.success('Order confirmed, invoice generated')
       fetchOrder()
     } else {
-      toast.error('Failed to update status')
+      const j = await res.json().catch(() => ({}))
+      toast.error(j.error ?? 'Failed to update status')
     }
     setUpdating(false)
   }
@@ -174,8 +168,8 @@ export default function OrderDetailPage() {
   if (loading) return <div className="animate-pulse p-8 text-slate-400">Loading...</div>
   if (!order) return <div className="p-8 text-slate-400">Order not found.</div>
 
-  const currentIdx = STATUS_FLOW.indexOf(order.status)
-  const canAdvance = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1
+  const currentIdx = FLOW_INDEX[order.status] ?? -1
+  const canConfirm = order.status === 'RECEIVED' && (isAdmin || user?.role === 'MANAGER')
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -184,7 +178,7 @@ export default function OrderDetailPage() {
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold font-mono">{order.orderNumber}</h1>
-            <Badge className={STATUS_COLORS[order.status] ?? ''}>{order.status}</Badge>
+            <Badge className={orderStatusColor(order.status)}>{orderStatusLabel(order.status)}</Badge>
           </div>
           <p className="text-slate-500 text-sm">{formatDateTime(order.orderDate)}</p>
         </div>
@@ -194,12 +188,12 @@ export default function OrderDetailPage() {
               <Pencil size={14} /> Edit
             </Button>
           )}
-          {canAdvance && order.status !== 'CANCELLED' && (
-            <Button onClick={advanceStatus} disabled={updating}>
-              → {STATUS_FLOW[currentIdx + 1]}
+          {canConfirm && (
+            <Button onClick={confirmOrder} disabled={updating}>
+              Confirm order
             </Button>
           )}
-          {order.status === 'PENDING' && (
+          {order.status === 'RECEIVED' && (
             <Button variant="outline" onClick={cancelOrder} disabled={updating}
               className="text-red-600 border-red-200 hover:bg-red-50">
               Cancel
@@ -217,14 +211,14 @@ export default function OrderDetailPage() {
         <CardContent className="pt-4">
           <div className="flex items-center gap-0">
             {STATUS_FLOW.map((s, i) => {
-              const done = STATUS_FLOW.indexOf(order.status) >= i
-              const active = order.status === s
+              const done = currentIdx >= i
+              const active = currentIdx === i
               return (
                 <div key={s} className="flex items-center flex-1">
                   <div className={`flex flex-col items-center flex-1 ${i === 0 ? '' : ''}`}>
                     <div className={`h-2 w-full ${i === 0 ? 'rounded-l-full' : i === STATUS_FLOW.length - 1 ? 'rounded-r-full' : ''} ${done ? 'bg-blue-500' : 'bg-slate-200'}`} />
                     <span className={`text-xs mt-1 ${active ? 'font-bold text-blue-600' : done ? 'text-blue-500' : 'text-slate-400'}`}>
-                      {s}
+                      {ORDER_STATUS_LABEL[s]}
                     </span>
                   </div>
                 </div>
@@ -265,13 +259,13 @@ export default function OrderDetailPage() {
                 <Badge className="text-xs ml-2">{order.invoice.status}</Badge>
               </div>
             )}
-            {order.status !== 'PENDING' && order.status !== 'CANCELLED' && (
+            {order.status !== 'RECEIVED' && order.status !== 'CANCELLED' && (
               <a href={`/api/orders/${order.id}/challan`} download className="text-blue-600 hover:underline block">
                 Download Delivery Challan
               </a>
             )}
             {!order.delivery && !order.invoice && (
-              <p className="text-slate-400">Will be created on CONFIRMED</p>
+              <p className="text-slate-400">Will be created when the order is confirmed</p>
             )}
           </CardContent>
         </Card>

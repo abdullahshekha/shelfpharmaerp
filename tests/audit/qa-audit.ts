@@ -112,7 +112,7 @@ async function main() {
   const mfr = track(await prisma.manufacturer.create({ data: { name: `${P} Mfr` } }))
   const med = track(await prisma.medicine.create({ data: { code: `QAAUD${Date.now() % 100000}`, name: `${P} MED`, manufacturerId: mfr.id } }))
   const order = track(await prisma.order.create({
-    data: { retailerId: ret.id, status: 'DRAFT', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 10, lineTotal: 20 }, { medicineId: med.id, quantity: 1, unitPrice: 10, lineTotal: 10 }] } },
+    data: { retailerId: ret.id, status: 'RECEIVED', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 10, lineTotal: 20 }, { medicineId: med.id, quantity: 1, unitPrice: 10, lineTotal: 10 }] } },
   }))
   es = await entries('Order', order.id)
   check('order CREATE entry holds the nested items', JSON.stringify((es[0]?.changes as any)?.items ?? '').includes('"quantity":2'))
@@ -134,11 +134,11 @@ async function main() {
   }
   const batch = track(await prisma.medicineBatch.create({ data: { medicineId: med.id, batchNumber: 'QA-AUDIT-B1', expiryDate: new Date('2031-01-01'), quantityIn: 10, currentQty: 10, purchasePrice: 0, tradePrice: 0 } }))
   const flow = track(await prisma.order.create({
-    data: { retailerId: ret.id, status: 'PENDING', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 0, lineTotal: 0 }] } },
+    data: { retailerId: ret.id, status: 'RECEIVED', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 0, lineTotal: 0 }] } },
     include: { items: true },
   }))
   flow.items.forEach(track)
-  await setOrderStatus(flow.id, 'CONFIRMED')
+  await setOrderStatus(flow.id, 'INVOICED')
   const inv = track((await prisma.invoice.findUnique({ where: { orderId: flow.id } }))!)
   track((await prisma.delivery.findUnique({ where: { orderId: flow.id } }))!)
   track((await prisma.deliveryChallan.findUnique({ where: { orderId: flow.id } }))!)
@@ -324,7 +324,7 @@ async function main() {
   try {
     const orderNumber = `SP-19990101-${String(Date.now() % 10000).padStart(4, '0')}`
     const ho = track(await prisma.order.create({
-      data: { retailerId: ret.id, orderNumber, status: 'DRAFT', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 10, lineTotal: 20 }] } },
+      data: { retailerId: ret.id, orderNumber, status: 'RECEIVED', items: { create: [{ medicineId: med.id, quantity: 2, unitPrice: 10, lineTotal: 20 }] } },
       include: { items: true },
     }))
     const item = track((ho as any).items[0])

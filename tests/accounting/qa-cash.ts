@@ -219,7 +219,7 @@ async function main() {
     const mk = await api('/api/orders', ADMIN, { method: 'POST', body: JSON.stringify({ retailerId: retailer.id, items: [{ medicineId: med.id, quantity: 10, unitPrice: 100, offerPercent: 0, salesTax: 0 }] }) })
     const order = (await json(mk)).data
     ids.orders.push(order.id)
-    await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) })
+    await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     const inv = await prisma.invoice.findUnique({ where: { orderId: order.id } })
     ids.invoices.push(inv!.id)
     const bankBefore = bal(b1.id)

@@ -133,7 +133,7 @@ async function main() {
     r = await api('/api/orders', ADMIN, { method: 'POST', body: JSON.stringify({ retailerId: retailer.id, items: [{ medicineId: med.id, quantity: 10, unitPrice: 100, offerPercent: 10, salesTax: 5 }] }) })
     const order = (await json(r)).data
     ids.orders.push(order.id)
-    for (const status of ['CONFIRMED', 'PICKING', 'DELIVERED']) await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status }) })
+    for (const status of ['INVOICED']) await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status }) })
     const inv = await prisma.invoice.findUnique({ where: { orderId: order.id } })
     ids.invoices.push(inv!.id)
     check('scenario: invoice has tax 50 and subtotal 900', Number(inv!.taxAmount) === 50 && Number(inv!.subtotal) === 900, `${inv!.taxAmount}/${inv!.subtotal}`)

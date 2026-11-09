@@ -9,19 +9,10 @@ import { formatPKR, formatDate } from '@/lib/utils/format'
 import { Plus, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { ORDER_STATUSES, ORDER_STATUS_LABEL, orderStatusColor, orderStatusLabel } from '@/lib/orders/status'
 import { DateRangePicker, type DateRange } from '@/components/shared/DateRangePicker'
 
-const STATUSES = ['DRAFT', 'PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED', 'DELIVERED', 'CANCELLED']
-
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT:      'bg-gray-100 text-gray-500 border border-dashed',
-  PENDING:    'bg-slate-100 text-slate-700',
-  CONFIRMED:  'bg-blue-100 text-blue-700',
-  PICKING:    'bg-yellow-100 text-yellow-700',
-  DISPATCHED: 'bg-orange-100 text-orange-700',
-  DELIVERED:  'bg-green-100 text-green-700',
-  CANCELLED:  'bg-red-100 text-red-700',
-}
+const STATUSES = ORDER_STATUSES
 
 interface Order {
   id: string
@@ -83,7 +74,7 @@ export default function OrdersPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
-              {STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              {STATUSES.map(s => <SelectItem key={s} value={s}>{ORDER_STATUS_LABEL[s]}</SelectItem>)}
             </SelectContent>
           </Select>
           {(status || dateRange) && (
@@ -121,7 +112,7 @@ export default function OrdersPage() {
                 ) : (
                   orders.map(o => (
                     <tr key={o.id} className="border-b hover:bg-slate-50 cursor-pointer"
-                      onClick={() => window.location.href = o.status === 'DRAFT' ? `/orders/new?draft=${o.id}` : `/orders/${o.id}`}>
+                      onClick={() => window.location.href = `/orders/${o.id}`}>
                       <td className="px-4 py-3 font-mono text-xs">{o.orderNumber}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium">{o.retailer.name}</div>
@@ -129,7 +120,7 @@ export default function OrdersPage() {
                       </td>
                       <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">{formatDate(o.orderDate)}</td>
                       <td className="px-4 py-3">
-                        <Badge className={`text-xs ${STATUS_COLORS[o.status] ?? ''}`}>{o.status}</Badge>
+                        <Badge className={`text-xs ${orderStatusColor(o.status)}`}>{orderStatusLabel(o.status)}</Badge>
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{formatPKR(o.totalAmount)}</td>
                       <td className="px-4 py-3">

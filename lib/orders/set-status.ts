@@ -1,22 +1,15 @@
-import { AccountingError } from '@/lib/accounting/core'
 import { prisma } from '@/lib/prisma'
 import { syncAfterCommit } from '@/lib/deliveries/sync'
 import { undeliverInTx } from '@/lib/orders/lifecycle'
 import { generateInvoiceNumber, generateChallanNumber, getNextDeliveryDateForArea } from '@/lib/utils/format'
 
 /**
- * Moves an order to `status` with its side effects (invoice/delivery/challan on CONFIRMED, restock when leaving a
+ * Moves an order to `status` with its side effects (invoice/delivery/challan on INVOICED, restock when leaving a
  * stock-out status, ledger sync). Never deducts stock: that happens at assignment (lib/deliveries/assign.ts).
  * Throws AccountingError unchanged.
  */
 export async function setOrderStatus(id: string, status: string) {
   const warnings: string[] = []
-
-  // A draft is not a real order yet: it can only be confirmed into PENDING (or cancelled).
-  const current = await prisma.order.findUnique({ where: { id }, select: { status: true } })
-  if (current?.status === 'DRAFT' && status !== 'PENDING' && status !== 'CANCELLED') {
-    throw new AccountingError(409, 'A draft must be confirmed (set to PENDING) before it can move on')
-  }
 
   const order = await prisma.$transaction(async (tx) => {
     // Re-setting DELIVERED must be a no-op for stock and deliveredAt. The conditional update also serialises
@@ -47,7 +40,7 @@ export async function setOrderStatus(id: string, status: string) {
       },
     })
 
-    if (status === 'CONFIRMED') {
+    if (status === 'INVOICED') {
       const existing = await tx.invoice.findUnique({ where: { orderId: id } })
       if (!existing) {
         const subtotal = Number(updated.totalAmount)

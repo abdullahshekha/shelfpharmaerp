@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/utils/auth'
+import { PENDING_DEMAND_STATUSES } from '@/lib/orders/status'
 
 export const dynamic = 'force-dynamic'
 
 const ALLOWED_ROLES = ['ADMIN', 'MANAGER', 'ACCOUNTANT']
 
-// Orders that have not been delivered yet have not consumed stock (stock is deducted at DELIVERED).
-const PENDING_STATUSES = ['PENDING', 'CONFIRMED', 'PICKING', 'DISPATCHED']
+// Orders not yet settled with the customer (per the spec: received, invoiced, out for delivery, on hold).
+const PENDING_STATUSES = [...PENDING_DEMAND_STATUSES]
 
 // Reorder suggestions: suggested = max(0, pending demand + minStockLevel − current stock). Read-only.
 export async function GET(req: NextRequest) {

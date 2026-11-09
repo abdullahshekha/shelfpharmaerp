@@ -30,7 +30,9 @@ export const isStockOutStatus = (s: string) => (STOCK_OUT_STATUSES as readonly s
  * clears unitCost/deductedQty. Returns warnings.
  */
 export async function restockOrderItems(tx: Tx, orderId: string, fromStatus: string): Promise<string[]> {
-  const items = await tx.orderItem.findMany({ where: { orderId }, include: { medicine: { select: { name: true } } } })
+  const found = await tx.orderItem.findMany({ where: { orderId }, include: { medicine: { select: { name: true } } } })
+  // Sorted by medicineId (same order as assignment locks batches) so a cancel and an assign cannot deadlock.
+  const items = [...found].sort((a, b) => (a.medicineId < b.medicineId ? -1 : a.medicineId > b.medicineId ? 1 : 0))
   const warnings: string[] = []
   for (const item of items) {
     const qty = stillDeductedQty(fromStatus, item)

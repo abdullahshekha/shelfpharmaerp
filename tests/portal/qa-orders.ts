@@ -28,7 +28,7 @@ async function main() {
     check('place order 200', r.status === 200)
     check('priced server-side: 5 x 100 x 0.9 = 450', j.data?.totalAmount === 450 && j.data.items[0].unitPrice === 100 && j.data.items[0].offerPercent === 10, JSON.stringify(j.data))
     const db = await prisma.order.findFirst({ where: { retailerId: retailer.id }, include: { items: true } })
-    check('stored PENDING / OFFER_LIST / MRP snapshot', db?.status === 'PENDING' && db.source === 'OFFER_LIST' && Number(db.items[0].mrp) === 130 && Number(db.totalAmount) === 450)
+    check('stored RECEIVED / OFFER_LIST / MRP snapshot', db?.status === 'RECEIVED' && db.source === 'OFFER_LIST' && Number(db.items[0].mrp) === 130 && Number(db.totalAmount) === 450)
     const orderId = j.data.id as string
 
     // GET returns it; the offer-list page can pre-fill from this
@@ -46,8 +46,8 @@ async function main() {
     check('orderId null while an order is open -> 409', r.status === 409)
     check('…and nothing changed', Number((await prisma.order.findUnique({ where: { id: orderId } }))?.totalAmount) === 720)
 
-    // a staff-created PENDING order for this customer is never touched
-    const staffOrder = await prisma.order.create({ data: { orderNumber: `QA-STAFF-${Date.now()}`, retailerId: retailer.id, status: 'PENDING', source: 'MANUAL', totalAmount: 1 } })
+    // a staff-created RECEIVED order for this customer is never touched
+    const staffOrder = await prisma.order.create({ data: { orderNumber: `QA-STAFF-${Date.now()}`, retailerId: retailer.id, status: 'RECEIVED', source: 'MANUAL', totalAmount: 1 } })
     await putOrder(cookie, { orderId, items: [{ medicineId: M, quantity: 2 }] })
     check('staff MANUAL pending order untouched', (await prisma.order.findUnique({ where: { id: staffOrder.id } }))?.totalAmount.toString() === '1')
 
@@ -63,7 +63,7 @@ async function main() {
     check('staff order unchanged after refused edit', so?.totalAmount.toString() === '1' && so.items.length === 0)
 
     // staff confirmed the order after the customer loaded it (sequential, stale orderId) -> 409, edit not applied; next order starts fresh
-    const conf = await api(`/api/orders/${orderId}/status`, staffCookie(), { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) })
+    const conf = await api(`/api/orders/${orderId}/status`, staffCookie(), { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     check('staff confirm ok', conf.status === 200)
     r = await putOrder(cookie, { orderId, items: [{ medicineId: M, quantity: 99 }] })
     check('edit after confirm -> 409', r.status === 409 && /updated by our team/i.test((await r.json()).error))
@@ -75,7 +75,7 @@ async function main() {
     const newId = j.data.id as string
     j = await (await api('/api/portal/orders', cookie)).json()
     const confirmed = j.data.find((o: { id: string }) => o.id === orderId)
-    check('history shows confirmed status, invoice total and delivery date', confirmed?.status === 'CONFIRMED' && confirmed.invoiceTotal === 180 && !!confirmed.scheduledDate, JSON.stringify(confirmed))
+    check('history shows confirmed status, invoice total and delivery date', confirmed?.status === 'INVOICED' && confirmed.invoiceTotal === 180 && !!confirmed.scheduledDate, JSON.stringify(confirmed))
 
     // zero-out a line, then clear the cart deletes the open order
     r = await putOrder(cookie, { orderId: newId, items: [{ medicineId: M, quantity: 0 }] })
@@ -96,7 +96,7 @@ async function main() {
     const rs = await Promise.all(Array.from({ length: 6 }, () => putOrder(rc, { orderId: null, items: [{ medicineId: M, quantity: 1 }] })))
     const codes = rs.map(x => x.status)
     check('6 parallel creates: exactly one 200, rest 409', codes.filter(c => c === 200).length === 1 && codes.filter(c => c === 409).length === 5, JSON.stringify(codes))
-    check('exactly one open order in DB', (await prisma.order.count({ where: { retailerId: racer.retailer.id, status: 'PENDING', source: 'OFFER_LIST' } })) === 1)
+    check('exactly one open order in DB', (await prisma.order.count({ where: { retailerId: racer.retailer.id, status: 'RECEIVED', source: 'OFFER_LIST' } })) === 1)
 
     // confirm-vs-edit race: invoice must never disagree with the lines
     const rr = await makeQaCustomer({ customerType: 'QA-Type-Orders' })
@@ -106,11 +106,11 @@ async function main() {
       const oid = (await (await putOrder(rrc, { orderId: null, items: [{ medicineId: M, quantity: 1 }] })).json()).data.id as string
       const [ur, sr] = await Promise.all([
         putOrder(rrc, { orderId: oid, items: [{ medicineId: M, quantity: 7 }] }),
-        api(`/api/orders/${oid}/status`, staffCookie(), { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) }),
+        api(`/api/orders/${oid}/status`, staffCookie(), { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) }),
       ])
       const o = await prisma.order.findUnique({ where: { id: oid }, include: { items: true, invoice: true } })
       const sum = o!.items.reduce((s, it) => s + Number(it.lineTotal), 0)
-      check(`race ${i}: update 200/409 (never 500), staff ${sr.status}, CONFIRMED`, (ur.status === 200 || ur.status === 409) && o?.status === 'CONFIRMED', `update=${ur.status} staff=${sr.status}`)
+      check(`race ${i}: update 200/409 (never 500), staff ${sr.status}, CONFIRMED`, (ur.status === 200 || ur.status === 409) && o?.status === 'INVOICED', `update=${ur.status} staff=${sr.status}`)
       check(`race ${i}: invoice subtotal == order total == sum of lines`, !!o?.invoice && Number(o.invoice.subtotal) === Number(o.totalAmount) && Number(o.totalAmount) === sum, `inv=${o?.invoice?.subtotal} total=${o?.totalAmount} sum=${sum}`)
     }
 

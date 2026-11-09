@@ -46,7 +46,7 @@ export function serializeOrder(o: OrderWithView): PortalOrderView {
 
 export async function findOpenOrder(retailerId: string): Promise<PortalOrderView | null> {
   const o = await prisma.order.findFirst({
-    where: { retailerId, status: 'PENDING', source: 'OFFER_LIST', invoice: { is: null } },
+    where: { retailerId, status: 'RECEIVED', source: 'OFFER_LIST', invoice: { is: null } },
     orderBy: { createdAt: 'desc' },
     include: orderViewInclude,
   })
@@ -85,7 +85,7 @@ export async function savePortalOrder(params: {
         // Serialise all portal saves for this customer (transaction-scoped; safe under pgbouncer)
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${retailerId}))`
         const open = await tx.order.findFirst({
-          where: { retailerId, status: 'PENDING', source: 'OFFER_LIST', invoice: { is: null } },
+          where: { retailerId, status: 'RECEIVED', source: 'OFFER_LIST', invoice: { is: null } },
           orderBy: { createdAt: 'desc' },
           select: { id: true },
         })
@@ -99,14 +99,14 @@ export async function savePortalOrder(params: {
         if (lines.length === 0) {
           // orderId is guaranteed set here (the route rejects an empty cart without one)
           // The status condition is part of the write itself, so a concurrent staff CONFIRM loses/wins atomically
-          const n = await tx.order.deleteMany({ where: { id: orderId!, retailerId, status: 'PENDING', source: 'OFFER_LIST', invoice: { is: null } } }) // items cascade
+          const n = await tx.order.deleteMany({ where: { id: orderId!, retailerId, status: 'RECEIVED', source: 'OFFER_LIST', invoice: { is: null } } }) // items cascade
           if (n.count !== 1) throw new PortalConflict(CONFIRMED_MESSAGE)
           return null
         }
 
         let id: string
         if (orderId) {
-          const n = await tx.order.updateMany({ where: { id: orderId, retailerId, status: 'PENDING', source: 'OFFER_LIST', invoice: { is: null } }, data: { totalAmount: total } })
+          const n = await tx.order.updateMany({ where: { id: orderId, retailerId, status: 'RECEIVED', source: 'OFFER_LIST', invoice: { is: null } }, data: { totalAmount: total } })
           if (n.count !== 1) throw new PortalConflict(CONFIRMED_MESSAGE)
           await tx.orderItem.deleteMany({ where: { orderId } })
           await tx.orderItem.createMany({ data: lineData.map(l => ({ ...l, orderId })) })
@@ -118,6 +118,7 @@ export async function savePortalOrder(params: {
               retailerId,
               salesRepId,
               source: 'OFFER_LIST',
+              status: 'RECEIVED',
               totalAmount: total,
               items: { create: lineData },
             },

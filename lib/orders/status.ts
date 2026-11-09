@@ -65,3 +65,46 @@ export function boardColumn(
     default: return null
   }
 }
+
+export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
+  RECEIVED: 'Order Received',
+  INVOICED: 'Invoice Generated',
+  OUT_FOR_DELIVERY: 'Out for Delivery',
+  DELIVERED: 'Delivered',
+  ON_HOLD: 'On Hold',
+  RETURNED: 'Returned',
+  CANCELLED: 'Cancelled',
+}
+
+/** Label for any stored status (falls back to the raw value for unknown/legacy ones). */
+export function orderStatusLabel(s: string): string {
+  return isOrderStatus(s) ? ORDER_STATUS_LABEL[s] : s
+}
+
+/** The generic status route only does RECEIVED -> INVOICED ("Confirm") and cancel; every other move goes through the delivery functions. */
+export function canSetViaStatusRoute(to: string): boolean {
+  return to === 'INVOICED' || to === 'CANCELLED'
+}
+
+/** Whether an order of this status counts as a sale in counts/totals/reports. */
+export function countsAsSale(status: string): boolean {
+  return status !== 'CANCELLED'
+}
+
+/** Orders whose lines are still owed to the customer (purchase demand). */
+export const PENDING_DEMAND_STATUSES: readonly OrderStatus[] = ['RECEIVED', 'INVOICED', 'OUT_FOR_DELIVERY', 'ON_HOLD']
+
+/** Badge classes shared by every page that shows an order status. */
+export const ORDER_STATUS_COLOR: Record<OrderStatus, string> = {
+  RECEIVED: 'bg-slate-100 text-slate-700',
+  INVOICED: 'bg-blue-100 text-blue-700',
+  OUT_FOR_DELIVERY: 'bg-orange-100 text-orange-700',
+  DELIVERED: 'bg-green-100 text-green-700',
+  ON_HOLD: 'bg-yellow-100 text-yellow-700',
+  RETURNED: 'bg-purple-100 text-purple-700',
+  CANCELLED: 'bg-red-100 text-red-700',
+}
+
+export function orderStatusColor(s: string): string {
+  return isOrderStatus(s) ? ORDER_STATUS_COLOR[s] : ''
+}

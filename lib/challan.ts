@@ -2,12 +2,12 @@ import { prisma } from '@/lib/prisma'
 import { generateChallanNumber } from '@/lib/utils/format'
 import type { ChallanData } from '@/components/deliveries/DeliveryChallanPDF'
 
-// Challans are normally created when an order is CONFIRMED; this backfills any confirmed order that predates the feature.
+// Challans are normally created when an order is INVOICED; this backfills any invoiced order that predates the feature.
 export async function loadChallans(orderIds: string[]): Promise<ChallanData[]> {
   if (orderIds.length === 0) return []
 
   const missing = await prisma.order.findMany({
-    where: { id: { in: orderIds }, challan: null, status: { notIn: ['DRAFT', 'PENDING', 'CANCELLED'] } },
+    where: { id: { in: orderIds }, challan: null, status: { notIn: ['RECEIVED', 'CANCELLED'] } },
     select: { id: true },
   })
   for (const o of missing) {

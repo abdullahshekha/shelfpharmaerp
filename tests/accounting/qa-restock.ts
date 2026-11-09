@@ -64,7 +64,7 @@ async function main() {
       return o.id as string
     }
     const confirmAndDeliver = async (id: string) => {
-      await setStatus(id, 'CONFIRMED')
+      await setStatus(id, 'INVOICED')
       const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true } })
       if (inv) created.invoices.push(inv.id)
       return setStatus(id, 'DELIVERED')
@@ -114,7 +114,7 @@ async function main() {
 
     // ---- 7. never-delivered hard delete: stock unchanged ----
     const O3 = await mkOrder(med.id, 7)
-    await setStatus(O3, 'CONFIRMED')
+    await setStatus(O3, 'INVOICED')
     const inv3 = await prisma.invoice.findUnique({ where: { orderId: O3 }, select: { id: true } })
     if (inv3) created.invoices.push(inv3.id)
     res = await api(`/api/orders/${O3}?hard=true`, ADMIN, { method: 'DELETE' })

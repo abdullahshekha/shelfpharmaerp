@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         retailerId: body.retailerId,
         salesRepId: body.salesRepId ?? null,
         source: body.source ?? 'MANUAL',
-        ...(body.status === 'DRAFT' ? { status: 'DRAFT' } : {}),
+        status: 'RECEIVED',
         notes: body.notes ?? null,
         items: {
           create: items.map((item) => {

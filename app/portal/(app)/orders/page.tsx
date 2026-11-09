@@ -11,12 +11,13 @@ interface OrderView {
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
-  PENDING:    { label: 'Awaiting confirmation', cls: 'bg-amber-100 text-amber-800' },
-  CONFIRMED:  { label: 'Confirmed',             cls: 'bg-blue-100 text-blue-800' },
-  PICKING:    { label: 'Being prepared',        cls: 'bg-blue-100 text-blue-800' },
-  DISPATCHED: { label: 'Out for delivery',      cls: 'bg-indigo-100 text-indigo-800' },
-  DELIVERED:  { label: 'Delivered',             cls: 'bg-green-100 text-green-800' },
-  CANCELLED:  { label: 'Cancelled',             cls: 'bg-red-100 text-red-700' },
+  RECEIVED:         { label: 'Awaiting confirmation', cls: 'bg-amber-100 text-amber-800' },
+  INVOICED:         { label: 'Confirmed',             cls: 'bg-blue-100 text-blue-800' },
+  OUT_FOR_DELIVERY: { label: 'Out for delivery',      cls: 'bg-indigo-100 text-indigo-800' },
+  ON_HOLD:          { label: 'On hold',               cls: 'bg-yellow-100 text-yellow-800' },
+  DELIVERED:        { label: 'Delivered',             cls: 'bg-green-100 text-green-800' },
+  RETURNED:         { label: 'Returned',              cls: 'bg-purple-100 text-purple-800' },
+  CANCELLED:        { label: 'Cancelled',             cls: 'bg-red-100 text-red-700' },
 }
 
 export default function PortalOrdersPage() {

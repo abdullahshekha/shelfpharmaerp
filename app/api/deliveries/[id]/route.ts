@@ -7,8 +7,6 @@ import { getUserFromRequest } from '@/lib/utils/auth'
 
 export const dynamic = 'force-dynamic'
 
-const EARLIER_THAN_DISPATCHED = ['PENDING', 'CONFIRMED', 'PICKING']
-
 // body: { action: 'start' | 'deliver' | 'fail' | 'reschedule', scheduledDate?, driverId?, notes? }
 // A plain { driverId } / { notes } body (no action) just updates those fields. Delivery status is never
 // written as DELIVERED directly: 'deliver' goes through setOrderStatus so stock/COGS stay consistent.
@@ -38,11 +36,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       warnings.push(...r.warnings)
       await prisma.delivery.update({ where: { id }, data: fields })
     } else if (action === 'start') {
-      await prisma.delivery.update({ where: { id }, data: { ...fields, status: 'OUT_FOR_DELIVERY' } })
-      if (EARLIER_THAN_DISPATCHED.includes(existing.order.status)) {
-        const r = await setOrderStatus(existing.orderId, 'DISPATCHED')
-        warnings.push(...r.warnings)
-      }
+      // Assignment (stock leaves, order -> OUT_FOR_DELIVERY) is wired in the next task (lib/deliveries/assign.ts).
+      return NextResponse.json({ error: 'Starting a delivery is now done by assigning it; this action is being replaced' }, { status: 400 })
     } else if (action === 'fail') {
       await prisma.delivery.update({ where: { id }, data: { ...fields, status: 'FAILED' } })
     } else if (action === 'reschedule') {

@@ -16,6 +16,7 @@ import { CUSTOMER_TYPES } from '@/lib/constants'
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser'
 import { PortalAccessCard } from '@/components/retailers/PortalAccessCard'
 import { DrugLicensesEditor, type DrugLicenseForm } from '@/components/retailers/DrugLicensesEditor'
+import { orderStatusColor, orderStatusLabel } from '@/lib/orders/status'
 
 interface Order { id: string; orderNumber: string; orderDate: string; status: string; totalAmount: number }
 interface Invoice { id: string; invoiceNumber: string; invoiceDate: string; totalAmount: number; status: string }
@@ -35,11 +36,6 @@ interface Retailer {
   orders: Order[]; invoices: Invoice[]; outstandingBalance: number; returnCredits: number
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: 'bg-slate-100 text-slate-700', CONFIRMED: 'bg-blue-100 text-blue-700',
-  PICKING: 'bg-yellow-100 text-yellow-700', DISPATCHED: 'bg-orange-100 text-orange-700',
-  DELIVERED: 'bg-green-100 text-green-700', CANCELLED: 'bg-red-100 text-red-700',
-}
 
 export default function RetailerDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -511,7 +507,7 @@ export default function RetailerDetailPage() {
                     <td className="px-4 py-2 font-mono text-xs">{o.orderNumber}</td>
                     <td className="px-4 py-2">{formatDate(o.orderDate)}</td>
                     <td className="px-4 py-2">
-                      <Badge className={`text-xs ${STATUS_COLORS[o.status] ?? ''}`}>{o.status}</Badge>
+                      <Badge className={`text-xs ${orderStatusColor(o.status)}`}>{orderStatusLabel(o.status)}</Badge>
                     </td>
                     <td className="px-4 py-2 text-right">{formatPKR(o.totalAmount)}</td>
                   </tr>

@@ -54,6 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         orderNumber,
         retailerId: body.retailerId,
         source: 'WHATSAPP',
+        status: 'RECEIVED',
         whatsappOrderId: id,
         items: {
           create: body.items.map((item: {

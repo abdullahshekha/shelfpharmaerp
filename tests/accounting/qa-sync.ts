@@ -192,7 +192,7 @@ async function main() {
       return o
     }
     const order = await mkOrder(10) // 10 x 100 x 0.9 = 900
-    let st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) })
+    let st = await api(`/api/orders/${order.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     check('hook: confirm without go-live succeeds and posts nothing', st.status === 200 && (await prisma.journalEntry.count()) === 0)
     const inv0 = await prisma.invoice.findUnique({ where: { orderId: order.id } })
     ids.invoices.push(inv0!.id)
@@ -224,7 +224,7 @@ async function main() {
     check('concurrent x6 same source: one entry set', (await entryCount('INVOICE', inv0!.id)) === 1 && (await signature('INVOICE', inv0!.id)) === sig1)
     // concurrent different sources on the same day: unique numbers, no errors
     const extra = await Promise.all([mkOrder(1), mkOrder(2), mkOrder(3), mkOrder(4), mkOrder(5), mkOrder(6)])
-    await Promise.all(extra.map((o) => api(`/api/orders/${o.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) })))
+    await Promise.all(extra.map((o) => api(`/api/orders/${o.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })))
     const extraInv = await prisma.invoice.findMany({ where: { orderId: { in: extra.map((o) => o.id) } } })
     ids.invoices.push(...extraInv.map((i) => i.id))
     check('concurrent hooks: 6 confirmations each posted exactly one invoice entry', (await Promise.all(extraInv.map((i) => entryCount('INVOICE', i.id)))).every((c) => c === 1) && extraInv.length === 6)
@@ -491,7 +491,7 @@ async function main() {
 
     // ---- delivered order: deliveries PUT hook, soft cancel removes COGS ----
     const o3 = await mkOrder(1)
-    await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) })
+    await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'INVOICED' }) })
     await api(`/api/orders/${o3.id}/status`, ADMIN, { method: 'PUT', body: JSON.stringify({ status: 'DELIVERED' }) })
     const inv3 = await prisma.invoice.findUnique({ where: { orderId: o3.id } })
     ids.invoices.push(inv3!.id)

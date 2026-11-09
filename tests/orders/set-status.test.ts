@@ -9,9 +9,9 @@ test('nextDeliveryColumn maps delivery statuses to board columns', () => {
 })
 
 test('deliveryMismatch only when delivery is DELIVERED and the order is not', () => {
-  assert.equal(deliveryMismatch('DELIVERED', 'CONFIRMED'), true)
-  assert.equal(deliveryMismatch('DELIVERED', 'DISPATCHED'), true)
+  assert.equal(deliveryMismatch('DELIVERED', 'INVOICED'), true)
+  assert.equal(deliveryMismatch('DELIVERED', 'OUT_FOR_DELIVERY'), true)
   assert.equal(deliveryMismatch('DELIVERED', 'DELIVERED'), false)
-  assert.equal(deliveryMismatch('SCHEDULED', 'CONFIRMED'), false)
-  assert.equal(deliveryMismatch('OUT_FOR_DELIVERY', 'DISPATCHED'), false)
+  assert.equal(deliveryMismatch('SCHEDULED', 'INVOICED'), false)
+  assert.equal(deliveryMismatch('OUT_FOR_DELIVERY', 'OUT_FOR_DELIVERY'), false)
 })

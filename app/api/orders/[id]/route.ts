@@ -6,7 +6,7 @@ import { totalUnits } from '@/lib/orders/units'
 import { deductFefo, blendUnitCost, restockFefo, adjustDeductedQty, restockOnDecrease } from '@/lib/accounting/cost'
 import { AccountingError } from '@/lib/accounting/core'
 import { syncAllSafe } from '@/lib/accounting/sync'
-import { cancelOrder, hardDeleteOrder } from '@/lib/orders/lifecycle'
+import { cancelOrder, hardDeleteOrder, isStockOutStatus } from '@/lib/orders/lifecycle'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,7 +41,7 @@ interface EditItemInput {
 
 // Admin-only edit of an already-created Sales Invoice (Order). Recomputes each line and the
 // order/invoice totals with the same formulas as creation/confirmation. If the order is already
-// DELIVERED, stock was deducted FEFO with no per-line record of which batch(es) supplied it (see
+// out for delivery / delivered (stock already left), stock was deducted FEFO with no per-line record of which batch(es) supplied it (see
 // CLAUDE.md's Sales Invoice section), so a quantity change there is applied as a best-effort delta:
 // an increase deducts the extra via FEFO same as a normal delivery; a decrease restocks onto
 // whichever batch is currently earliest-expiring for that medicine. This is an approximation, not
@@ -82,7 +82,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const locked = await tx.$queryRaw<{ status: string }[]>`SELECT "status" FROM "Order" WHERE "id" = ${id} FOR UPDATE`
     if (!locked.length) throw new AccountingError(404, 'Not found')
     const liveStatus = locked[0].status
-    if ((liveStatus === 'DELIVERED') !== (order.status === 'DELIVERED')) {
+    if (isStockOutStatus(liveStatus) !== isStockOutStatus(order.status)) {
       throw new AccountingError(409, 'The order status changed while you were editing — reload and try again')
     }
     // Re-read the items inside the transaction (quantity / deductedQty / unitCost must be current for the stock delta).
@@ -115,7 +115,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const newCosts = new Map<string, number>()
     const newDeducted = new Map<string, number>()
-    if (liveStatus === 'DELIVERED') {
+    if (isStockOutStatus(liveStatus)) {
+      // deductFefo/restockFefo write absolute batch values, so lock the affected medicines' batch rows first
+      // (sorted by medicineId, like lib/deliveries/assign.ts, so concurrent edits/assignments cannot deadlock).
+      const changed = computed.filter((i) => totalUnits(i) !== totalUnits(i.existing)).map((i) => i.medicineId)
+      for (const medicineId of Array.from(new Set(changed)).sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "MedicineBatch" WHERE "medicineId" = ${medicineId} FOR UPDATE`
+      }
       for (const item of computed) {
         // Stock moves by total units (quantity + bonus); unitCost stays per ordered unit (see the status route).
         const oldUnits = totalUnits(item.existing)
