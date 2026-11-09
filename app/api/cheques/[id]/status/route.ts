@@ -4,6 +4,9 @@ import { getUserFromRequest } from '@/lib/utils/auth'
 import { canManageCheques, canAcknowledge } from '@/lib/pdc/guard'
 import { canTransition, type ChequeStatus } from '@/lib/pdc/rules'
 import { optStr } from '@/lib/pdc/create'
+import { clearCheque, PdcError } from '@/lib/pdc/clear'
+import { AccountingError } from '@/lib/accounting/core'
+import { parseDateInput } from '@/lib/accounting/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +36,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   if (action === 'clear') {
-    return NextResponse.json({ error: 'Clearing not implemented yet' }, { status: 501 })
+    let clearingDate: Date | undefined
+    if (body.clearingDate != null && body.clearingDate !== '') {
+      const d = parseDateInput(body.clearingDate)
+      if (!d) return NextResponse.json({ error: 'Invalid clearing date' }, { status: 400 })
+      clearingDate = d
+    }
+    if (body.bankAccountId != null && body.bankAccountId !== '' && typeof body.bankAccountId !== 'string') {
+      return NextResponse.json({ error: 'Invalid bank account' }, { status: 400 })
+    }
+    try {
+      const result = await clearCheque(id, user, { clearingDate, bankAccountId: optStr(body.bankAccountId) ?? undefined })
+      return NextResponse.json({ data: await prisma.cheque.findUnique({ where: { id } }), payments: result.payments })
+    } catch (e) {
+      if (e instanceof PdcError || e instanceof AccountingError) {
+        return NextResponse.json({ error: e.message }, { status: e.status })
+      }
+      if ((e as { code?: string })?.code === 'P2028') {
+        return NextResponse.json({ error: 'The server is busy, please retry' }, { status: 503 })
+      }
+      console.error('clear cheque failed', e)
+      return NextResponse.json({ error: 'Failed to clear cheque' }, { status: 500 })
+    }
   }
 
   const to = typeof action === 'string' ? TARGET[action] : undefined
